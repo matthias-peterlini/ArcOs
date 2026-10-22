@@ -362,6 +362,18 @@ pub fn timer_tick() {
     }
 }
 
+/// Switches the running thread back to the kernel-only address space (its
+/// process is going away).
+pub fn leave_address_space() {
+    let mut s = SCHED.lock();
+    let cur = s.current;
+    if let Some(t) = s.threads.get_mut(&cur) {
+        t.cr3 = 0;
+    }
+    // SAFETY: the kernel tables map everything the kernel needs.
+    unsafe { cpu::write_cr3(mem::paging::kernel_pml4()) };
+}
+
 pub fn current() -> Tid {
     SCHED.lock().current
 }

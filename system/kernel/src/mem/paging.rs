@@ -92,6 +92,22 @@ fn walk(pml4: u64, virt: u64) -> Option<(&'static mut u64, u64)> {
     (*e & PRESENT != 0).then_some((e, PAGE_SIZE))
 }
 
+/// Is the page at `virt` present and reachable from user mode?
+pub fn user_accessible(pml4: u64, virt: u64) -> bool {
+    let mut t = pml4;
+    for level in (0..4).rev() {
+        let e = table(t)[index(virt, level)];
+        if e & PRESENT == 0 || e & USER == 0 {
+            return false;
+        }
+        if level == 0 || e & HUGE != 0 {
+            return true;
+        }
+        t = e & ADDR_MASK;
+    }
+    false
+}
+
 pub fn translate_in(pml4: u64, virt: u64) -> Option<u64> {
     let (e, size) = walk(pml4, virt)?;
     Some((*e & ADDR_MASK & !(size - 1)) + (virt & (size - 1)))

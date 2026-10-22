@@ -18,13 +18,15 @@ TARGET   := system/target/x86_64-unknown-none/$(PROFILE)
 ARCTOOL  := tools/target/release/arctool
 DRIVERS  := $(notdir $(wildcard system/drivers/*))
 PACKAGES := $(DRIVERS:%=$(BUILD)/drivers/%.adp)
+APPS     := $(notdir $(wildcard system/apps/*))
+ROOT     := $(BUILD)/root
 IMAGE    := $(BUILD)/arcos.img
 
 ifeq ($(PROFILE),release)
 CARGO_PROFILE := --release
 endif
 
-.PHONY: all system tools image run run-q35 run-nvme test check clean $(PACKAGES)
+.PHONY: all system tools root image run run-q35 run-nvme test check clean $(PACKAGES)
 
 all: image
 
@@ -46,10 +48,17 @@ $(PACKAGES): $(BUILD)/drivers/%.adp: system tools
 	@mkdir -p $(BUILD)/drivers
 	$(ARCTOOL) pack system/drivers/$*/driver.manifest $(TARGET)/$* $@
 
-image: $(BUILD)/stage1.bin $(BUILD)/stage2.bin system tools $(PACKAGES)
+# The files of the system volume: rootfs/ plus the programs.
+root: system
+	rm -rf $(ROOT)
+	mkdir -p $(ROOT)/apps
+	cp -r rootfs/. $(ROOT)/
+	for app in $(APPS); do cp $(TARGET)/$$app $(ROOT)/apps/$$app.app; done
+
+image: $(BUILD)/stage1.bin $(BUILD)/stage2.bin system tools $(PACKAGES) root
 	$(ARCTOOL) image $(IMAGE) --size $(SIZE) \
 		--stage1 $(BUILD)/stage1.bin --stage2 $(BUILD)/stage2.bin \
-		--kernel $(TARGET)/arc-kernel --drivers $(BUILD)/drivers --files rootfs
+		--kernel $(TARGET)/arc-kernel --drivers $(BUILD)/drivers --files $(ROOT)
 
 QEMU_COMMON := -m $(MEMORY) -serial stdio -no-reboot -rtc base=localtime
 

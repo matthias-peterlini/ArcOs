@@ -17,7 +17,7 @@
 //! `drv add <file>` does the same on demand.
 
 mod api;
-mod elf;
+pub mod elf;
 
 use crate::dev;
 use crate::fs::{self, Path};

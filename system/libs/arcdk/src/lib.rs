@@ -1,6 +1,6 @@
-//! Arc Driver Kit.
+//! Arc Development Kit: the contracts between the kernel and the code it runs.
 //!
-//! The contract between the arcOS kernel and its drivers:
+//! For drivers:
 //!
 //! * [`abi`] — the `#[repr(C)]` types a driver module and the kernel exchange.
 //!   The kernel hands every module a [`abi::KernelApi`] table; the module
@@ -11,6 +11,10 @@
 //!   hardware it drives. The kernel matches devices against manifests to
 //!   install drivers automatically, without loading any code first.
 //! * [`package`] — the `.adp` driver package: header, manifest and module image.
+//!
+//! For user programs:
+//!
+//! * [`syscall`] — system call numbers, error codes and key codes.
 //!
 //! The run-time support for driver modules (heap, panic handler, entry
 //! point, hardware helpers) is the separate `arcdrv` crate.
@@ -24,5 +28,6 @@ pub mod abi;
 pub mod crc32;
 pub mod manifest;
 pub mod package;
+pub mod syscall;
 
 pub use abi::*;

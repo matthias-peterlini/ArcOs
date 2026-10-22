@@ -33,6 +33,13 @@ name = "arcfs"
 version = "0.1.0"
 
 [[package]]
+name = "arcrt"
+version = "0.1.0"
+dependencies = [
+ "arcdk",
+]
+
+[[package]]
 name = "ata"
 version = "1.0.0"
 dependencies = [
@@ -40,10 +47,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "calc"
+version = "1.0.0"
+dependencies = [
+ "arcrt",
+]
+
+[[package]]
 name = "e1000"
 version = "1.0.0"
 dependencies = [
  "arcdrv",
+]
+
+[[package]]
+name = "edit"
+version = "1.0.0"
+dependencies = [
+ "arcrt",
+]
+
+[[package]]
+name = "hello"
+version = "1.0.0"
+dependencies = [
+ "arcrt",
+]
+
+[[package]]
+name = "info"
+version = "1.0.0"
+dependencies = [
+ "arcrt",
 ]
 
 [[package]]
@@ -65,6 +100,13 @@ name = "ps2mouse"
 version = "1.0.0"
 dependencies = [
  "arcdrv",
+]
+
+[[package]]
+name = "snake"
+version = "1.0.0"
+dependencies = [
+ "arcrt",
 ]
 
 [[package]]

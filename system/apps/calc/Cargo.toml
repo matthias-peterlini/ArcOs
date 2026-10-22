@@ -1,0 +1,19 @@
+[package]
+name = "calc"
+description = "arcOS program: calculator"
+version = "1.0.0"
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "calc"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+arcrt.workspace = true
+
+[lints]
+workspace = true

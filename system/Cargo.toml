@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["kernel", "libs/*", "drivers/*"]
+members = ["kernel", "libs/*", "drivers/*", "apps/*"]
 
 [workspace.package]
 version = "0.1.0"
@@ -12,6 +12,7 @@ authors = ["Matthias Peterlini"]
 arcdk = { path = "libs/arcdk" }
 arcfs = { path = "libs/arcfs" }
 arcdrv = { path = "libs/arcdrv" }
+arcrt = { path = "libs/arcrt" }
 
 [workspace.lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }

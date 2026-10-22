@@ -1,0 +1,155 @@
+//! The arcOS system call interface for user programs.
+//!
+//! `int 0x80` with the call number in `rax` and up to five arguments in
+//! `rdi`, `rsi`, `rdx`, `r10`, `r8`. The result comes back in `rax`:
+//! non-negative on success, a negative [`Error`] code otherwise.
+//!
+//! Files are reached through **handles** that the kernel hands out; paths
+//! are arcOS paths (`sys:/home/notes.txt`, or relative to the program's
+//! current folder). Handle 0 is the console.
+
+pub const EXIT: u64 = 0;
+/// (handle, ptr, len) -> bytes written
+pub const WRITE: u64 = 1;
+/// (timeout_ms) -> key code, or 0 on timeout. `u64::MAX` waits forever.
+pub const READ_KEY: u64 = 2;
+/// (path, len, mode) -> handle
+pub const OPEN: u64 = 3;
+/// (handle, ptr, len) -> bytes read
+pub const READ: u64 = 4;
+/// (handle)
+pub const CLOSE: u64 = 5;
+/// (handle, position)
+pub const SEEK: u64 = 6;
+/// (handle) -> size in bytes
+pub const FILE_SIZE: u64 = 7;
+/// (path, len, buf, cap) -> bytes: "name\tkind\tsize\n" per entry (kind d/f)
+pub const LIST_DIR: u64 = 8;
+/// (path, len)
+pub const REMOVE: u64 = 9;
+/// (path, len)
+pub const MAKE_DIR: u64 = 10;
+/// () -> milliseconds since start
+pub const UPTIME: u64 = 11;
+/// (ms)
+pub const SLEEP: u64 = 12;
+/// () -> seconds since 2000-01-01
+pub const NOW: u64 = 13;
+/// (path, len, args, len) -> process id
+pub const SPAWN: u64 = 14;
+/// (pid) -> exit code
+pub const WAIT: u64 = 15;
+pub const YIELD: u64 = 16;
+/// (bytes) -> address of fresh zeroed memory
+pub const MAP: u64 = 17;
+/// (ptr to [u64; SYSINFO_WORDS]) -> number of words written
+pub const SYSINFO: u64 = 18;
+/// () -> columns << 32 | rows of the console
+pub const SCREEN: u64 = 19;
+/// (from, len, to, len)
+pub const RENAME: u64 = 20;
+/// (buf, cap) -> length of the current folder path
+pub const GET_CWD: u64 = 21;
+/// (path, len)
+pub const SET_CWD: u64 = 22;
+
+pub const MODE_READ: u64 = 0;
+/// Create or truncate.
+pub const MODE_WRITE: u64 = 1;
+/// Create if needed, write at the end.
+pub const MODE_APPEND: u64 = 2;
+
+pub const CONSOLE: u64 = 0;
+
+/// `SYSINFO` words: total memory, free memory, uptime ms, threads,
+/// processes, devices, devices with a driver, disks.
+pub const SYSINFO_WORDS: usize = 8;
+
+/// Error codes (returned negated).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(i64)]
+pub enum Error {
+    NotFound = 1,
+    Exists = 2,
+    NotDir = 3,
+    IsDir = 4,
+    NotEmpty = 5,
+    NoSpace = 6,
+    InvalidName = 7,
+    ReadOnly = 8,
+    Io = 9,
+    BadHandle = 10,
+    BadAddress = 11,
+    NoMemory = 12,
+    BadProgram = 13,
+    Unknown = 14,
+}
+
+impl Error {
+    pub fn from_code(code: i64) -> Error {
+        match -code {
+            1 => Error::NotFound,
+            2 => Error::Exists,
+            3 => Error::NotDir,
+            4 => Error::IsDir,
+            5 => Error::NotEmpty,
+            6 => Error::NoSpace,
+            7 => Error::InvalidName,
+            8 => Error::ReadOnly,
+            9 => Error::Io,
+            10 => Error::BadHandle,
+            11 => Error::BadAddress,
+            12 => Error::NoMemory,
+            13 => Error::BadProgram,
+            _ => Error::Unknown,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Error::NotFound => "not found",
+            Error::Exists => "already exists",
+            Error::NotDir => "not a folder",
+            Error::IsDir => "is a folder",
+            Error::NotEmpty => "folder not empty",
+            Error::NoSpace => "disk full",
+            Error::InvalidName => "invalid name",
+            Error::ReadOnly => "read-only",
+            Error::Io => "I/O error",
+            Error::BadHandle => "bad handle",
+            Error::BadAddress => "bad address",
+            Error::NoMemory => "out of memory",
+            Error::BadProgram => "not a program",
+            Error::Unknown => "error",
+        }
+    }
+}
+
+// Key codes returned by READ_KEY: a Unicode scalar, or one of these, with
+// modifier bits on top.
+pub const KEY_SPECIAL: u32 = 0x11_0000;
+pub const KEY_ENTER: u32 = KEY_SPECIAL + 1;
+pub const KEY_BACKSPACE: u32 = KEY_SPECIAL + 2;
+pub const KEY_DELETE: u32 = KEY_SPECIAL + 3;
+pub const KEY_TAB: u32 = KEY_SPECIAL + 4;
+pub const KEY_ESCAPE: u32 = KEY_SPECIAL + 5;
+pub const KEY_UP: u32 = KEY_SPECIAL + 6;
+pub const KEY_DOWN: u32 = KEY_SPECIAL + 7;
+pub const KEY_LEFT: u32 = KEY_SPECIAL + 8;
+pub const KEY_RIGHT: u32 = KEY_SPECIAL + 9;
+pub const KEY_HOME: u32 = KEY_SPECIAL + 10;
+pub const KEY_END: u32 = KEY_SPECIAL + 11;
+pub const KEY_PAGE_UP: u32 = KEY_SPECIAL + 12;
+pub const KEY_PAGE_DOWN: u32 = KEY_SPECIAL + 13;
+pub const KEY_INSERT: u32 = KEY_SPECIAL + 14;
+/// F1..F12 are KEY_F + 1..12.
+pub const KEY_F: u32 = KEY_SPECIAL + 0x100;
+
+pub const MOD_CTRL: u64 = 1 << 32;
+pub const MOD_ALT: u64 = 1 << 33;
+pub const MOD_SHIFT: u64 = 1 << 34;
+
+/// Where user programs are loaded and where their stack ends.
+pub const USER_BASE: u64 = 0x40_0000;
+pub const USER_STACK_TOP: u64 = 0x7FFF_FFF0_0000;
+pub const USER_HEAP_BASE: u64 = 0x1000_0000_0000;

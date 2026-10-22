@@ -52,16 +52,24 @@ struct Segment {
     memsz: u64,
 }
 
+/// Loads a module into the module region.
 pub fn load(elf: &[u8]) -> Result<Image, String> {
+    load_with(elf, |pages| region::alloc_pages(&region::MODULES, pages, 1), |img| img.unload())
+}
+
+/// Loads an image at an address chosen by `alloc` (given the page count,
+/// it maps that many zeroed pages and returns the base); `undo` releases
+/// them if relocation fails.
+pub fn load_with(elf: &[u8], alloc: impl FnOnce(u64) -> Option<u64>, undo: impl FnOnce(Image)) -> Result<Image, String> {
     let err = |m: &str| String::from(m);
     if elf.len() < 64 || &elf[..4] != b"\x7fELF" || elf[4] != 2 || elf[5] != 1 {
         return Err(err("not a 64-bit little-endian ELF file"));
     }
     if u16_at(elf, 16) != Some(3) {
-        return Err(err("module is not position-independent (ET_DYN)"));
+        return Err(err("the image is not position-independent (ET_DYN)"));
     }
     if u16_at(elf, 18) != Some(0x3E) {
-        return Err(err("module is not built for x86-64"));
+        return Err(err("the image is not built for x86-64"));
     }
     let entry = u64_at(elf, 24).ok_or("bad header")?;
     let phoff = u64_at(elf, 32).ok_or("bad header")? as usize;
@@ -94,14 +102,14 @@ pub fn load(elf: &[u8]) -> Result<Image, String> {
         }
     }
     if segments.is_empty() || end > 64 << 20 {
-        return Err(err("module has no loadable segments or is too big"));
+        return Err(err("the image has no loadable segments or is too big"));
     }
     if entry >= end {
         return Err(err("entry point outside the module"));
     }
 
     let pages = mem::align_up(end, PAGE_SIZE) / PAGE_SIZE;
-    let base = region::alloc_pages(&region::MODULES, pages, 1).ok_or("out of memory")?;
+    let base = alloc(pages).ok_or("out of memory")?;
     let image = Image { base, pages, entry: base + entry };
     for s in &segments {
         // SAFETY: the destination lies inside the freshly mapped image
@@ -114,7 +122,7 @@ pub fn load(elf: &[u8]) -> Result<Image, String> {
 
     if let Some((dyn_addr, dyn_size)) = dynamic {
         if let Err(e) = relocate(&image, end, dyn_addr, dyn_size) {
-            image.unload();
+            undo(image);
             return Err(e);
         }
     }

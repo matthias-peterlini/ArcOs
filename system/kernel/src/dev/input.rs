@@ -125,6 +125,9 @@ fn key(usage: u32, value: i32) {
             0x52 => Some(Key::Up),
             _ => keymap::translate(s.layout, usage, shift, s.altgr, s.caps).map(Key::Char),
         };
+        if key == Some(Key::Char('c')) && ctrl && crate::user::interrupt_foreground() {
+            return; // Ctrl+C stops the running program
+        }
         if let Some(key) = key {
             let ev = KeyEvent { key, ctrl, alt: s.alt, shift };
             push(&mut s, ev);
@@ -195,6 +198,7 @@ pub fn serial_byte(b: u8) {
                 b'\r' | b'\n' => plain(Key::Enter),
                 0x7F | 0x08 => plain(Key::Backspace),
                 b'\t' => plain(Key::Tab),
+                0x03 if crate::user::interrupt_foreground() => return,
                 0x01..=0x1A => KeyEvent { key: Key::Char((b'a' + b - 1) as char), ctrl: true, alt: false, shift: false },
                 0x20..=0x7E => plain(Key::Char(b as char)),
                 _ => return,

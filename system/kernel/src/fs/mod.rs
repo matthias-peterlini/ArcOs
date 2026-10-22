@@ -296,6 +296,30 @@ pub fn write_file(path: &Path, data: &[u8]) -> Result<()> {
     fs.sync()
 }
 
+/// Reads up to `buf.len()` bytes at `offset`.
+pub fn read_at(path: &Path, offset: u64, buf: &mut [u8]) -> Result<usize> {
+    let v = vol(path)?;
+    let mut fs = v.fs.lock();
+    let id = fs.lookup(&path.inner)?;
+    fs.read(id, offset, buf)
+}
+
+/// Writes at `offset`, creating the file if needed.
+pub fn write_at(path: &Path, offset: u64, data: &[u8]) -> Result<()> {
+    let v = vol(path)?;
+    let mut fs = v.fs.lock();
+    let id = match fs.lookup(&path.inner) {
+        Ok(id) => id,
+        Err(Error::NotFound) => {
+            let (dir, name) = fs.lookup_parent(&path.inner)?;
+            fs.create(dir, name, Kind::File)?
+        }
+        Err(e) => return Err(e),
+    };
+    fs.write(id, offset, data)?;
+    fs.sync()
+}
+
 /// Appends to a file, creating it if needed.
 pub fn append_file(path: &Path, data: &[u8]) -> Result<()> {
     let v = vol(path)?;

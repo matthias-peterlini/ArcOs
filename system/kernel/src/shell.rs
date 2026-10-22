@@ -59,7 +59,9 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("drv", "[list|info|add|remove|reload|inbox]", "manage drivers"),
     ("kbd", "[us|it]", "show or set the keyboard layout"),
     ("mem", "", "memory usage"),
-    ("ps", "", "running threads"),
+    ("ps", "", "running programs and threads"),
+    ("kill", "<pid>", "stop a program"),
+    ("run", "<program> [args]", "start a program (also just: <program>)"),
     ("irq", "", "interrupt lines"),
     ("net", "", "network interfaces and addresses"),
     ("ping", "<host> [count]", "send ICMP echo requests"),
@@ -468,9 +470,25 @@ impl Shell {
                 println!("heap      {} in use of {} mapped", Size(heap_used as u64), Size(heap_size as u64));
             }
             "ps" | "tasks" => {
-                println!("{DIM}  tid  state      cpu     name{RESET}");
+                println!("{DIM}  tid  pid  state      cpu     name{RESET}");
                 for t in task::list() {
-                    println!("{:>5}  {:<9}  {:>5}ms  {}", t.tid, t.state.name(), t.cpu_ms, t.name);
+                    let pid = if t.pid == 0 { String::from("-") } else { t.pid.to_string() };
+                    println!("{:>5} {:>4}  {:<9}  {:>5}ms  {}", t.tid, pid, t.state.name(), t.cpu_ms, t.name);
+                }
+            }
+            "kill" => {
+                if need(1, "<pid>") {
+                    match rest[0].parse::<u32>() {
+                        Ok(pid) if crate::user::kill(pid) => println!("program {pid} stopped"),
+                        _ => println!("{ERR}no running program {}{RESET}", rest[0]),
+                    }
+                }
+            }
+            "run" => {
+                if need(1, "<program> [args]") {
+                    let args = line.trim_start()[3..].trim_start();
+                    let (prog, prog_args) = args.split_once(char::is_whitespace).unwrap_or((args, ""));
+                    self.run_program(prog, prog_args.trim());
                 }
             }
             "irq" => {
@@ -582,7 +600,27 @@ impl Shell {
                 println!("{WARN}this computer cannot be turned off by software; it is safe to switch it off now{RESET}");
                 crate::arch::cpu::halt_forever();
             }
-            _ => println!("{ERR}{cmd}: unknown command{RESET} {DIM}(type help){RESET}"),
+            _ => {
+                let prog_args = line.trim_start()[args[0].len()..].trim();
+                if crate::user::find_program(&args[0], &self.cwd).is_some() {
+                    self.run_program(&args[0], prog_args);
+                } else {
+                    println!("{ERR}{cmd}: unknown command{RESET} {DIM}(type help){RESET}");
+                }
+            }
+        }
+    }
+
+    fn run_program(&self, name: &str, args: &str) {
+        let Some(path) = crate::user::find_program(name, &self.cwd) else {
+            println!("{ERR}{name}: no such program{RESET}");
+            return;
+        };
+        match crate::user::run_foreground(&path, args, self.cwd.clone()) {
+            Ok(0) => {}
+            Ok(-130) => println!("{DIM}^C{RESET}"),
+            Ok(code) => println!("{DIM}{name} ended with code {code}{RESET}"),
+            Err(e) => println!("{ERR}{name}: {}{RESET}", e.as_str()),
         }
     }
 
@@ -604,6 +642,12 @@ impl Shell {
             println!("  {BOLD}{name:<9}{RESET}{DIM}{args:<22}{RESET} {text}");
         }
         println!("\nPaths name a volume first: {BOLD}sys:/system/drivers{RESET}. Tab completes commands and paths.");
+        if let Ok(apps) = fs::abs("sys:/apps").and_then(|p| fs::list_dir(&p)) {
+            let names: Vec<String> = apps.iter().filter_map(|(e, _)| e.name.strip_suffix(".app").map(String::from)).collect();
+            if !names.is_empty() {
+                println!("Programs in sys:/apps: {BOLD}{}{RESET}", names.join("  "));
+            }
+        }
     }
 
     fn ls(&self, target: &str) {

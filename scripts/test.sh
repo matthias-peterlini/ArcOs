@@ -2,6 +2,9 @@
 # Boots an arcOS image headless and types a list of commands on the serial
 # console. Usage: scripts/test.sh <image> [commands-file] [qemu options...]
 #
+# Lines starting with @sleep N pause; @raw TEXT sends TEXT as a printf
+# format without a trailing Enter (\\023 is Ctrl+S).
+#
 # DISK selects how the image is attached: ide (default), ahci, nvme, virtio.
 #
 # Prints the whole session; exits non-zero if the kernel stopped.
@@ -27,6 +30,7 @@ OUT=$(mktemp)
         case "$line" in
             '#'*|'') continue ;;
             '@sleep '*) sleep "${line#@sleep }"; continue ;;
+            '@raw '*) printf "${line#@raw }"; sleep "$STEP_WAIT"; continue ;;
         esac
         printf '%s\r' "$line"
         sleep "$STEP_WAIT"

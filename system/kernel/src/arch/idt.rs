@@ -218,6 +218,7 @@ extern "C" fn trap_dispatch(frame: &mut TrapFrame) {
             pic::eoi(irq);
             if irq == 0 {
                 crate::task::timer_tick();
+                crate::user::check_kill(frame);
             }
         }
         VEC_SYSCALL => crate::task::syscall(frame),
