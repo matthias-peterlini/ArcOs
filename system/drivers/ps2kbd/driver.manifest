@@ -1,0 +1,8 @@
+# PS/2 keyboards (and USB keyboards in legacy emulation).
+name        = ps2kbd
+version     = 1.0.0
+class       = input
+description = PS/2 keyboard
+author      = arcOS
+boot        = yes
+match       = platform ps2-keyboard

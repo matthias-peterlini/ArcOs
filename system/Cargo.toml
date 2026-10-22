@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = ["kernel", "libs/*", "drivers/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+publish = false
+authors = ["Matthias Peterlini"]
+
+[workspace.dependencies]
+arcdk = { path = "libs/arcdk" }
+arcfs = { path = "libs/arcfs" }
+arcdrv = { path = "libs/arcdrv" }
+
+[workspace.lints.rust]
+rust_2018_idioms = { level = "warn", priority = -1 }
+unsafe_op_in_unsafe_fn = "warn"
+
+[profile.dev]
+panic = "abort"
+opt-level = 1
+
+[profile.release]
+panic = "abort"
+opt-level = 2
+debug = false
+codegen-units = 1

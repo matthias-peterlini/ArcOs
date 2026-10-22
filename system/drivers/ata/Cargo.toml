@@ -1,0 +1,19 @@
+[package]
+name = "ata"
+description = "arcOS driver: ATA/IDE disks"
+version = "1.0.0"
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "ata"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+arcdrv.workspace = true
+
+[lints]
+workspace = true

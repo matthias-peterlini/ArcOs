@@ -1,0 +1,13 @@
+# Commands typed by `make test`.
+help
+sysinfo
+dev
+drv
+vol
+disks
+ls sys:/
+cat sys:/home/welcome.txt
+mem
+ps
+uptime
+shutdown

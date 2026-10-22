@@ -1,0 +1,3 @@
+# Everything in this workspace runs on bare metal: no OS underneath.
+[build]
+target = "x86_64-unknown-none"

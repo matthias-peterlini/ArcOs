@@ -1,0 +1,20 @@
+[package]
+name = "arc-kernel"
+description = "The arcOS kernel"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "arc-kernel"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+arcdk.workspace = true
+arcfs.workspace = true
+
+[lints]
+workspace = true

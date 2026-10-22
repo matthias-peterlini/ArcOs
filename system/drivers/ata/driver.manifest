@@ -1,0 +1,8 @@
+# Parallel ATA and SATA disks in IDE (legacy) mode.
+name        = ata
+version     = 1.0.0
+class       = storage
+description = ATA/IDE disk controller
+author      = arcOS
+boot        = yes
+match       = pci-class 01:01
