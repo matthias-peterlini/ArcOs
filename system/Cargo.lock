@@ -96,6 +96,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ohci"
+version = "1.0.0"
+dependencies = [
+ "arcdrv",
+ "arcusb",
+]
+
+[[package]]
 name = "ps2kbd"
 version = "1.0.0"
 dependencies = [
@@ -114,6 +122,14 @@ name = "snake"
 version = "1.0.0"
 dependencies = [
  "arcrt",
+]
+
+[[package]]
+name = "uhci"
+version = "1.0.0"
+dependencies = [
+ "arcdrv",
+ "arcusb",
 ]
 
 [[package]]

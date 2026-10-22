@@ -805,6 +805,21 @@ pub fn interval_ms(ep: &EndpointDescriptor, speed: u8) -> u32 {
     }
 }
 
+/// The endpoints a controller has to prepare for a configuration: bulk and
+/// interrupt endpoints of alternate setting 0 of every interface, each once.
+pub fn config_endpoints(config: &[u8]) -> Vec<EndpointDescriptor> {
+    let mut out: Vec<EndpointDescriptor> = Vec::new();
+    for i in interfaces(config) {
+        for e in endpoints(config, i.number, 0) {
+            let kind = e.kind();
+            if (kind == EP_BULK || kind == EP_INTERRUPT) && e.number() != 0 && !out.iter().any(|o| o.address == e.address) {
+                out.push(e);
+            }
+        }
+    }
+    out
+}
+
 /// A small table that maps keys to values, for host drivers that keep
 /// per-device state behind a lock.
 pub struct Table<T> {

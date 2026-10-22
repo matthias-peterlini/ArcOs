@@ -1,0 +1,8 @@
+# USB 1.1 host controllers of AMD, NVIDIA, SiS and Apple chipsets (OHCI).
+name        = ohci
+version     = 1.0.0
+class       = usb
+description = USB host controller (OHCI)
+author      = arcOS
+boot        = yes
+match       = pci-class 0c:03:10

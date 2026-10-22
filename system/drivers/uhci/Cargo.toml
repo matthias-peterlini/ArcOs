@@ -1,0 +1,20 @@
+[package]
+name = "uhci"
+description = "arcOS driver: USB 1.1 host controllers (UHCI)"
+version = "1.0.0"
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "uhci"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+arcdrv.workspace = true
+arcusb.workspace = true
+
+[lints]
+workspace = true

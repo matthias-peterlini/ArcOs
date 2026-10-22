@@ -1,0 +1,9 @@
+# USB 1.1 host controllers of Intel and VIA chipsets (UHCI): the keyboard,
+# mouse and other full/low-speed ports of PCs up to about 2012.
+name        = uhci
+version     = 1.0.0
+class       = usb
+description = USB host controller (UHCI)
+author      = arcOS
+boot        = yes
+match       = pci-class 0c:03:00
