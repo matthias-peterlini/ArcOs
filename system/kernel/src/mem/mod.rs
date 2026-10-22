@@ -54,14 +54,29 @@ extern "C" {
     static __kernel_end: u8;
 }
 
+/// The kernel is linked at `KERNEL_BASE + 1 MiB`; the BIOS loader puts it
+/// at physical 1 MiB, the UEFI loader wherever the firmware had room (at
+/// the same offset within a 2 MiB page).
+pub const KERNEL_LINK_OFFSET: u64 = 0x10_0000;
+static KERNEL_PHYS: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(KERNEL_LINK_OFFSET);
+
+/// Physical address the kernel image was loaded at.
+pub fn kernel_phys() -> u64 {
+    KERNEL_PHYS.load(core::sync::atomic::Ordering::Relaxed)
+}
+
 /// Physical range of the loaded kernel image (including .bss).
 pub fn kernel_range() -> (u64, u64) {
     let (s, e) = (core::ptr::addr_of!(__kernel_start) as u64, core::ptr::addr_of!(__kernel_end) as u64);
-    (s - KERNEL_BASE, e - KERNEL_BASE)
+    let base = kernel_phys() - KERNEL_LINK_OFFSET;
+    (s - KERNEL_BASE + base, e - KERNEL_BASE + base)
 }
 
 /// Sets up physical and virtual memory and the heap.
 pub fn init(boot: &crate::boot::BootInfo) {
+    if boot.kernel_phys != 0 {
+        KERNEL_PHYS.store(boot.kernel_phys, core::sync::atomic::Ordering::Relaxed);
+    }
     frame::init(boot);
     paging::init();
     heap::init();

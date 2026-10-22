@@ -152,12 +152,13 @@ pub fn init() {
         map_huge(pml4, HHDM + phys, phys, WRITE);
         phys += HUGE_SIZE;
     }
-    // Kernel image.
-    let (_, end) = super::kernel_range();
-    let mut phys = 0;
-    while phys < align_up(end, HUGE_SIZE) {
-        map_huge(pml4, KERNEL_BASE + phys, phys, WRITE);
-        phys += HUGE_SIZE;
+    // Kernel image: KERNEL_BASE maps the 2 MiB page the image starts in.
+    let (start, end) = super::kernel_range();
+    let base = start - super::KERNEL_LINK_OFFSET;
+    let mut off = 0;
+    while base + off < align_up(end, HUGE_SIZE) {
+        map_huge(pml4, KERNEL_BASE + off, base + off, WRITE);
+        off += HUGE_SIZE;
     }
     KERNEL_PML4.store(pml4, Ordering::Relaxed);
     // SAFETY: the new tables map the kernel image, its stack and the direct map.

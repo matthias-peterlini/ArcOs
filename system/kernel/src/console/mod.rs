@@ -4,6 +4,7 @@
 
 mod cp437;
 pub mod fb;
+mod font;
 pub mod serial;
 mod vga;
 
@@ -411,12 +412,16 @@ pub fn early(s: &str) {
 /// Brings up the screen. Needs the heap.
 pub fn init_screen(boot: &BootInfo) {
     let screen = match boot.fb_kind {
-        FB_RGB if boot.fb_bpp == 32 && boot.font_addr != 0 => {
+        FB_RGB if boot.fb_bpp == 32 => {
             let size = boot.fb_pitch as u64 * boot.fb_height as u64;
             crate::mem::region::map_device(boot.fb_addr, size, crate::mem::paging::WRITE_COMBINE).map(|virt| {
-                // SAFETY: the loader copied the 4 KiB font there; the
-                // framebuffer was just mapped.
-                let font = unsafe { &*(crate::mem::phys_to_virt(boot.font_addr) as *const [u8; 4096]) };
+                // The firmware's font if the loader found one, else our own.
+                let font = if boot.font_addr != 0 && boot.font_height == 16 {
+                    // SAFETY: the loader copied the 4 KiB font there.
+                    unsafe { &*(crate::mem::phys_to_virt(boot.font_addr) as *const [u8; 4096]) }
+                } else {
+                    &font::FONT
+                };
                 let shift = (boot.red_pos, boot.green_pos, boot.blue_pos);
                 Screen::Fb(unsafe {
                     fb::FbSurface::new(virt as *mut u8, boot.fb_width as usize, boot.fb_height as usize, boot.fb_pitch as usize, shift, font)

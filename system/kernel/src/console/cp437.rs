@@ -35,6 +35,12 @@ pub fn glyph(c: char) -> u8 {
         'Ò' => b'O',
         'Ù' => b'U',
         '€' => b'E',
+        '›' => b'>',
+        '‹' => b'<',
+        '…' => 0xFA,
+        '—' | '–' => 0xC4,
+        '✓' => 0xFB,
+        '●' | '◆' => 0x04,
         _ => HIGH.iter().position(|&h| h == c).map(|i| 0x80 + i as u8).unwrap_or(b'?'),
     }
 }
