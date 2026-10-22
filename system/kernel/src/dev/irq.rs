@@ -1,6 +1,8 @@
-//! Interrupt lines shared between kernel handlers and driver modules.
+//! Interrupts of devices: the 16 legacy lines (8259 PIC), shared between
+//! kernel handlers and driver modules, and message-signalled interrupts
+//! (MSI and MSI-X), one vector per device, delivered by the local APIC.
 
-use crate::arch::pic;
+use crate::arch::{apic, pic};
 use crate::sync::IrqLock;
 use alloc::vec::Vec;
 use arcdk::IrqHandler;
@@ -45,8 +47,138 @@ fn attach(irq: u8, entry: Entry) {
     pic::unmask(irq);
 }
 
-/// Removes the handlers of `device` (on `irq`, or on every line for `None`).
+/// Vectors for message-signalled interrupts.
+pub const MSI_FIRST: u8 = 48;
+pub const MSI_LAST: u8 = 127;
+
+static MSI: IrqLock<[Option<Entry>; (MSI_LAST - MSI_FIRST + 1) as usize]> = IrqLock::new([None; (MSI_LAST - MSI_FIRST + 1) as usize]);
+
+const CAP_MSI: u8 = 0x05;
+const CAP_MSIX: u8 = 0x11;
+
+/// Points a device's MSI-X (preferred) or MSI at a free vector that runs
+/// `handler`. Returns the vector.
+pub fn attach_msi(device: u32, handler: IrqHandler, ctx: *mut c_void) -> Result<u8, arcdk::Status> {
+    let info = super::info(device).ok_or(arcdk::E_INVAL)?;
+    if info.bus != arcdk::BUS_PCI {
+        return Err(arcdk::E_UNSUPPORTED);
+    }
+    let loc = info.location;
+    let msix = super::pci::find_capability(loc, CAP_MSIX);
+    let msi = super::pci::find_capability(loc, CAP_MSI);
+    if msix.is_none() && msi.is_none() {
+        return Err(arcdk::E_UNSUPPORTED);
+    }
+    let apic_id = apic::enable().ok_or(arcdk::E_UNSUPPORTED)?;
+    let vector = {
+        let mut table = MSI.lock();
+        let free = table.iter().position(|e| e.is_none()).ok_or(arcdk::E_BUSY)?;
+        table[free] = Some(Entry { owner: device, handler: Handler::Driver(handler, ctx) });
+        MSI_FIRST + free as u8
+    };
+    let address = 0xFEE0_0000u32 | (apic_id & 0xFF) << 12;
+    let ok = match msix {
+        Some(cap) => program_msix(&info, cap, address, vector as u32),
+        None => {
+            program_msi(loc, msi.unwrap(), address, vector as u32);
+            true
+        }
+    };
+    if !ok {
+        MSI.lock()[(vector - MSI_FIRST) as usize] = None;
+        return Err(arcdk::E_IO);
+    }
+    // Message interrupts replace the legacy line.
+    let cmd = super::pci::read(loc, 0x04, 2);
+    super::pci::write(loc, 0x04, 2, cmd | (1 << 10));
+    Ok(vector)
+}
+
+fn program_msi(loc: u32, cap: u16, address: u32, vector: u32) {
+    use super::pci::{read, write};
+    let control = read(loc, cap + 2, 2);
+    let is64 = control & (1 << 7) != 0;
+    write(loc, cap + 4, 4, address);
+    if is64 {
+        write(loc, cap + 8, 4, 0);
+        write(loc, cap + 12, 2, vector);
+    } else {
+        write(loc, cap + 8, 2, vector);
+    }
+    // One message, enabled.
+    write(loc, cap + 2, 2, (control & !(7 << 4)) | 1);
+}
+
+fn program_msix(info: &arcdk::DeviceInfo, cap: u16, address: u32, vector: u32) -> bool {
+    use super::pci::{read, write};
+    let loc = info.location;
+    let control = read(loc, cap + 2, 2);
+    let table = read(loc, cap + 4, 4);
+    let bar = info.resources[(table & 7) as usize];
+    if bar.kind != arcdk::RES_MEMORY || bar.base == 0 {
+        return false;
+    }
+    let entries = (control & 0x7FF) as u64 + 1;
+    let Some(t) = crate::mem::region::map_device(bar.base + (table & !7) as u64, entries * 16, crate::mem::paging::NO_CACHE) else {
+        return false;
+    };
+    // Enabled with every vector masked, then entry 0 set and unmasked.
+    write(loc, cap + 2, 2, control | (1 << 15) | (1 << 14));
+    for i in 0..entries {
+        // SAFETY: inside the mapped vector table.
+        unsafe { core::ptr::write_volatile((t + i * 16 + 12) as *mut u32, 1) };
+    }
+    // SAFETY: entry 0 of the mapped table: address, upper address, data,
+    // control.
+    unsafe {
+        core::ptr::write_volatile(t as *mut u32, address);
+        core::ptr::write_volatile((t + 4) as *mut u32, 0);
+        core::ptr::write_volatile((t + 8) as *mut u32, vector);
+        core::ptr::write_volatile((t + 12) as *mut u32, 0);
+    }
+    write(loc, cap + 2, 2, (control | (1 << 15)) & !(1 << 14));
+    true
+}
+
+/// Turns off a device's message interrupts (its driver is going away).
+fn disable_msi(device: u32) {
+    let Some(info) = super::info(device) else { return };
+    if info.bus != arcdk::BUS_PCI {
+        return;
+    }
+    let loc = info.location;
+    if let Some(cap) = super::pci::find_capability(loc, CAP_MSIX) {
+        let c = super::pci::read(loc, cap + 2, 2);
+        super::pci::write(loc, cap + 2, 2, c & !(1 << 15));
+    }
+    if let Some(cap) = super::pci::find_capability(loc, CAP_MSI) {
+        let c = super::pci::read(loc, cap + 2, 2);
+        super::pci::write(loc, cap + 2, 2, c & !1);
+    }
+}
+
+/// Runs the handler of a message-signalled interrupt.
+pub fn dispatch_msi(vector: u8) {
+    let entry = MSI.lock()[(vector - MSI_FIRST) as usize];
+    if let Some(Entry { handler: Handler::Driver(f, ctx), .. }) = entry {
+        // SAFETY: the driver registered this handler with this context.
+        unsafe { f(ctx) };
+    }
+}
+
+/// Removes the handlers of `device` (on `irq`, or on every line for `None`),
+/// and its message interrupts.
 pub fn detach(device: u32, irq: Option<u8>) {
+    let mut had_msi = false;
+    for e in MSI.lock().iter_mut() {
+        if e.is_some_and(|e| e.owner == device) {
+            *e = None;
+            had_msi = true;
+        }
+    }
+    if had_msi {
+        disable_msi(device);
+    }
     let mut lines = LINES.lock();
     for (line, list) in lines.iter_mut().enumerate() {
         if irq.is_some_and(|i| i as usize != line) {

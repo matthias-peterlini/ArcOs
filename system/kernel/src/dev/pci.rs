@@ -48,6 +48,24 @@ pub fn write(loc: u32, off: u16, width: u8, value: u32) {
     }
 }
 
+/// Offset of the first capability with this id, if the function has one.
+pub fn find_capability(loc: u32, id: u8) -> Option<u16> {
+    if read(loc, 0x06, 2) & 0x10 == 0 {
+        return None; // no capability list
+    }
+    let mut at = read(loc, 0x34, 1) as u16 & 0xFC;
+    for _ in 0..48 {
+        if at < 0x40 {
+            return None;
+        }
+        if read(loc, at, 1) as u8 == id {
+            return Some(at);
+        }
+        at = read(loc, at + 1, 1) as u16 & 0xFC;
+    }
+    None
+}
+
 /// Size and decode the six BARs of a type-0 header.
 fn read_bars(loc: u32) -> [Resource; 6] {
     let mut out = [Resource::default(); 6];

@@ -178,6 +178,23 @@ pub fn unregister_device(device: u32) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// The hardware behind a device's disks is gone (unplugged): their volumes
+/// are dropped without flushing and the disks removed.
+pub fn device_gone(device: u32) {
+    let disks: Vec<Arc<Disk>> = DISKS.lock().iter().filter(|d| d.whole().0.device == device).cloned().collect();
+    if disks.is_empty() {
+        return;
+    }
+    for d in &disks {
+        *d.gone.lock() = true;
+        crate::fs::disk_gone(&d.name);
+    }
+    DISKS.lock().retain(|d| d.whole().0.device != device);
+    for d in disks.iter().filter(|d| d.parent.is_none()) {
+        crate::info!("disk", "{}: removed", d.name);
+    }
+}
+
 fn add_partition(disk: &Arc<Disk>, index: usize, start: u64, sectors: u64, kind: String) -> Option<Arc<Disk>> {
     if start == 0 || sectors == 0 || start + sectors > disk.sectors {
         return None;

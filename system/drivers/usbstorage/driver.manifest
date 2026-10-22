@@ -1,0 +1,11 @@
+# USB flash drives, card readers and external disks (bulk-only transport,
+# SCSI commands): nearly every USB storage device.
+name        = usbstorage
+version     = 1.0.0
+class       = storage
+description = USB flash drive and disk (mass storage)
+author      = arcOS
+boot        = yes
+match       = usb-class 08:06:50
+match       = usb-class 08:02:50  # ATAPI command set (old CD drives)
+match       = usb-class 08:05:50  # SFF-8070i (old card readers)

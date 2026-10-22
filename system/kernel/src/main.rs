@@ -104,6 +104,12 @@ extern "C" fn kmain(boot_phys: u64) -> ! {
     let found = dev::scan().len();
     debug!("kernel", "{found} devices found");
     driver::init();
+    if fs::volume("sys").is_none() && dev::list().iter().any(|d| d.driver.is_some() && d.info.bus == arcdk::BUS_PCI && d.info.class == 0x0C && d.info.subclass == 0x03) {
+        // The system disk may be a USB drive: its controller finds it in
+        // the background.
+        info!("kernel", "waiting for USB disks");
+        driver::wait_for_system(8000);
+    }
     if fs::volume("sys").is_none() {
         warn!("kernel", "no system volume found: only boot: and ram: are available");
     }

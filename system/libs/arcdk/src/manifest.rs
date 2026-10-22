@@ -14,12 +14,14 @@
 //! match       = pci-class 01:06:01  # class:subclass[:prog-if]
 //! match       = pci 8086:2922       # vendor:device
 //! match       = platform ps2-keyboard
+//! match       = usb 0781:5567       # USB vendor:product
+//! match       = usb-class 08:06:50  # USB interface class:subclass[:protocol]
 //! ```
 //!
 //! Keys can repeat (`match`); unknown keys are ignored so newer manifests
 //! still load on older kernels.
 
-use crate::abi::{DeviceInfo, BUS_PCI, BUS_PLATFORM};
+use crate::abi::{DeviceInfo, BUS_PCI, BUS_PLATFORM, BUS_USB};
 
 /// A hardware matching rule (`match = ...`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,6 +32,56 @@ pub enum MatchRule<'a> {
     PciClass { class: u8, subclass: Option<u8>, prog_if: Option<u8> },
     /// `platform <id>`
     Platform(&'a str),
+    /// `usb VVVV:PPPP`
+    UsbId { vendor: u16, product: u16 },
+    /// `usb-class CC[:SS[:PP]]` (of the interface)
+    UsbClass { class: u8, subclass: Option<u8>, protocol: Option<u8> },
+}
+
+fn parse_id(rest: &str, what: &'static str) -> Result<(u16, u16), &'static str> {
+    let (v, d) = rest.split_once(':').ok_or(what)?;
+    let a = u16::from_str_radix(v.trim(), 16).map_err(|_| what)?;
+    let b = u16::from_str_radix(d.trim(), 16).map_err(|_| what)?;
+    Ok((a, b))
+}
+
+fn parse_class(rest: &str, what: &'static str) -> Result<(u8, Option<u8>, Option<u8>), &'static str> {
+    let mut parts = rest.split(':');
+    let hex = |s: Option<&str>| -> Result<Option<u8>, &'static str> {
+        match s {
+            None => Ok(None),
+            Some(s) => u8::from_str_radix(s.trim(), 16).map(Some).map_err(|_| what),
+        }
+    };
+    let class = hex(parts.next())?.ok_or(what)?;
+    let sub = hex(parts.next())?;
+    let prog = hex(parts.next())?;
+    if parts.next().is_some() {
+        return Err(what);
+    }
+    Ok((class, sub, prog))
+}
+
+/// Score of a class rule: 20 for the class, 40 with the subclass, 60 with
+/// the programming interface (protocol) too.
+fn class_score(dev: (u8, u8, u8), class: u8, sub: Option<u8>, prog: Option<u8>) -> Option<u32> {
+    if dev.0 != class {
+        return None;
+    }
+    let mut score = 20;
+    if let Some(s) = sub {
+        if dev.1 != s {
+            return None;
+        }
+        score = 40;
+    }
+    if let Some(p) = prog {
+        if dev.2 != p {
+            return None;
+        }
+        score = 60;
+    }
+    Some(score)
 }
 
 impl<'a> MatchRule<'a> {
@@ -39,26 +91,20 @@ impl<'a> MatchRule<'a> {
         let rest = rest.trim();
         match kind {
             "pci" => {
-                let (v, d) = rest.split_once(':').ok_or("match pci: expected vendor:device")?;
-                let vendor = u16::from_str_radix(v.trim(), 16).map_err(|_| "match pci: bad vendor id")?;
-                let device = u16::from_str_radix(d.trim(), 16).map_err(|_| "match pci: bad device id")?;
+                let (vendor, device) = parse_id(rest, "match pci: expected vendor:device in hex")?;
                 Ok(MatchRule::PciId { vendor, device })
             }
             "pci-class" => {
-                let mut parts = rest.split(':');
-                let hex = |s: Option<&str>| -> Result<Option<u8>, &'static str> {
-                    match s {
-                        None => Ok(None),
-                        Some(s) => u8::from_str_radix(s.trim(), 16).map(Some).map_err(|_| "match pci-class: bad number"),
-                    }
-                };
-                let class = hex(parts.next())?.ok_or("match pci-class: missing class")?;
-                let subclass = hex(parts.next())?;
-                let prog_if = hex(parts.next())?;
-                if parts.next().is_some() {
-                    return Err("match pci-class: too many fields");
-                }
+                let (class, subclass, prog_if) = parse_class(rest, "match pci-class: expected CC[:SS[:PP]] in hex")?;
                 Ok(MatchRule::PciClass { class, subclass, prog_if })
+            }
+            "usb" => {
+                let (vendor, product) = parse_id(rest, "match usb: expected vendor:product in hex")?;
+                Ok(MatchRule::UsbId { vendor, product })
+            }
+            "usb-class" => {
+                let (class, subclass, protocol) = parse_class(rest, "match usb-class: expected CC[:SS[:PP]] in hex")?;
+                Ok(MatchRule::UsbClass { class, subclass, protocol })
             }
             "platform" => {
                 if rest.is_empty() || rest.len() > 31 {
@@ -66,7 +112,7 @@ impl<'a> MatchRule<'a> {
                 }
                 Ok(MatchRule::Platform(rest))
             }
-            _ => Err("match: unknown kind (pci, pci-class, platform)"),
+            _ => Err("match: unknown kind (pci, pci-class, usb, usb-class, platform)"),
         }
     }
 
@@ -76,23 +122,17 @@ impl<'a> MatchRule<'a> {
         match *self {
             MatchRule::PciId { vendor, device } => (dev.bus == BUS_PCI && dev.vendor == vendor && dev.device == device).then_some(100),
             MatchRule::PciClass { class, subclass, prog_if } => {
-                if dev.bus != BUS_PCI || dev.class != class {
+                if dev.bus != BUS_PCI {
                     return None;
                 }
-                let mut score = 20;
-                if let Some(s) = subclass {
-                    if dev.subclass != s {
-                        return None;
-                    }
-                    score = 40;
+                class_score((dev.class, dev.subclass, dev.prog_if), class, subclass, prog_if)
+            }
+            MatchRule::UsbId { vendor, product } => (dev.bus == BUS_USB && dev.vendor == vendor && dev.device == product).then_some(100),
+            MatchRule::UsbClass { class, subclass, protocol } => {
+                if dev.bus != BUS_USB {
+                    return None;
                 }
-                if let Some(p) = prog_if {
-                    if dev.prog_if != p {
-                        return None;
-                    }
-                    score = 60;
-                }
-                Some(score)
+                class_score((dev.class, dev.subclass, dev.prog_if), class, subclass, protocol)
             }
             MatchRule::Platform(id) => (dev.bus == BUS_PLATFORM && dev.name() == id).then_some(100),
         }
@@ -231,6 +271,24 @@ mod tests {
         assert!(Manifest::parse("version = 1").is_err());
         assert!(Manifest::parse("name = a b\nversion = 1").is_err());
         assert!(Manifest::parse("name = x\nversion = 1\nmatch = pci zz:00").is_err());
+        assert!(Manifest::parse("name = x\nversion = 1\nmatch = usb-class 1:2:3:4").is_err());
+    }
+
+    #[test]
+    fn usb_rules() {
+        let m = Manifest::parse("name = usbhid\nversion = 1\nmatch = usb-class 03\nmatch = usb-class 03:01:01\nmatch = usb 046d:c077").unwrap();
+        let mut dev = DeviceInfo::empty();
+        dev.bus = BUS_USB;
+        dev.class = 3;
+        assert_eq!(m.score(&dev), Some(20));
+        dev.subclass = 1;
+        dev.prog_if = 1;
+        assert_eq!(m.score(&dev), Some(60));
+        dev.vendor = 0x046d;
+        dev.device = 0xc077;
+        assert_eq!(m.score(&dev), Some(100));
+        dev.bus = BUS_PCI;
+        assert_eq!(m.score(&dev), None);
     }
 
     #[test]

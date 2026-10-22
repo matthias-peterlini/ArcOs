@@ -458,18 +458,37 @@ impl WaitQueue {
 
     /// Like [`wait_for`](Self::wait_for), giving up after `ms` milliseconds.
     pub fn wait_for_timeout<T>(&self, ms: u64, mut ready: impl FnMut() -> Option<T>) -> Option<T> {
-        let until = crate::time::uptime_ms() + ms;
+        let until = crate::time::uptime_ms().saturating_add(ms);
+        let irq = cpu::irq_save();
         loop {
-            let irq = cpu::irq_save();
             if let Some(v) = ready() {
                 cpu::irq_restore(irq);
                 return Some(v);
             }
-            cpu::irq_restore(irq);
             if crate::time::uptime_ms() >= until {
+                cpu::irq_restore(irq);
                 return None;
             }
-            sleep_ms(1);
+            let me = {
+                let mut s = SCHED.lock();
+                if !s.started {
+                    drop(s);
+                    cpu::enable_and_halt();
+                    cpu::disable_irq();
+                    continue;
+                }
+                // Asleep until the deadline, unless notified first.
+                let cur = s.current;
+                let t = s.threads.get_mut(&cur).unwrap();
+                t.state = State::Sleeping;
+                t.wake_at = until;
+                s.sleepers.push(cur);
+                cur
+            };
+            self.waiters.lock().push_back(me);
+            schedule();
+            // Woken by the timer: do not leave a stale entry behind.
+            self.waiters.lock().retain(|&t| t != me);
         }
     }
 
@@ -477,6 +496,43 @@ impl WaitQueue {
         let waiters = core::mem::take(&mut *self.waiters.lock());
         for t in waiters {
             wake(t);
+        }
+    }
+}
+
+/// A flag one thread waits on and others (or interrupt handlers) set.
+pub struct Event {
+    set: core::sync::atomic::AtomicBool,
+    queue: WaitQueue,
+}
+
+impl Default for Event {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Event {
+    pub const fn new() -> Event {
+        Event { set: core::sync::atomic::AtomicBool::new(false), queue: WaitQueue::new() }
+    }
+
+    /// Sets the event and wakes its waiters (safe in interrupt handlers).
+    pub fn signal(&self) {
+        self.set.store(true, core::sync::atomic::Ordering::Release);
+        self.queue.notify_all();
+    }
+
+    /// Waits until the event is set, then clears it. `None` waits forever.
+    /// Returns false on timeout.
+    pub fn wait(&self, timeout_ms: Option<u64>) -> bool {
+        let ready = || self.set.swap(false, core::sync::atomic::Ordering::Acquire).then_some(());
+        match timeout_ms {
+            None => {
+                self.queue.wait_for(ready);
+                true
+            }
+            Some(ms) => self.queue.wait_for_timeout(ms, ready).is_some(),
         }
     }
 }

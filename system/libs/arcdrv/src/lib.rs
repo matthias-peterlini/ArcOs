@@ -45,8 +45,8 @@ pub fn api() -> &'static KernelApi {
 #[doc(hidden)]
 pub unsafe fn init(table: *const KernelApi, name: &'static &'static str) -> bool {
     // SAFETY: the caller passes the kernel's table.
-    let version = unsafe { (*table).abi_version };
-    if version != ABI_VERSION {
+    let (version, size) = unsafe { ((*table).abi_version, (*table).size) };
+    if version != ABI_VERSION || (size as usize) < core::mem::size_of::<KernelApi>() {
         return false;
     }
     API.store(table as *mut KernelApi, Ordering::Relaxed);
@@ -506,6 +506,66 @@ pub fn irq_detach(device: u32, irq: u8) {
     unsafe { (api().irq_detach)(device, irq) }
 }
 
+/// Routes the device's MSI-X/MSI to `handler(ctx)`. Returns the vector, or
+/// `E_UNSUPPORTED` when only the legacy line is available.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub fn irq_attach_msi(device: u32, handler: IrqHandler, ctx: *mut c_void) -> Status {
+    // SAFETY: kernel call.
+    unsafe { (api().irq_attach_msi)(device, handler, ctx) }
+}
+
+/// Attaches `handler` to the device's message interrupt if it has one,
+/// else to its legacy line. Returns whether an interrupt is attached
+/// (without one, the driver has to poll).
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub fn irq_attach_any(dev: &DeviceInfo, handler: IrqHandler, ctx: *mut c_void) -> bool {
+    if irq_attach_msi(dev.id, handler, ctx) >= 0 {
+        return true;
+    }
+    dev.irq != IRQ_NONE && irq_attach(dev.id, dev.irq, handler, ctx) == OK
+}
+
+/// A flag a thread waits on until another thread or an interrupt handler
+/// sets it.
+pub struct Event(arcdk::Event);
+
+// SAFETY: kernel events are made to be shared between threads and IRQs.
+unsafe impl Send for Event {}
+unsafe impl Sync for Event {}
+
+impl Event {
+    pub fn new() -> Event {
+        // SAFETY: kernel call.
+        Event(unsafe { (api().event_new)() })
+    }
+
+    /// Sets the event (safe in interrupt handlers).
+    pub fn signal(&self) {
+        // SAFETY: a live event.
+        unsafe { (api().event_signal)(self.0) }
+    }
+
+    /// Waits until the event is set, then clears it. Returns false after
+    /// `timeout_ms` (`WAIT_FOREVER` for no limit).
+    pub fn wait(&self, timeout_ms: u64) -> bool {
+        // SAFETY: a live event.
+        unsafe { (api().event_wait)(self.0, timeout_ms) == OK }
+    }
+}
+
+impl Default for Event {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for Event {
+    fn drop(&mut self) {
+        // SAFETY: created by event_new, freed once.
+        unsafe { (api().event_free)(self.0) }
+    }
+}
+
 /// A spin lock that also masks interrupts, so state shared with an interrupt
 /// handler can be locked from both sides.
 pub struct IrqLock<T> {
@@ -635,6 +695,21 @@ pub fn net_register(device: u32, desc: &'static NetDesc) -> Status {
 pub fn net_receive(iface: u32, frame: &[u8]) {
     // SAFETY: kernel call with a valid buffer.
     unsafe { (api().net_receive)(iface, frame.as_ptr(), frame.len()) }
+}
+
+/// Adds a device this driver found (a USB device) as a child of `parent`.
+/// Returns its id or an error.
+pub fn device_add(parent: u32, info: &DeviceInfo, description: &str, flags: u32) -> Status {
+    let d = Str { ptr: description.as_ptr(), len: description.len() };
+    // SAFETY: kernel call with valid pointers for the call's duration.
+    unsafe { (api().device_add)(parent, info, d, flags) }
+}
+
+/// A device this driver added went away. `OK`: no driver uses its
+/// interface any more.
+pub fn device_remove(device: u32) -> Status {
+    // SAFETY: kernel call.
+    unsafe { (api().device_remove)(device) }
 }
 
 /// Copies an ASCII model name into the fixed field of [`BlockDesc`].

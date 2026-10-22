@@ -1,0 +1,11 @@
+# USB keyboards, mice, trackballs, touchpads and tablets: anything that
+# speaks the HID protocol.
+name        = usbhid
+version     = 1.0.0
+class       = input
+description = USB keyboard, mouse and tablet (HID)
+author      = arcOS
+boot        = yes
+match       = usb-class 03
+match       = usb-class 03:01:01  # boot keyboard
+match       = usb-class 03:01:02  # boot mouse

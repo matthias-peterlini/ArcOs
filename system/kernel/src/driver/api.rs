@@ -147,6 +147,64 @@ unsafe extern "C" fn api_net_receive(iface: u32, frame: *const u8, len: usize) {
     dev::net::receive(iface, unsafe { core::slice::from_raw_parts(frame, len) });
 }
 
+unsafe extern "C" fn api_irq_attach_msi(device: u32, handler: IrqHandler, ctx: *mut c_void) -> Status {
+    match dev::irq::attach_msi(device, handler, ctx) {
+        Ok(v) => v as Status,
+        Err(e) => e,
+    }
+}
+
+unsafe extern "C" fn api_event_new() -> Event {
+    alloc::boxed::Box::into_raw(alloc::boxed::Box::new(crate::task::Event::new())) as Event
+}
+
+unsafe extern "C" fn api_event_free(event: Event) {
+    if !event.is_null() {
+        // SAFETY: created by api_event_new; the module frees it once.
+        drop(unsafe { alloc::boxed::Box::from_raw(event as *mut crate::task::Event) });
+    }
+}
+
+unsafe extern "C" fn api_event_signal(event: Event) {
+    // SAFETY: a live event of the module.
+    if let Some(e) = unsafe { (event as *const crate::task::Event).as_ref() } {
+        e.signal();
+    }
+}
+
+unsafe extern "C" fn api_event_wait(event: Event, timeout_ms: u64) -> Status {
+    // SAFETY: a live event of the module.
+    let Some(e) = (unsafe { (event as *const crate::task::Event).as_ref() }) else { return E_INVAL };
+    if e.wait((timeout_ms != WAIT_FOREVER).then_some(timeout_ms)) {
+        OK
+    } else {
+        E_TIMEOUT
+    }
+}
+
+unsafe extern "C" fn api_device_add(parent: u32, info: *const DeviceInfo, description: Str, flags: u32) -> Status {
+    if info.is_null() {
+        return E_INVAL;
+    }
+    // SAFETY: the module passes a valid device and string.
+    let (info, name) = unsafe { (*info, description.as_str()) };
+    let name = (!name.is_empty()).then(|| alloc::string::String::from(&name[..name.len().min(64)]));
+    let owned = flags & DEVICE_OWNED != 0;
+    match dev::add_child(parent, info, name, owned) {
+        Some(id) => {
+            if !owned {
+                super::device_added();
+            }
+            id as Status
+        }
+        None => E_INVAL,
+    }
+}
+
+unsafe extern "C" fn api_device_remove(device: u32) -> Status {
+    super::device_removed(device)
+}
+
 pub static KERNEL_API: KernelApi = KernelApi {
     abi_version: ABI_VERSION,
     size: core::mem::size_of::<KernelApi>() as u32,
@@ -169,4 +227,11 @@ pub static KERNEL_API: KernelApi = KernelApi {
     input_event: api_input_event,
     net_register: api_net_register,
     net_receive: api_net_receive,
+    irq_attach_msi: api_irq_attach_msi,
+    event_new: api_event_new,
+    event_free: api_event_free,
+    event_signal: api_event_signal,
+    event_wait: api_event_wait,
+    device_add: api_device_add,
+    device_remove: api_device_remove,
 };

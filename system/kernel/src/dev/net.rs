@@ -21,14 +21,16 @@ pub struct Iface {
 // SAFETY: the descriptor belongs to the driver, which serialises sends itself.
 unsafe impl Send for Iface {}
 
-static IFACES: IrqLock<Vec<Iface>> = IrqLock::new(Vec::new());
+/// Interfaces by number; a removed interface leaves its slot empty, so the
+/// numbers of the others never change.
+static IFACES: IrqLock<Vec<Option<Iface>>> = IrqLock::new(Vec::new());
 
 pub fn register(device: u32, desc: *const NetDesc) -> Status {
     // SAFETY: the driver keeps the descriptor alive.
     let d = unsafe { &*desc };
     let mut ifaces = IFACES.lock();
     let n = ifaces.len();
-    ifaces.push(Iface {
+    ifaces.push(Some(Iface {
         device,
         mac: d.mac,
         mtu: d.mtu,
@@ -38,7 +40,7 @@ pub fn register(device: u32, desc: *const NetDesc) -> Status {
         tx_packets: 0,
         tx_bytes: 0,
         rx: VecDeque::new(),
-    });
+    }));
     drop(ifaces);
     let m = d.mac;
     crate::info!("net", "net{n}: MAC {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}", m[0], m[1], m[2], m[3], m[4], m[5]);
@@ -47,7 +49,7 @@ pub fn register(device: u32, desc: *const NetDesc) -> Status {
 
 pub fn receive(iface: u32, frame: &[u8]) {
     let mut ifaces = IFACES.lock();
-    if let Some(i) = ifaces.get_mut(iface as usize) {
+    if let Some(Some(i)) = ifaces.get_mut(iface as usize) {
         i.rx_packets += 1;
         i.rx_bytes += frame.len() as u64;
         if i.rx.len() < 64 {
@@ -58,13 +60,13 @@ pub fn receive(iface: u32, frame: &[u8]) {
 
 /// Next received frame on an interface.
 pub fn poll(iface: u32) -> Option<Vec<u8>> {
-    IFACES.lock().get_mut(iface as usize)?.rx.pop_front()
+    IFACES.lock().get_mut(iface as usize)?.as_mut()?.rx.pop_front()
 }
 
 pub fn send(iface: u32, frame: &[u8]) -> Status {
     let desc = {
         let mut ifaces = IFACES.lock();
-        let Some(i) = ifaces.get_mut(iface as usize) else { return E_INVAL };
+        let Some(Some(i)) = ifaces.get_mut(iface as usize) else { return E_INVAL };
         i.tx_packets += 1;
         i.tx_bytes += frame.len() as u64;
         i.desc
@@ -87,6 +89,7 @@ pub fn list() -> Vec<IfaceInfo> {
         .lock()
         .iter()
         .enumerate()
+        .filter_map(|(n, i)| Some((n, i.as_ref()?)))
         .map(|(n, i)| IfaceInfo {
             index: n as u32,
             device: i.device,
@@ -99,7 +102,11 @@ pub fn list() -> Vec<IfaceInfo> {
 }
 
 pub fn remove_device(device: u32) {
-    IFACES.lock().retain(|i| i.device != device);
+    for slot in IFACES.lock().iter_mut() {
+        if slot.as_ref().is_some_and(|i| i.device == device) {
+            *slot = None;
+        }
+    }
 }
 
 #[allow(dead_code)]

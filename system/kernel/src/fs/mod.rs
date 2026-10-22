@@ -154,6 +154,16 @@ pub fn unmount(name: &str) -> Result<()> {
     Ok(())
 }
 
+/// The disk under a volume vanished: forget the volume (nothing can be
+/// written back any more).
+pub fn disk_gone(disk: &str) {
+    let gone: Vec<Arc<Volume>> = VOLUMES.lock().iter().filter(|v| v.source.eq_ignore_ascii_case(disk)).cloned().collect();
+    for v in gone {
+        VOLUMES.lock().retain(|x| !Arc::ptr_eq(x, &v));
+        crate::warn!("fs", "{}: removed while mounted; unsaved changes are lost", v.name);
+    }
+}
+
 /// Formats a disk or partition with ArcFS and mounts it.
 pub fn format(disk: &Arc<Disk>, label: &str) -> Result<String> {
     if is_mounted_on(&disk.name) {

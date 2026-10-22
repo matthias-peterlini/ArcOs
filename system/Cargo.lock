@@ -40,6 +40,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "arcusb"
+version = "0.1.0"
+dependencies = [
+ "arcdrv",
+]
+
+[[package]]
 name = "ata"
 version = "1.0.0"
 dependencies = [
@@ -110,8 +117,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "usbhid"
+version = "1.0.0"
+dependencies = [
+ "arcdrv",
+]
+
+[[package]]
+name = "usbstorage"
+version = "1.0.0"
+dependencies = [
+ "arcdrv",
+]
+
+[[package]]
 name = "virtioblk"
 version = "1.0.0"
 dependencies = [
  "arcdrv",
+]
+
+[[package]]
+name = "xhci"
+version = "1.0.0"
+dependencies = [
+ "arcdrv",
+ "arcusb",
 ]

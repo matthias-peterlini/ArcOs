@@ -1,0 +1,9 @@
+# USB 3 host controllers (xHCI): every USB port of PCs made since about 2012,
+# USB 1.1, 2.0 and 3.x devices alike, and the hubs between them.
+name        = xhci
+version     = 1.0.0
+class       = usb
+description = USB host controller (xHCI)
+author      = arcOS
+boot        = yes
+match       = pci-class 0c:03:30

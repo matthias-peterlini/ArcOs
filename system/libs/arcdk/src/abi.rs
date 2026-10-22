@@ -10,7 +10,7 @@
 use core::ffi::c_void;
 
 /// Current version of the driver ABI.
-pub const ABI_VERSION: u32 = 1;
+pub const ABI_VERSION: u32 = 2;
 
 /// `DriverInfo::magic`: "ARDV".
 pub const DRIVER_MAGIC: u32 = 0x5644_5241;
@@ -36,6 +36,10 @@ pub const E_INVAL: Status = -4;
 pub const E_UNSUPPORTED: Status = -5;
 pub const E_TIMEOUT: Status = -6;
 pub const E_BUSY: Status = -7;
+/// USB: the endpoint stalled (the device refused the request).
+pub const E_STALL: Status = -8;
+/// The device was unplugged.
+pub const E_GONE: Status = -9;
 
 /// Short human-readable name of a status code.
 pub fn status_name(status: Status) -> &'static str {
@@ -48,6 +52,8 @@ pub fn status_name(status: Status) -> &'static str {
         E_UNSUPPORTED => "not supported",
         E_TIMEOUT => "timed out",
         E_BUSY => "busy",
+        E_STALL => "stalled",
+        E_GONE => "device gone",
         _ => "error",
     }
 }
@@ -93,6 +99,15 @@ unsafe impl Sync for Str {}
 pub const BUS_PCI: u32 = 1;
 /// Fixed, non-enumerable hardware of the platform (PS/2, legacy ATA, ...).
 pub const BUS_PLATFORM: u32 = 2;
+/// A USB interface. `vendor`/`device` are the USB ids, `class`/`subclass`/
+/// `prog_if` the interface class, subclass and protocol, `name` the port
+/// path ("3-1.2:0": controller 3, root port 1, hub port 2, interface 0) and
+/// `interface` points at a [`crate::usb::UsbInterface`].
+pub const BUS_USB: u32 = 3;
+
+/// `device_add` flag: the parent driver handles the device itself (a USB
+/// hub, for instance); the kernel does not look for a driver.
+pub const DEVICE_OWNED: u32 = 1;
 
 pub const RES_NONE: u32 = 0;
 pub const RES_MEMORY: u32 = 1;
@@ -137,8 +152,15 @@ pub struct DeviceInfo {
     /// PCI location: bus << 8 | slot << 3 | function.
     pub location: u32,
     pub resources: [Resource; 6],
-    /// Platform device id ("ps2-keyboard"), NUL-padded. Empty on PCI.
+    /// Platform device id ("ps2-keyboard") or USB port path, NUL-padded.
+    /// Empty on PCI.
     pub name: [u8; 32],
+    /// Device that found this one (a USB controller), 0 for none.
+    pub parent: u32,
+    pub _reserved: u32,
+    /// Bus-specific interface the parent driver offers to the device's
+    /// driver (for USB a `*const UsbInterface`), 0 for none.
+    pub interface: u64,
 }
 
 impl DeviceInfo {
@@ -159,6 +181,9 @@ impl DeviceInfo {
             location: 0,
             resources: [Resource { kind: 0, flags: 0, base: 0, size: 0 }; 6],
             name: [0; 32],
+            parent: 0,
+            _reserved: 0,
+            interface: 0,
         }
     }
 
@@ -217,6 +242,11 @@ pub const INPUT_KEY: u32 = 1;
 pub const INPUT_REL: u32 = 2;
 /// Pointer button: `code` 0 = left, 1 = right, 2 = middle; `value` 1/0.
 pub const INPUT_BUTTON: u32 = 3;
+/// Absolute position (tablets, touch screens): `code` is [`AXIS_X`] or
+/// [`AXIS_Y`], `value` goes from 0 to [`ABS_MAX`] across the screen.
+pub const INPUT_ABS: u32 = 4;
+
+pub const ABS_MAX: i32 = 0x7FFF;
 
 pub const KEY_RELEASED: i32 = 0;
 pub const KEY_PRESSED: i32 = 1;
@@ -251,6 +281,10 @@ pub const LOG_INFO: u32 = 3;
 pub const LOG_DEBUG: u32 = 4;
 
 pub type IrqHandler = unsafe extern "C" fn(ctx: *mut c_void);
+/// An event a thread can wait for (see `KernelApi::event_new`).
+pub type Event = *mut c_void;
+/// `event_wait`: wait without a time limit.
+pub const WAIT_FOREVER: u64 = u64::MAX;
 pub type ThreadEntry = unsafe extern "C" fn(ctx: *mut c_void);
 
 /// The services the kernel offers a driver module.
@@ -295,6 +329,33 @@ pub struct KernelApi {
     pub net_register: unsafe extern "C" fn(device: u32, desc: *const NetDesc) -> Status,
     /// Hands a received Ethernet frame to the kernel.
     pub net_receive: unsafe extern "C" fn(iface: u32, frame: *const u8, len: usize),
+
+    // Message-signalled interrupts
+    /// Routes the device's MSI-X or MSI to `handler(ctx)`. Returns the
+    /// vector, or [`E_UNSUPPORTED`] if the device has neither (use the
+    /// legacy line then). `irq_detach` with any line number releases it.
+    pub irq_attach_msi: unsafe extern "C" fn(device: u32, handler: IrqHandler, ctx: *mut c_void) -> Status,
+
+    // Events: a flag a thread sleeps on until another thread or an
+    // interrupt handler sets it.
+    pub event_new: unsafe extern "C" fn() -> Event,
+    pub event_free: unsafe extern "C" fn(event: Event),
+    /// Sets the event and wakes its waiter. Safe in interrupt handlers.
+    pub event_signal: unsafe extern "C" fn(event: Event),
+    /// Waits until the event is set (then clears it). Returns [`OK`] or
+    /// [`E_TIMEOUT`] after `timeout_ms` (or never, for [`WAIT_FOREVER`]).
+    pub event_wait: unsafe extern "C" fn(event: Event, timeout_ms: u64) -> Status,
+
+    // Devices found by drivers (USB devices behind a controller)
+    /// Adds a child of `parent`; returns its device id. The kernel looks for
+    /// a driver in the background unless `flags` has [`DEVICE_OWNED`].
+    pub device_add: unsafe extern "C" fn(parent: u32, info: *const DeviceInfo, description: Str, flags: u32) -> Status,
+    /// The device (and its children) went away: their drivers are told,
+    /// their disks and interfaces removed. Returns [`OK`] once no driver
+    /// uses the device's `interface` any more, so the parent may free it;
+    /// [`E_BUSY`] if a driver could not let go (keep the memory alive).
+    /// Never call it from `probe`.
+    pub device_remove: unsafe extern "C" fn(device: u32) -> Status,
 }
 
 /// What a module tells the kernel about itself.

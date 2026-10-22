@@ -222,6 +222,10 @@ extern "C" fn trap_dispatch(frame: &mut TrapFrame) {
             }
         }
         VEC_SYSCALL => crate::task::syscall(frame),
+        crate::dev::irq::MSI_FIRST..=crate::dev::irq::MSI_LAST => {
+            crate::dev::irq::dispatch_msi(vector);
+            super::apic::eoi();
+        }
         _ => {}
     }
 }

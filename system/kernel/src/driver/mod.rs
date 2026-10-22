@@ -15,6 +15,11 @@
 //! Adding a driver needs no command: a package dropped into `sys:/inbox` is
 //! checked, moved into the store and installed within a couple of seconds.
 //! `drv add <file>` does the same on demand.
+//!
+//! Devices that drivers find (USB devices behind a controller) are added
+//! from the drivers' own threads; the monitor thread wakes up and installs
+//! their drivers right away. When such a device goes away, its driver is
+//! told and the device's children go with it.
 
 mod api;
 pub mod elf;
@@ -26,7 +31,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use arcdk::manifest::{compare_versions, Manifest};
 use arcdk::package::Package;
-use arcdk::{DriverEntry, DriverInfo, ABI_VERSION, DRIVER_MAGIC, E_NODEV, OK};
+use arcdk::{DriverEntry, DriverInfo, Status, ABI_VERSION, DRIVER_MAGIC, E_BUSY, E_NODEV, OK};
 
 pub const STORE: &str = "sys:/system/drivers";
 pub const BOOT_DRIVERS: &str = "boot:/drivers";
@@ -69,6 +74,10 @@ pub struct Loaded {
     image: elf::Image,
     info: &'static DriverInfo,
     pub devices: Vec<u32>,
+    /// The module has driven a device. Such a module stays loaded when its
+    /// devices go away (a call into it may still be returning); only an
+    /// explicit unload removes it.
+    used: bool,
 }
 
 impl Loaded {
@@ -176,7 +185,7 @@ impl Manager {
         let info: &'static DriverInfo = unsafe { &*info };
         let version = pkg.manifest().version().to_string();
         crate::debug!("drivers", "loaded {name} {version} at {:#x} ({})", image.base, crate::util::Size(image.size()));
-        self.loaded.push(Loaded { name, version, image, info, devices: Vec::new() });
+        self.loaded.push(Loaded { name, version, image, info, devices: Vec::new(), used: false });
         Ok(self.loaded.len() - 1)
     }
 
@@ -184,7 +193,7 @@ impl Manager {
     fn drop_idle(&mut self) {
         let mut i = 0;
         while i < self.loaded.len() {
-            if self.loaded[i].devices.is_empty() {
+            if self.loaded[i].devices.is_empty() && !self.loaded[i].used {
                 let l = self.loaded.remove(i);
                 crate::debug!("drivers", "unloaded {} (no device)", l.name);
                 l.image.unload();
@@ -222,6 +231,7 @@ impl Manager {
                 if status == OK {
                     let l = &mut self.loaded[idx];
                     l.devices.push(d.info.id);
+                    l.used = true;
                     dev::set_driver(d.info.id, Some(&l.name));
                     crate::info!("drivers", "{} {} installed for {} ({})", l.name, l.version, d.description(), d.location());
                     bound += 1;
@@ -250,6 +260,15 @@ impl Manager {
                 return Err(alloc::format!("{} drives a disk with a mounted volume", l.name));
             }
         }
+        // The devices these found (USB devices behind a controller) go
+        // first, while the module can still serve them.
+        let devices = self.loaded[i].devices.clone();
+        for &d in &devices {
+            for child in dev::children(d) {
+                self.remove_device(child);
+            }
+        }
+        let i = self.loaded_index(name).expect("still loaded");
         let l = self.loaded.remove(i);
         for &d in &l.devices {
             // SAFETY: the module's own remove callback for a device it owns.
@@ -262,6 +281,33 @@ impl Manager {
         l.image.unload();
         Ok(())
     }
+
+    /// A device went away: its children first, then the device. Returns
+    /// whether every driver involved let go of it.
+    fn remove_device(&mut self, id: u32) -> bool {
+        let Some(d) = dev::get(id) else { return true };
+        let mut released = true;
+        for child in dev::mark_gone(id) {
+            released &= self.remove_device(child);
+        }
+        // No new I/O reaches the hardware from here on.
+        dev::irq::detach(id, None);
+        dev::block::device_gone(id);
+        dev::net::remove_device(id);
+        if let Some(i) = self.loaded.iter().position(|l| l.devices.contains(&id)) {
+            let l = &mut self.loaded[i];
+            l.devices.retain(|&x| x != id);
+            match l.info.remove {
+                // SAFETY: the module's own remove callback for a device it owns.
+                Some(remove) => unsafe { remove(id) },
+                None => released = false,
+            }
+            crate::info!("drivers", "{} removed from {} ({})", d.description(), l.name, d.location());
+        } else if !d.owned {
+            crate::debug!("drivers", "{} ({}) removed", d.description(), d.location());
+        }
+        released
+    }
 }
 
 /// First pass at boot: drivers from the boot pack.
@@ -271,6 +317,37 @@ pub fn init() {
     let n = m.packages.len();
     let bound = m.configure();
     crate::debug!("drivers", "{n} packages in the boot pack, {bound} device{} configured", if bound == 1 { "" } else { "s" });
+}
+
+/// Set when a driver adds a device: the monitor looks for its driver.
+static PENDING: crate::task::Event = crate::task::Event::new();
+
+/// A driver found a device (see `KernelApi::device_add`).
+pub fn device_added() {
+    PENDING.signal();
+}
+
+/// A device went away (see `KernelApi::device_remove`).
+pub fn device_removed(id: u32) -> Status {
+    let mut m = MANAGER.lock();
+    let released = m.remove_device(id);
+    m.drop_idle();
+    if released {
+        OK
+    } else {
+        E_BUSY
+    }
+}
+
+/// At boot, without a system volume: gives controllers that find disks by
+/// themselves (USB) up to `ms` milliseconds to find it.
+pub fn wait_for_system(ms: u64) {
+    let until = crate::time::uptime_ms() + ms;
+    while fs::volume("sys").is_none() && crate::time::uptime_ms() < until {
+        if PENDING.wait(Some(100)) {
+            configure_all();
+        }
+    }
 }
 
 /// After the system volume is mounted: the whole store.
@@ -399,13 +476,22 @@ pub fn process_inbox() -> Vec<String> {
 /// Background thread: installs packages dropped into the inbox and drivers
 /// for newly appeared devices.
 pub fn start_monitor() {
-    crate::task::spawn("drvmon", || loop {
-        crate::task::sleep_ms(2000);
-        process_inbox();
-        let new = dev::scan();
-        if !new.is_empty() {
-            crate::info!("drivers", "{} new devices found", new.len());
-            configure_all();
+    crate::task::spawn("drvmon", || {
+        let mut last_scan = 0;
+        loop {
+            if PENDING.wait(Some(2000)) {
+                configure_all();
+            }
+            let now = crate::time::uptime_ms();
+            if now - last_scan >= 2000 {
+                last_scan = now;
+                process_inbox();
+                let new = dev::scan();
+                if !new.is_empty() {
+                    crate::info!("drivers", "{} new devices found", new.len());
+                    configure_all();
+                }
+            }
         }
     });
 }

@@ -11,6 +11,9 @@
 //!   hardware it drives. The kernel matches devices against manifests to
 //!   install drivers automatically, without loading any code first.
 //! * [`package`] — the `.adp` driver package: header, manifest and module image.
+//! * [`usb`] — what USB host controller drivers offer device drivers, and
+//!   descriptor parsing.
+//! * [`hid`] — HID report descriptors (USB keyboards, mice, tablets).
 //!
 //! For user programs:
 //!
@@ -19,15 +22,19 @@
 //! The run-time support for driver modules (heap, panic handler, entry
 //! point, hardware helpers) is the separate `arcdrv` crate.
 //!
-//! The crate is `no_std` and has no dependencies, so the kernel, the drivers
-//! and the host tools all share the same code.
+//! The crate is `no_std` (with `alloc`) and has no dependencies, so the
+//! kernel, the drivers and the host tools all share the same code.
 
 #![cfg_attr(not(test), no_std)]
 
+extern crate alloc;
+
 pub mod abi;
 pub mod crc32;
+pub mod hid;
 pub mod manifest;
 pub mod package;
 pub mod syscall;
+pub mod usb;
 
 pub use abi::*;

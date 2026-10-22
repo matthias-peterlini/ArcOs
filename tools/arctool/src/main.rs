@@ -40,8 +40,9 @@ fn main() -> ExitCode {
         Some("inspect") => cmd_inspect(&args[1..]),
         Some("image") => cmd_image(&args[1..]),
         Some("fs") => cmd_fs(&args[1..]),
+        Some("mkfs") => cmd_mkfs(&args[1..]),
         _ => Err(String::from(
-            "usage:\n  arctool pack <driver.manifest> <module> <out.adp>\n  arctool inspect <file.adp>\n  arctool image <out.img> --stage1 <bin> --stage2 <bin> --kernel <elf> --drivers <dir> [--efi <BOOTX64.efi>] [--size 128M] [--files <dir>]\n  arctool fs <image> ls [path] | cat <path> | put <local> <path> | get <path> <local> | mkdir <path> | rm <path> | check",
+            "usage:\n  arctool pack <driver.manifest> <module> <out.adp>\n  arctool inspect <file.adp>\n  arctool image <out.img> --stage1 <bin> --stage2 <bin> --kernel <elf> --drivers <dir> [--efi <BOOTX64.efi>] [--size 128M] [--files <dir>]\n  arctool fs <image> ls [path] | cat <path> | put <local> <path> | get <path> <local> | mkdir <path> | rm <path> | check\n  arctool mkfs <image> [--size 64M] [--label Data]",
         )),
     };
     match result {
@@ -301,6 +302,49 @@ fn cmd_image(args: &[String]) -> Result<()> {
         boot.join(", "),
         drivers.len()
     );
+    Ok(())
+}
+
+// ----------------------------------------------------------------------------
+// mkfs
+
+/// A data disk (a USB stick, a second hard disk): an MBR with one ArcFS
+/// partition from 1 MiB to the end.
+fn cmd_mkfs(args: &[String]) -> Result<()> {
+    let out = args.first().ok_or("usage: arctool mkfs <image> [--size 64M] [--label Data]")?;
+    let mut size = 64 << 20;
+    let mut label = String::from("Data");
+    let mut i = 1;
+    while i < args.len() {
+        let value = args.get(i + 1).ok_or_else(|| format!("{}: missing value", args[i]))?;
+        match args[i].as_str() {
+            "--size" => size = parse_size(value)?,
+            "--label" => label = value.clone(),
+            other => return Err(format!("unknown option {other}")),
+        }
+        i += 2;
+    }
+    let start: u64 = 2048;
+    let sectors = size / SECTOR;
+    if sectors < start + 2048 {
+        return Err("the disk must be at least 2 MiB".into());
+    }
+    let part = sectors - start;
+    let f = OpenOptions::new().read(true).write(true).create(true).truncate(true).open(out).map_err(|e| format!("{out}: {e}"))?;
+    f.set_len(size).map_err(|e| format!("{out}: {e}"))?;
+    let mut mbr = [0u8; 512];
+    let e = &mut mbr[0x1BE..0x1CE];
+    e[4] = 0xAC;
+    e[8..12].copy_from_slice(&(start as u32).to_le_bytes());
+    e[12..16].copy_from_slice(&(part as u32).to_le_bytes());
+    mbr[510] = 0x55;
+    mbr[511] = 0xAA;
+    use std::os::unix::fs::FileExt;
+    f.write_all_at(&mbr, 0).map_err(|e| format!("{out}: {e}"))?;
+    let dev = FileBlocks { file: f, offset: start * SECTOR, blocks: part * SECTOR / BLOCK_SIZE as u64 };
+    let mut fs = Fs::format(dev, &label, &CLOCK).map_err(|e| format!("{out}: {e}"))?;
+    fs.sync().map_err(|e| format!("{out}: {e}"))?;
+    println!("{out}: {} MiB, ArcFS volume \"{label}\"", size >> 20);
     Ok(())
 }
 
