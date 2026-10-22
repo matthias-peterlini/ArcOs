@@ -1,0 +1,10 @@
+# USB 2.0 host controllers (EHCI): high-speed ports of PCs from 2002 to
+# about 2015. Low- and full-speed devices are handed to the companion UHCI
+# or OHCI controller, or reach EHCI through a hub.
+name        = ehci
+version     = 1.0.0
+class       = usb
+description = USB host controller (EHCI)
+author      = arcOS
+boot        = yes
+match       = pci-class 0c:03:20

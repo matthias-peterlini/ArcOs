@@ -1,0 +1,20 @@
+[package]
+name = "ehci"
+description = "arcOS driver: USB 2.0 host controllers (EHCI)"
+version = "1.0.0"
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "ehci"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+arcdrv.workspace = true
+arcusb.workspace = true
+
+[lints]
+workspace = true

@@ -75,6 +75,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ehci"
+version = "1.0.0"
+dependencies = [
+ "arcdrv",
+ "arcusb",
+]
+
+[[package]]
 name = "hello"
 version = "1.0.0"
 dependencies = [
