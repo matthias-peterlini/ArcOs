@@ -147,6 +147,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rtl8169"
+version = "1.0.0"
+dependencies = [
+ "arcdrv",
+]
+
+[[package]]
 name = "snake"
 version = "1.0.0"
 dependencies = [
