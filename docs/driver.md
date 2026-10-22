@@ -12,6 +12,12 @@ piattaforma (il controller PS/2 con tastiera e mouse). Ogni dispositivo
 diventa un `DeviceInfo` con id, bus, vendor/device, classe, IRQ, risorse
 (BAR) e, per quelli di piattaforma, un nome come `ps2-keyboard`.
 
+Altri dispositivi li aggiungono i driver stessi: il driver di un
+controller USB aggiunge ogni interfaccia di ogni dispositivo collegato
+(`device_add`), come figlio del controller, e la toglie quando il
+dispositivo viene scollegato (`device_remove`). Per quei dispositivi la
+scelta del driver funziona esattamente come per quelli PCI.
+
 I pacchetti stanno in due posti:
 
 | Dove | Cosa |
@@ -22,9 +28,9 @@ I pacchetti stanno in due posti:
 Per ogni dispositivo senza driver, il gestore:
 
 1. valuta le regole `match` di tutti i manifesti. Una regola più specifica
-   vale di più: un id PCI esatto o un nome di piattaforma vale 100,
-   `pci-class` classe:sottoclasse:interfaccia 60, classe:sottoclasse 40, la
-   sola classe 20;
+   vale di più: un id PCI o USB esatto o un nome di piattaforma vale 100,
+   `pci-class` o `usb-class` classe:sottoclasse:interfaccia 60,
+   classe:sottoclasse 40, la sola classe 20;
 2. a parità di punteggio sceglie la versione più recente; a parità di
    versione preferisce il magazzino al pacchetto di avvio;
 3. carica il modulo (una volta sola, anche se serve a più dispositivi) e
@@ -91,6 +97,8 @@ Le regole `match` possibili:
 |---|---|---|
 | `pci VVVV:DDDD` | `pci 1af4:1001` | un modello preciso |
 | `pci-class CC[:SS[:PP]]` | `pci-class 01:06:01` | una classe PCI (qui: SATA AHCI) |
+| `usb VVVV:PPPP` | `usb 0781:5567` | un modello USB preciso (vendor:product) |
+| `usb-class CC[:SS[:PP]]` | `usb-class 08:06:50` | una classe di interfaccia USB (qui: disco, SCSI, bulk-only) |
 | `platform <id>` | `platform ps2-mouse` | un dispositivo di piattaforma |
 
 Un manifesto senza regole è valido, ma il driver non verrà mai scelto
@@ -209,10 +217,12 @@ funzioni sicure:
 |---|---|
 | giornale | `info!`, `warn!`, `error!`, `debug!` (il prefisso col nome del driver è automatico) |
 | memoria | allocatore globale: `alloc::vec::Vec`, `Box`, `String` funzionano |
-| registri | `Mmio` (memoria del dispositivo, mappata non in cache), `port::inb/outb/...` |
-| DMA | `Dma`: memoria fisicamente contigua con il suo indirizzo fisico |
-| PCI | `Pci`: spazio di configurazione, bus master |
-| interruzioni | `irq_attach`, `irq_detach` |
+| registri | `Mmio` (memoria del dispositivo, mappata non in cache), `port::inb/outb/...`, `Regs` (la stessa interfaccia per porte e memoria, per i dispositivi che hanno entrambe) |
+| DMA | `Dma`: memoria fisicamente contigua, sotto i 4 GiB, con il suo indirizzo fisico |
+| PCI | `Pci`: spazio di configurazione, bus master, `find_capability` |
+| interruzioni | `irq_attach`, `irq_detach` per la linea classica; `irq_attach_msi` per MSI-X o MSI; `irq_attach_any` prova MSI e ripiega sulla linea |
+| attese | `Event`: un thread aspetta (con un limite di tempo) che un altro thread o un gestore di interruzione lo svegli |
+| dispositivi figli | `device_add`, `device_remove` (per i driver di bus, come quelli USB) |
 | tempo e thread | `time_ms`, `sleep_ms`, `yield_now`, `wait_until`, `spawn` |
 | sincronizzazione | `IrqLock` (spinlock con interruzioni spente), `Mutex` |
 | dischi | `block_register` con un `BlockDesc` (lettura, scrittura, flush) |
@@ -220,8 +230,99 @@ funzioni sicure:
 | rete | `net_register` con un `NetDesc`, `net_receive` per i frame in arrivo |
 
 Il driver dichiara la versione dell'ABI per cui è compilato
-(`ABI_VERSION`). Il kernel rifiuta i pacchetti di un'ABI diversa invece di
-caricarli e rischiare un errore.
+(`ABI_VERSION`, oggi 2). Il kernel rifiuta i pacchetti di un'ABI diversa
+invece di caricarli e rischiare un errore. L'ABI 2 ha aggiunto MSI, gli
+eventi e i dispositivi figli; i servizi nuovi si aggiungono in fondo alla
+tabella, quindi un driver compilato per l'ABI 2 funziona anche con un
+kernel più recente della stessa ABI.
+
+### Più dispositivi, interruzioni e polling
+
+Un driver può gestire più dispositivi uguali (due schede di rete, due
+controller USB): `probe` viene chiamata per ognuno e lo stato va tenuto per
+dispositivo, non in variabili globali. Il modo più semplice è un `Box`
+lasciato vivo con `Box::leak` e passato come `ctx` alle interruzioni e ai
+thread.
+
+Le linee di interruzione classiche sono spesso condivise: un gestore deve
+controllare prima di tutto se l'interruzione è del suo dispositivo e
+tornare subito se non lo è, ma deve sempre confermare quelle del suo
+dispositivo, anche se non gli servono. Una linea lasciata alta blocca
+anche tutti gli altri dispositivi collegati. I driver inclusi tengono
+anche un thread di polling come rete di sicurezza, perché su alcune schede
+madri le interruzioni arrivano instradate male.
+
+## Driver USB
+
+I driver USB sono di due tipi.
+
+**Driver di controller** (`xhci`, `ehci`, `uhci`, `ohci`): parlano con il
+controller e implementano il trait `arcusb::Host`. Il trait chiede le
+operazioni proprie del controller: stato, reset e indirizzo delle porte,
+trasferimenti di controllo, bulk e interrupt, e la configurazione degli
+endpoint. Il resto lo fa la libreria `arcusb`, uguale per tutti:
+
+- controlla le porte ogni 250 ms e a ogni cambiamento segnalato dal
+  controller;
+- enumera i dispositivi nuovi: indirizzo, descrittori, nomi, configurazione;
+- gestisce gli hub USB 2 e USB 3, anche uno dentro l'altro;
+- aggiunge al kernel ogni interfaccia come dispositivo `usb`, e la toglie
+  quando il dispositivo viene scollegato.
+
+EHCI gestisce i dispositivi ad alta velocità (480 Mbit/s). Quelli più lenti collegati
+direttamente a una sua porta passano ai controller compagni UHCI o OHCI;
+quelli dietro un hub USB 2 usano le transazioni split dell'hub.
+
+**Driver di classe** (`usbhid`, `usbstorage`): vengono scelti con le
+regole `usb` e `usb-class`. In `DeviceInfo::interface` ricevono un
+puntatore a `UsbInterface`, che contiene:
+
+- il descrittore di configurazione completo;
+- le funzioni per i trasferimenti: `control`, `transfer`, `poll_start`
+  (un report periodico da un endpoint interrupt), `poll_stop` e
+  `clear_halt`.
+
+Non sanno su quale controller si trovano. Le funzioni per leggere i
+descrittori sono in `arcdrv::usb`.
+
+## Driver virtio
+
+`arcvirtio` è la parte comune ai driver virtio (`virtioblk`, `virtionet`).
+Trova l'interfaccia moderna (virtio 1.0, con le capability PCI) o quella
+legacy (porte I/O), negozia le funzioni e prepara le code. Offre anche le
+interruzioni MSI-X o la linea classica. Un driver virtio nuovo deve solo
+descrivere le sue code e i suoi messaggi.
+
+## Hardware supportato
+
+"Provato" vuol dire verificato in QEMU da `make test-drivers` (e a mano
+per il collegamento a caldo). Gli altri id elencati nei manifesti sono
+chip della stessa famiglia che usano la stessa interfaccia.
+
+| Driver | Hardware | Stato |
+|---|---|---|
+| `ata` | controller IDE/PATA | provato |
+| `ahci` | controller SATA AHCI (qualunque marca, per classe PCI) | provato |
+| `nvme` | dischi NVMe (per classe PCI) | provato |
+| `virtioblk` | dischi virtio (interfaccia legacy e moderna) | provato |
+| `xhci` | controller USB 3 (per classe PCI) | provato, anche con hub e collegamento a caldo |
+| `ehci` | controller USB 2 (per classe PCI), con i compagni UHCI/OHCI | provato, anche con collegamento a caldo |
+| `uhci` | controller USB 1.1 Intel/VIA (per classe PCI) | provato, anche con hub |
+| `ohci` | controller USB 1.1 degli altri produttori (per classe PCI) | provato, anche con hub |
+| `usbhid` | tastiere, mouse e tavolette USB | provato |
+| `usbstorage` | chiavette e dischi USB (bulk-only, SCSI) | provato, anche come disco di sistema |
+| `e1000` | Intel 82540/82545/82574 | provato |
+| `e1000` | Intel 8254x, 8257x, 82583 | stessa interfaccia, non provato su hardware |
+| `e1000` | Intel 82577/82578/82579, I217, I218, I219 | non verificato su hardware |
+| `rtl8139` | Realtek RTL8139 e schede derivate | provato |
+| `pcnet` | AMD PCnet-PCI II e successive | provato |
+| `virtionet` | schede di rete virtio (legacy e moderna) | provato |
+| `rtl8169` | Realtek RTL8169, RTL8111/8168, RTL810x | non verificato su hardware (QEMU non lo emula) |
+| `ps2kbd`, `ps2mouse` | tastiera e mouse PS/2 | provati |
+
+Mancano ancora i driver per: Wi-Fi, audio, schede video (il sistema usa il
+framebuffer del firmware), Intel I225/I226 e Realtek RTL8125 (2,5 Gbit),
+lettori di schede SD.
 
 ### Il pacchetto
 

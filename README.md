@@ -37,8 +37,16 @@ Hello from user mode!
   all'avvio, dopo ogni scansione dei dispositivi e quando un pacchetto viene
   lasciato in `sys:/inbox`. I driver si possono anche aggiornare e rimuovere
   a sistema avviato. Dettagli in [docs/driver.md](docs/driver.md).
-- **Driver inclusi**: dischi IDE/ATA, AHCI (SATA), NVMe, virtio-blk; tastiera
-  e mouse PS/2; rete Intel PRO/1000 (e1000).
+- **Driver inclusi** (elenco completo in [docs/driver.md](docs/driver.md#hardware-supportato)):
+  - dischi IDE/ATA, AHCI (SATA), NVMe, virtio-blk;
+  - USB con tutti e quattro i tipi di controller (xHCI, EHCI, UHCI, OHCI),
+    hub, tastiere e mouse (HID), chiavette e dischi esterni; i dispositivi
+    si possono collegare e scollegare a sistema avviato;
+  - rete Intel PRO/1000 (e1000, 8254x/8257x), Realtek RTL8139 e
+    RTL8169/8111, AMD PCnet, virtio-net;
+  - tastiera e mouse PS/2.
+  Interruzioni MSI/MSI-X dove il dispositivo le offre, e più schede dello
+  stesso tipo insieme.
 - **ArcFS**, il file system nativo: blocchi da 4 KiB, extent, nomi
   indipendenti da maiuscole/minuscole, controllo di coerenza (`check`).
   Volumi con nome: `sys:` (il disco di sistema), `boot:` (il pacchetto di
@@ -72,6 +80,8 @@ make run-q35    # PC moderno, disco SATA (AHCI)
 make run-nvme   # disco NVMe
 make test       # avvio senza schermo con una sessione di comandi scritta
 make test-uefi  # la stessa, avviata da UEFI
+make test-drivers  # un avvio per ogni disco, scheda di rete e controller
+                # USB emulato da QEMU, controllando che il driver funzioni
 make check      # test delle librerie condivise e dello strumento host
 ```
 
@@ -85,10 +95,28 @@ USB (per esempio con `dd`, facendo molta attenzione a scegliere il
 dispositivo giusto) si avvia sia in modalità BIOS/legacy sia in UEFI. Il
 loader non è firmato, quindi Secure Boot va disattivato.
 
-Da sapere prima di provarlo: arcOS non ha ancora un driver USB. Il disco di
-sistema deve essere IDE, SATA (AHCI) o NVMe, e la tastiera deve essere PS/2
-o una USB emulata come PS/2 dal firmware (molti PC moderni non lo fanno dopo
-l'avvio UEFI). Il kernel usa un solo processore.
+Il disco di sistema può essere la chiavetta stessa: i driver USB sono nel
+pacchetto di avvio e il kernel aspetta i dischi USB prima di cercare
+`sys:`. Tastiere e mouse USB funzionano senza l'emulazione PS/2 del
+firmware.
+
+Da sapere prima di provarlo:
+
+- il kernel usa un solo processore;
+- non ci sono ancora driver per Wi-Fi, schede video (si usa il framebuffer
+  del firmware), audio, né per le schede di rete Intel I225/I226 e
+  Realtek RTL8125 (2,5 Gbit);
+- alcuni driver sono scritti dalla documentazione dei chip ma non sono
+  ancora stati provati su hardware vero perché QEMU non li emula: sono
+  segnati come tali in [docs/driver.md](docs/driver.md#hardware-supportato).
+
+Per un disco dati in più (una chiavetta da usare con arcOS):
+
+```sh
+tools/target/release/arctool mkfs chiavetta.img --size 1G --label Dati
+```
+
+crea un'immagine con una partizione ArcFS, che arcOS monta come `dati:`.
 
 ## Struttura del repository
 
@@ -101,11 +129,13 @@ l'avvio UEFI). Il kernel usa un solo processore.
 | `system/libs/arcdrv/` | libreria di supporto per scrivere driver |
 | `system/libs/arcrt/` | libreria di supporto per scrivere programmi |
 | `system/libs/arcfs/` | ArcFS, condiviso tra kernel e strumenti host |
+| `system/libs/arcusb/` | il nucleo USB comune ai driver dei controller (enumerazione, hub, collegamento a caldo) |
+| `system/libs/arcvirtio/` | interfaccia virtio (legacy e moderna) comune ai driver virtio |
 | `system/drivers/` | i driver, uno per cartella, ognuno con il suo `driver.manifest` |
 | `system/apps/` | i programmi |
 | `tools/arctool/` | strumento host: crea pacchetti e immagini, legge e scrive volumi ArcFS |
 | `rootfs/` | file copiati nel volume di sistema |
-| `scripts/` | test automatici in QEMU |
+| `scripts/` | test automatici in QEMU (`test.sh`, `test-drivers.sh`) |
 
 ## Primi passi nella shell
 

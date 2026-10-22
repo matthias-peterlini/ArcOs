@@ -20,7 +20,8 @@ sia da UEFI:
 | partizione 1 (tipo 0xAC) | il volume ArcFS "System", che diventa `sys:` |
 
 Il **pacchetto di avvio** è un piccolo volume ArcFS in sola lettura con i
-driver marcati `boot = yes` (dischi e tastiera). Il loader lo carica in
+driver marcati `boot = yes` (dischi, controller USB, tastiere e chiavette
+USB). Il loader lo carica in
 memoria e il kernel lo monta come `boot:`. Così il kernel può leggere il
 disco di sistema con un driver normale, installabile e aggiornabile,
 invece di averne uno incorporato.
@@ -110,6 +111,20 @@ rilocazioni e chiama `arc_driver_entry` con la tabella dei servizi
 driver registrano dischi, sorgenti di input e interfacce di rete; il kernel
 fa il resto: partizioni e volumi, tastiera e mappe dei tasti, IP. La scelta
 e l'installazione automatica sono descritte in [driver.md](driver.md).
+
+I bus che il kernel non conosce li gestiscono i driver. Il driver di un
+controller USB enumera i dispositivi collegati e li aggiunge al kernel come
+figli del controller (`device_add`); il kernel sceglie per ognuno un
+driver, come per un dispositivo PCI. Quando un dispositivo viene
+scollegato, il kernel toglie lui e tutto quello che sta dietro (`device_remove`):
+chiama `remove` dei driver, toglie dischi e interfacce e smonta i volumi.
+
+Se il disco di sistema è USB, il kernel aspetta che i controller USB
+abbiano enumerato i loro dispositivi prima di cercare `sys:`.
+
+Le interruzioni arrivano dalle 16 linee classiche del PIC 8259, condivise
+tra più dispositivi, o da MSI e MSI-X, che il kernel programma su un
+vettore libero per dispositivo e riceve tramite l'APIC locale.
 
 ### File system: ArcFS
 
