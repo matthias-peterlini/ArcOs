@@ -3,6 +3,13 @@
 version = 4
 
 [[package]]
+name = "ahci"
+version = "1.0.0"
+dependencies = [
+ "arcdrv",
+]
+
+[[package]]
 name = "arc-kernel"
 version = "0.1.0"
 dependencies = [
@@ -33,7 +40,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "e1000"
+version = "1.0.0"
+dependencies = [
+ "arcdrv",
+]
+
+[[package]]
+name = "nvme"
+version = "1.0.0"
+dependencies = [
+ "arcdrv",
+]
+
+[[package]]
 name = "ps2kbd"
+version = "1.0.0"
+dependencies = [
+ "arcdrv",
+]
+
+[[package]]
+name = "ps2mouse"
+version = "1.0.0"
+dependencies = [
+ "arcdrv",
+]
+
+[[package]]
+name = "virtioblk"
 version = "1.0.0"
 dependencies = [
  "arcdrv",

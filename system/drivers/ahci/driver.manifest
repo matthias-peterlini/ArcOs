@@ -1,0 +1,8 @@
+# SATA disks behind an AHCI controller: nearly every PC since 2008.
+name        = ahci
+version     = 1.0.0
+class       = storage
+description = AHCI SATA controller
+author      = arcOS
+boot        = yes
+match       = pci-class 01:06:01

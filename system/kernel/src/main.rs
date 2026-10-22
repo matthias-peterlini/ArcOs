@@ -17,6 +17,7 @@ mod dev;
 mod driver;
 mod fs;
 mod mem;
+mod net;
 mod shell;
 mod sync;
 mod task;
@@ -109,6 +110,7 @@ extern "C" fn kmain(boot_phys: u64) -> ! {
     driver::configure_all();
     driver::process_inbox();
     driver::start_monitor();
+    net::start();
 
     shell::run();
 }

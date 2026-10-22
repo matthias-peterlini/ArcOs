@@ -1,0 +1,18 @@
+# Intel PRO/1000 Ethernet: 8254x and 8257x families (and most hypervisors).
+name        = e1000
+version     = 1.0.0
+class       = network
+description = Intel PRO/1000 Ethernet
+author      = arcOS
+match       = pci 8086:100e     # 82540EM (QEMU, VirtualBox)
+match       = pci 8086:100f     # 82545EM (VMware)
+match       = pci 8086:1004     # 82543GC
+match       = pci 8086:100c     # 82544GC
+match       = pci 8086:1015     # 82540EM LOM
+match       = pci 8086:1019     # 82547EI
+match       = pci 8086:101e     # 82540EP
+match       = pci 8086:1026     # 82545GM
+match       = pci 8086:1076     # 82541GI
+match       = pci 8086:107c     # 82541PI
+match       = pci 8086:10d3     # 82574L (QEMU q35)
+match       = pci 8086:10f5     # 82567LM

@@ -61,7 +61,9 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("mem", "", "memory usage"),
     ("ps", "", "running threads"),
     ("irq", "", "interrupt lines"),
-    ("net", "", "network interfaces"),
+    ("net", "", "network interfaces and addresses"),
+    ("ping", "<host> [count]", "send ICMP echo requests"),
+    ("host", "<name>", "look up the address of a host name"),
     ("sysinfo", "", "about this machine"),
     ("date", "", "date and time"),
     ("uptime", "", "time since start"),
@@ -483,14 +485,66 @@ impl Shell {
             "net" => {
                 let list = dev::net::list();
                 if list.is_empty() {
-                    println!("no network interfaces");
+                    println!("no network interfaces (is a network driver installed? try: dev)");
                 }
                 for i in list {
                     let m = i.mac;
                     println!(
-                        "net{}  {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}  mtu {}  rx {} ({})  tx {} ({})",
+                        "{BOLD}net{}{RESET}  {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}  mtu {}  rx {} ({})  tx {} ({})",
                         i.index, m[0], m[1], m[2], m[3], m[4], m[5], i.mtu, i.rx.0, Size(i.rx.1), i.tx.0, Size(i.tx.1)
                     );
+                    match crate::net::config(i.index) {
+                        Some((c, true)) => println!("      address {} mask {} gateway {} DNS {}", c.ip, c.mask, c.gateway, c.dns),
+                        _ => println!("      {DIM}waiting for an address (DHCP){RESET}"),
+                    }
+                }
+                let arp = crate::net::arp_table();
+                if !arp.is_empty() {
+                    println!("{DIM}neighbours{RESET}");
+                    for (ip, m, age) in arp {
+                        println!("      {:<15} {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}  {age}s", ip.to_string(), m[0], m[1], m[2], m[3], m[4], m[5]);
+                    }
+                }
+            }
+            "ping" => {
+                if need(1, "<host> [count]") {
+                    let count: u16 = rest.get(1).and_then(|c| c.parse().ok()).unwrap_or(4);
+                    if !crate::net::wait_configured(5000) {
+                        println!("{ERR}the network is not configured{RESET}");
+                        return;
+                    }
+                    match crate::net::resolve(rest[0]) {
+                        Ok(ip) => {
+                            println!("ping {} ({ip})", rest[0]);
+                            let mut ok = 0;
+                            for seq in 0..count {
+                                match crate::net::ping(ip, seq, 2000) {
+                                    Ok(ms) => {
+                                        ok += 1;
+                                        println!("  reply from {ip}: seq {seq}, time {ms} ms");
+                                    }
+                                    Err(e) => println!("  {WARN}seq {seq}: {e}{RESET}"),
+                                }
+                                if seq + 1 < count {
+                                    task::sleep_ms(500);
+                                }
+                            }
+                            println!("{ok} of {count} replies");
+                        }
+                        Err(e) => println!("{ERR}{}: {e}{RESET}", rest[0]),
+                    }
+                }
+            }
+            "host" => {
+                if need(1, "<name>") {
+                    if !crate::net::wait_configured(5000) {
+                        println!("{ERR}the network is not configured{RESET}");
+                        return;
+                    }
+                    match crate::net::resolve(rest[0]) {
+                        Ok(ip) => println!("{} has address {ip}", rest[0]),
+                        Err(e) => println!("{ERR}{}: {e}{RESET}", rest[0]),
+                    }
                 }
             }
             "sysinfo" => self.sysinfo(),

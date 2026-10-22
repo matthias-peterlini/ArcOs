@@ -1,0 +1,7 @@
+# PS/2 mice and touchpads in PS/2 compatibility mode.
+name        = ps2mouse
+version     = 1.0.0
+class       = input
+description = PS/2 mouse
+author      = arcOS
+match       = platform ps2-mouse

@@ -1,0 +1,8 @@
+# NVMe solid-state drives (M.2, U.2, PCIe cards).
+name        = nvme
+version     = 1.0.0
+class       = storage
+description = NVM Express SSD
+author      = arcOS
+boot        = yes
+match       = pci-class 01:08:02

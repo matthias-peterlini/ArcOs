@@ -324,30 +324,39 @@ pub fn add(path: &Path) -> Result<String, String> {
     ))
 }
 
-/// Unloads a driver (if possible) and deletes it from the store.
+/// Unloads a driver (if possible) and deletes it from the store. A driver
+/// that cannot be unloaded keeps running until the next start.
 pub fn remove(name: &str) -> Result<String, String> {
     let mut m = MANAGER.lock();
-    let mut msg = String::new();
-    if m.loaded_index(name).is_some() {
-        m.unload(name)?;
-        msg.push_str("unloaded; ");
+    let mut notes: Vec<String> = Vec::new();
+    if let Some(i) = m.loaded_index(name) {
+        if m.loaded[i].can_unload() {
+            m.unload(name)?;
+            notes.push(String::from("unloaded"));
+        } else {
+            notes.push(String::from("it keeps running until the next start"));
+        }
     }
-    let entries: Vec<PackageEntry> =
-        m.packages.iter().filter(|p| p.origin == Origin::Store && p.manifest().name().eq_ignore_ascii_case(name)).cloned().collect();
-    if entries.is_empty() && msg.is_empty() {
-        return Err(alloc::format!("no driver named {name} in the store"));
+    let entries: Vec<PackageEntry> = m.packages.iter().filter(|p| p.manifest().name().eq_ignore_ascii_case(name)).cloned().collect();
+    if entries.is_empty() {
+        return Err(alloc::format!("no driver named {name}"));
     }
-    for p in &entries {
+    let mut removed = false;
+    for p in entries.iter().filter(|p| p.origin == Origin::Store) {
         let path = fs::abs(&p.path).map_err(|e| e.to_string())?;
         fs::remove(&path).map_err(|e| alloc::format!("{path}: {e}"))?;
+        removed = true;
     }
-    if !entries.is_empty() {
-        msg.push_str("removed from the driver store");
+    if removed {
+        notes.insert(0, String::from("removed from the driver store"));
+    }
+    if entries.iter().any(|p| p.origin == Origin::Boot) {
+        notes.push(String::from("a copy stays in the boot pack"));
     }
     m.refresh();
     // Another driver may take over the freed devices.
     m.configure();
-    Ok(msg)
+    Ok(notes.join("; "))
 }
 
 /// Unloads and reloads a driver (picks up a newer version from the store).

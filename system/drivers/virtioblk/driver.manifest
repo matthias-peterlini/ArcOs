@@ -1,0 +1,8 @@
+# Disks of virtual machines (QEMU/KVM, cloud servers): virtio-blk.
+name        = virtioblk
+version     = 1.0.0
+class       = storage
+description = virtio block device
+author      = arcOS
+boot        = yes
+match       = pci 1af4:1001
