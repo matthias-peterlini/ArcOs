@@ -1,7 +1,8 @@
 //! Intel PRO/1000 (e1000) Ethernet driver.
 //!
 //! Descriptor rings for receive and transmit, 2 KiB buffers, receive
-//! interrupts on the legacy line (with a polling thread as a fallback).
+//! interrupts by MSI or the legacy line (with a polling thread as a
+//! fallback). Every card found gets its own state.
 
 #![no_std]
 #![no_main]
@@ -9,9 +10,9 @@
 extern crate alloc;
 
 use alloc::boxed::Box;
-use arcdrv::{DeviceInfo, Dma, IrqLock, Mmio, NetDesc, Status, E_INVAL, E_IO, E_NODEV, E_NOMEM, IRQ_NONE, OK, RES_MEMORY};
+use arcdrv::{DeviceInfo, Dma, IrqLock, Mmio, NetDesc, Status, E_INVAL, E_IO, E_NODEV, E_NOMEM, OK, RES_MEMORY};
 use core::ffi::c_void;
-use core::sync::atomic::{AtomicI32, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
 arcdrv::driver! {
     name: "e1000",
@@ -22,6 +23,7 @@ arcdrv::driver! {
 const CTRL: usize = 0x0000;
 const STATUS: usize = 0x0008;
 const EERD: usize = 0x0014;
+const CTRL_EXT: usize = 0x0018;
 const ICR: usize = 0x00C0;
 const IMS: usize = 0x00D0;
 const IMC: usize = 0x00D8;
@@ -41,12 +43,14 @@ const TDT: usize = 0x3818;
 const MTA: usize = 0x5200;
 const RAL: usize = 0x5400;
 const RAH: usize = 0x5404;
+/// Interrupt vector allocation (82574 only).
+const IVAR: usize = 0x00E4;
 
 const RX_COUNT: usize = 32;
 const TX_COUNT: usize = 32;
 const BUF: usize = 2048;
 
-struct Nic {
+struct Rings {
     regs: Mmio,
     rx_ring: Dma,
     rx_bufs: Dma,
@@ -56,13 +60,15 @@ struct Nic {
     tx_next: usize,
 }
 
-static NIC: IrqLock<Option<Nic>> = IrqLock::new(None);
-static IFACE: AtomicI32 = AtomicI32::new(-1);
+struct Nic {
+    rings: IrqLock<Rings>,
+    iface: AtomicI32,
+    has_irq: AtomicBool,
+}
 
-impl Nic {
+impl Rings {
     /// Hands every completed receive descriptor to the kernel.
-    fn receive(&mut self) {
-        let iface = IFACE.load(Ordering::Relaxed);
+    fn receive(&mut self, iface: i32) {
         loop {
             let at = self.rx_next * 16;
             let status = self.rx_ring.read::<u8>(at + 12);
@@ -104,30 +110,30 @@ impl Nic {
     }
 }
 
-unsafe extern "C" fn send(_: *mut c_void, frame: *const u8, len: usize) -> Status {
-    // SAFETY: the kernel passes a valid frame.
-    let frame = unsafe { core::slice::from_raw_parts(frame, len) };
-    match NIC.lock().as_mut() {
-        Some(nic) => nic.send(frame),
-        None => E_IO,
+unsafe extern "C" fn send(ctx: *mut c_void, frame: *const u8, len: usize) -> Status {
+    // SAFETY: ctx is the leaked Nic; the kernel passes a valid frame.
+    let nic = unsafe { &*(ctx as *const Nic) };
+    nic.rings.lock().send(unsafe { core::slice::from_raw_parts(frame, len) })
+}
+
+unsafe extern "C" fn irq(ctx: *mut c_void) {
+    // SAFETY: the leaked Nic.
+    let nic = unsafe { &*(ctx as *const Nic) };
+    let mut rings = nic.rings.lock();
+    let cause = rings.regs.read32(ICR); // reading clears it
+    if cause != 0 && cause != u32::MAX {
+        // With MSI-X the 82574 does not clear on read.
+        rings.regs.write32(ICR, cause);
+        rings.receive(nic.iface.load(Ordering::Relaxed));
     }
 }
 
-unsafe extern "C" fn irq(_: *mut c_void) {
-    if let Some(nic) = NIC.lock().as_mut() {
-        let cause = nic.regs.read32(ICR); // reading clears it
-        if cause != 0 {
-            nic.receive();
-        }
-    }
-}
-
-unsafe extern "C" fn poller(_: *mut c_void) {
+unsafe extern "C" fn poller(ctx: *mut c_void) {
+    // SAFETY: the leaked Nic.
+    let nic = unsafe { &*(ctx as *const Nic) };
     loop {
-        if let Some(nic) = NIC.lock().as_mut() {
-            nic.receive();
-        }
-        arcdrv::sleep_ms(5);
+        nic.rings.lock().receive(nic.iface.load(Ordering::Relaxed));
+        arcdrv::sleep_ms(if nic.has_irq.load(Ordering::Relaxed) { 50 } else { 5 });
     }
 }
 
@@ -203,22 +209,41 @@ fn probe(dev: &DeviceInfo) -> Status {
     regs.write32(TIPG, 0x0060_200A);
 
     let link = regs.read32(STATUS) & 2 != 0;
-    *NIC.lock() = Some(Nic { regs, rx_ring, rx_bufs, rx_next: 0, tx_ring, tx_bufs, tx_next: 0 });
+    let nic: &'static Nic = Box::leak(Box::new(Nic {
+        rings: IrqLock::new(Rings { regs, rx_ring, rx_bufs, rx_next: 0, tx_ring, tx_bufs, tx_next: 0 }),
+        iface: AtomicI32::new(-1),
+        has_irq: AtomicBool::new(false),
+    }));
+    let ctx = nic as *const Nic as *mut c_void;
 
-    let desc: &'static NetDesc = Box::leak(Box::new(NetDesc { ctx: core::ptr::null_mut(), mac, _pad: [0; 2], mtu: 1500, send }));
+    let desc: &'static NetDesc = Box::leak(Box::new(NetDesc { ctx, mac, _pad: [0; 2], mtu: 1500, send }));
     let iface = arcdrv::net_register(dev.id, desc);
     if iface < 0 {
+        regs.write32(RCTL, 0);
+        regs.write32(TCTL, 0);
         return iface;
     }
-    IFACE.store(iface, Ordering::Relaxed);
+    nic.iface.store(iface, Ordering::Relaxed);
 
-    if dev.irq != IRQ_NONE && arcdrv::irq_attach(dev.id, dev.irq, irq, core::ptr::null_mut()) == OK {
-        if let Some(nic) = NIC.lock().as_ref() {
-            nic.regs.write32(IMS, (1 << 7) | (1 << 4) | (1 << 2)); // receive timer, overrun, link change
-        }
+    // Receive timer, overrun, link change.
+    let mut causes = (1 << 7) | (1 << 4) | (1 << 2);
+    if matches!(dev.device, 0x10D3 | 0x10F6) {
+        // 82574: with MSI-X every cause goes to the first vector, and
+        // reports itself as "queue 0 received" and "other".
+        regs.write32(IVAR, 0x8008_8888);
+        regs.write32(CTRL_EXT, regs.read32(CTRL_EXT) & !(1 << 27));
+        causes |= (1 << 20) | (1 << 24);
+    }
+    if arcdrv::irq_attach_any(dev, irq, ctx) {
+        nic.has_irq.store(true, Ordering::Relaxed);
+        regs.write32(IMS, causes);
     }
     // Interrupt routing can be wrong on some boards; poll as a safety net.
-    arcdrv::spawn("e1000-rx", poller, core::ptr::null_mut());
-    arcdrv::info!("link {}", if link { "up" } else { "down" });
+    arcdrv::spawn("e1000-rx", poller, ctx);
+    arcdrv::info!(
+        "link {}, {}",
+        if link { "up" } else { "down" },
+        if nic.has_irq.load(Ordering::Relaxed) { "interrupts" } else { "polling" }
+    );
     OK
 }
