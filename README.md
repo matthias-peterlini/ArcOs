@@ -5,7 +5,8 @@ Linux, da Unix, da DOS o da Windows, e non ne imita le interfacce: boot
 loader, kernel, file system, formato dei driver, chiamate di sistema e shell
 sono progettati apposta. Il codice è Rust `no_std` (più due piccoli stadi di
 avvio in assembly) e non usa librerie esterne: niente crate di terze parti,
-solo il compilatore e la libreria `core`/`alloc` di Rust.
+solo il compilatore e la libreria `core`/`alloc` di Rust. Il linguaggio
+ArcScript viene dal suo repository, portato senza `std` anche lui.
 
 ```
   arcOS 0.1.0
@@ -56,6 +57,11 @@ Hello from user mode!
   sbaglia viene fermato senza toccare il resto; Ctrl+C interrompe quello in
   primo piano. Programmi inclusi: `hello`, `info`, `calc`, `edit`, `snake`.
   Vedi [docs/programmi.md](docs/programmi.md).
+- **ArcScript**, il linguaggio applicativo di arcOS, con il suo compilatore
+  e la sua macchina virtuale: `arcc` compila ed esegue i sorgenti `.as` e i
+  pacchetti `.arc`, che la shell avvia come qualsiasi programma (`hello.as`,
+  `notes add …`). Le interfacce (`view`) per ora sono mostrate come testo.
+  Vedi [docs/arcscript.md](docs/arcscript.md).
 - **Rete**: ARP, IPv4, ICMP (ping), UDP, client DHCP e DNS.
 - **Shell** con cronologia, completamento con Tab e una quarantina di comandi
   (`help` li elenca).
@@ -82,6 +88,8 @@ make test       # avvio senza schermo con una sessione di comandi scritta
 make test-uefi  # la stessa, avviata da UEFI
 make test-drivers  # un avvio per ogni disco, scheda di rete e controller
                 # USB emulato da QEMU, controllando che il driver funzioni
+make test-arcscript  # programmi ArcScript eseguiti su arcOS, con l'uscita
+                # controllata
 scripts/build-qemu.sh  # un QEMU con i modelli di tools/qemu (RTL8169 e
                 # RTL8168), usato da make test-drivers per provarne i driver
 make check      # test delle librerie condivise e dello strumento host
@@ -134,12 +142,13 @@ crea un'immagine con una partizione ArcFS, che arcOS monta come `dati:`.
 | `system/libs/arcfs/` | ArcFS, condiviso tra kernel e strumenti host |
 | `system/libs/arcusb/` | il nucleo USB comune ai driver dei controller (enumerazione, hub, collegamento a caldo) |
 | `system/libs/arcvirtio/` | interfaccia virtio (legacy e moderna) comune ai driver virtio |
+| `system/libs/arcc-core/`, `system/libs/arc-vm/` | compilatore e macchina virtuale di ArcScript |
 | `system/drivers/` | i driver, uno per cartella, ognuno con il suo `driver.manifest` |
 | `system/apps/` | i programmi |
 | `tools/arctool/` | strumento host: crea pacchetti e immagini, legge e scrive volumi ArcFS |
 | `tools/qemu/` | modelli di dispositivi per QEMU che QEMU non ha (Realtek RTL8169/8168) |
 | `rootfs/` | file copiati nel volume di sistema |
-| `scripts/` | test automatici in QEMU (`test.sh`, `test-drivers.sh`) e `build-qemu.sh` |
+| `scripts/` | test automatici in QEMU (`test.sh`, `test-drivers.sh`, `test-arcscript.sh`) e `build-qemu.sh` |
 
 ## Primi passi nella shell
 
@@ -154,6 +163,9 @@ cat sys:/home/welcome.txt
 edit sys:/home/nota.txt
 net / ping 10.0.2.2    rete
 info / snake / calc    programmi
+cd sys:/home/arcscript
+hello.as               un programma ArcScript
+arcc help              compilare ed eseguire ArcScript
 kbd it                 tastiera italiana
 shutdown / restart
 ```

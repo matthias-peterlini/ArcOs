@@ -5,5 +5,7 @@ This volume (sys:) holds the system and your files:
   sys:/system/drivers   the driver store: every driver this computer can use
   sys:/inbox            drop a driver package (.adp) here and it installs itself
   sys:/home             your files
+  sys:/home/arcscript   programs in ArcScript, the arcOS language
 
-Try: help, dev, drv, vol, ls sys:/system/drivers
+Try: help, dev, drv, vol, ls sys:/system/drivers,
+or: cd sys:/home/arcscript, then hello.as

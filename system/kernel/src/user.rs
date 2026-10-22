@@ -62,16 +62,27 @@ fn fs_error(e: fs::Error) -> Error {
     }
 }
 
-/// Where a program name points: `edit` -> `sys:/apps/edit.app`; paths are
-/// taken as they are.
+/// Where a program name points: `edit` -> `sys:/apps/edit.app`, else
+/// `edit.arc` or `edit.as` there (ArcScript programs); paths are taken as
+/// they are.
 pub fn find_program(name: &str, cwd: &Path) -> Option<Path> {
-    if name.contains(':') || name.contains('/') || name.ends_with(".app") {
+    if name.contains(':') || name.contains('/') || name.ends_with(".app") || is_script(name) {
         let p = Path::parse(name, cwd).ok()?;
         return fs::stat(&p).ok().filter(|s| s.kind == arcfs::Kind::File).map(|_| p);
     }
-    let p = fs::abs(&alloc::format!("sys:/apps/{}.app", name.to_ascii_lowercase())).ok()?;
-    fs::exists(&p).then_some(p)
+    ["app", "arc", "as"].iter().find_map(|ext| {
+        let p = fs::abs(&alloc::format!("sys:/apps/{}.{ext}", name.to_ascii_lowercase())).ok()?;
+        fs::exists(&p).then_some(p)
+    })
 }
+
+/// ArcScript packages and sources, which `arcc` runs.
+fn is_script(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.ends_with(".arc") || lower.ends_with(".as")
+}
+
+const SCRIPT_RUNNER: &str = "sys:/apps/arcc.app";
 
 struct Start {
     image: Vec<u8>,
@@ -80,7 +91,21 @@ struct Start {
 
 /// Starts a program. Returns its process id.
 pub fn spawn(path: &Path, args: &str, cwd: Path) -> Result<u32, Error> {
+    let name = path.name();
+    if is_script(name) {
+        // `arcc run <file> <args>`, under the script's own name.
+        let runner = fs::abs(SCRIPT_RUNNER).map_err(fs_error)?;
+        let image = fs::read_file(&runner).map_err(fs_error)?;
+        let shown = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
+        let file = alloc::format!("{path}");
+        let file = if file.contains(char::is_whitespace) { alloc::format!("\"{file}\"") } else { file };
+        return start(image, String::from(shown), &alloc::format!("run {file} {args}"), cwd);
+    }
     let image = fs::read_file(path).map_err(fs_error)?;
+    start(image, String::from(name.trim_end_matches(".app")), args, cwd)
+}
+
+fn start(image: Vec<u8>, name: String, args: &str, cwd: Path) -> Result<u32, Error> {
     if image.len() < 64 || &image[..4] != b"\x7fELF" {
         return Err(Error::BadProgram);
     }
@@ -91,7 +116,6 @@ pub fn spawn(path: &Path, args: &str, cwd: Path) -> Result<u32, Error> {
         *n += 1;
         pid
     };
-    let name = String::from(path.name().trim_end_matches(".app"));
     PROCS.lock().insert(
         pid,
         Process {

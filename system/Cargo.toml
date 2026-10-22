@@ -9,6 +9,8 @@ publish = false
 authors = ["Matthias Peterlini"]
 
 [workspace.dependencies]
+arcc-core = { path = "libs/arcc-core" }
+arc-vm = { path = "libs/arc-vm" }
 arcdk = { path = "libs/arcdk" }
 arcfs = { path = "libs/arcfs" }
 arcdrv = { path = "libs/arcdrv" }

@@ -9,6 +9,7 @@
 #   make test-uefi  the same, started by UEFI firmware
 #   make test-drivers  boot once per emulated disk, network card and USB
 #                   controller and check that its driver works
+#   make test-arcscript  run ArcScript programs on arcOS and check them
 #   make check      unit tests of the shared libraries and the host tool
 
 PROFILE  ?= release
@@ -34,7 +35,7 @@ ifeq ($(PROFILE),release)
 CARGO_PROFILE := --release
 endif
 
-.PHONY: all uefi system tools root image run run-q35 run-nvme run-uefi test test-uefi test-drivers check clean $(PACKAGES)
+.PHONY: all uefi system tools root image run run-q35 run-nvme run-uefi test test-uefi test-drivers test-arcscript check clean $(PACKAGES)
 
 all: image
 
@@ -97,8 +98,11 @@ test-uefi: image
 test-drivers: image
 	scripts/test-drivers.sh $(IMAGE)
 
+test-arcscript: image
+	scripts/test-arcscript.sh $(IMAGE)
+
 check:
-	cd system && $(CARGO) test --target x86_64-unknown-linux-gnu -p arcdk -p arcfs
+	cd system && $(CARGO) test --target x86_64-unknown-linux-gnu -p arcdk -p arcfs -p arcc-core -p arc-vm
 	cd tools && $(CARGO) test --release
 
 clean:

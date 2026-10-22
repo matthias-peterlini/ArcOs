@@ -1,0 +1,21 @@
+[package]
+name = "arcc"
+description = "arcOS program: the ArcScript compiler and runtime"
+version = "0.5.0"
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "arcc"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+arcrt.workspace = true
+arcc-core.workspace = true
+arc-vm.workspace = true
+
+[lints]
+workspace = true

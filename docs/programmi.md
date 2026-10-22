@@ -23,6 +23,11 @@ ps                       programmi e thread in esecuzione
 kill <pid>
 ```
 
+I programmi si possono scrivere anche in ArcScript: la shell avvia i
+sorgenti `.as` e i pacchetti `.arc` attraverso `arcc`, e cerca anche
+questi in `sys:/apps` (`notes` è `sys:/apps/notes.as`). Vedi
+[arcscript.md](arcscript.md).
+
 ## Scriverne uno
 
 Ogni cartella in `system/apps/` è un programma. Il `Makefile` la compila e

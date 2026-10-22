@@ -18,6 +18,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "arc-vm"
+version = "0.5.0"
+dependencies = [
+ "arcc-core",
+]
+
+[[package]]
+name = "arcc"
+version = "0.5.0"
+dependencies = [
+ "arc-vm",
+ "arcc-core",
+ "arcrt",
+]
+
+[[package]]
+name = "arcc-core"
+version = "0.5.0"
+
+[[package]]
 name = "arcdk"
 version = "0.1.0"
 
