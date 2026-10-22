@@ -1,0 +1,22 @@
+[package]
+name = "arc-uefi"
+description = "arcOS boot loader for UEFI firmware"
+version = "0.1.0"
+edition = "2021"
+publish = false
+authors = ["Matthias Peterlini"]
+
+# A workspace of its own: it builds for the UEFI target, not for bare metal.
+[workspace]
+
+[[bin]]
+name = "BOOTX64"
+path = "src/main.rs"
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+codegen-units = 1

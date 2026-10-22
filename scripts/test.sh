@@ -6,6 +6,7 @@
 # format without a trailing Enter (\\023 is Ctrl+S).
 #
 # DISK selects how the image is attached: ide (default), ahci, nvme, virtio.
+# UEFI=1 starts it with UEFI firmware (OVMF_CODE, OVMF_VARS) instead of a BIOS.
 #
 # Prints the whole session; exits non-zero if the kernel stopped.
 set -eu
@@ -18,12 +19,21 @@ BOOT_WAIT=${BOOT_WAIT:-4}
 STEP_WAIT=${STEP_WAIT:-1}
 case "${DISK:-ide}" in
     ide)    DRIVE="-drive file=$IMAGE,format=raw,if=ide" ;;
-    ahci)   DRIVE="-machine q35 -drive file=$IMAGE,format=raw,if=none,id=sys -device ahci,id=ahci -device ide-hd,drive=sys,bus=ahci.0" ;;
-    nvme)   DRIVE="-machine q35 -drive file=$IMAGE,format=raw,if=none,id=sys -device nvme,drive=sys,serial=arc0001" ;;
-    virtio) DRIVE="-drive file=$IMAGE,format=raw,if=none,id=sys -device virtio-blk-pci,drive=sys" ;;
+    ahci)   DRIVE="-machine q35 -drive file=$IMAGE,format=raw,if=none,id=sys -device ahci,id=ahci -device ide-hd,drive=sys,bus=ahci.0,bootindex=0" ;;
+    nvme)   DRIVE="-machine q35 -drive file=$IMAGE,format=raw,if=none,id=sys -device nvme,drive=sys,serial=arc0001,bootindex=0" ;;
+    virtio) DRIVE="-drive file=$IMAGE,format=raw,if=none,id=sys -device virtio-blk-pci,drive=sys,bootindex=0" ;;
     *) echo "unknown DISK=$DISK" >&2; exit 2 ;;
 esac
 OUT=$(mktemp)
+VARS=
+FIRMWARE=
+if [ "${UEFI:-0}" = 1 ]; then
+    # A fresh copy of the firmware variables for every run.
+    VARS=$(mktemp)
+    cp "${OVMF_VARS:-/usr/share/OVMF/OVMF_VARS_4M.fd}" "$VARS"
+    FIRMWARE="-drive if=pflash,format=raw,readonly=on,file=${OVMF_CODE:-/usr/share/OVMF/OVMF_CODE_4M.fd} -drive if=pflash,format=raw,file=$VARS"
+    BOOT_WAIT=${BOOT_WAIT_UEFI:-10}
+fi
 {
     sleep "$BOOT_WAIT"
     while IFS= read -r line; do
@@ -37,11 +47,10 @@ OUT=$(mktemp)
     done < "$COMMANDS"
     sleep 1
 } | timeout 120 "$QEMU" -m 512M -display none -no-reboot -monitor none -serial stdio \
-    $DRIVE "$@" > "$OUT" 2>&1 || true
+    $FIRMWARE $DRIVE "$@" > "$OUT" 2>&1 || true
 # Strip colours for readability.
 sed 's/\x1b\[[0-9;]*[A-Za-z]//g; s/\r//g' "$OUT"
-if grep -q "arcOS stopped" "$OUT"; then
-    rm -f "$OUT"
-    exit 1
-fi
-rm -f "$OUT"
+STATUS=0
+grep -q "arcOS stopped" "$OUT" && STATUS=1
+rm -f "$OUT" $VARS
+exit $STATUS

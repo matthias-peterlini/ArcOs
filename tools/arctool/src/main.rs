@@ -5,13 +5,14 @@
 //! arctool pack <driver.manifest> <module> <out.adp>
 //! arctool inspect <file.adp>
 //! arctool image <out.img> --stage1 <bin> --stage2 <bin> --kernel <elf> --drivers <dir>
-//!               [--size 128M] [--files <dir>]
+//!               [--efi <BOOTX64.efi>] [--size 128M] [--files <dir>]
 //! arctool fs <image> ls [path] | cat <path> | put <local> <path> | get <path> <local>
 //!               | mkdir <path> | rm <path> | check
 //! ```
 
 mod disk;
 mod elf;
+mod fat;
 
 use arcdk::manifest::Manifest;
 use arcdk::package::{self, Package};
@@ -28,6 +29,8 @@ const KERNEL_LINK_BASE: u64 = 0xFFFF_FFFF_8010_0000;
 const SECTOR: u64 = 512;
 const STAGE2_MAX_SECTORS: u64 = 64;
 const KERNEL_LBA: u64 = 64;
+/// Size of the EFI system partition (FAT16).
+const ESP_SIZE: u64 = 16 << 20;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -37,7 +40,7 @@ fn main() -> ExitCode {
         Some("image") => cmd_image(&args[1..]),
         Some("fs") => cmd_fs(&args[1..]),
         _ => Err(String::from(
-            "usage:\n  arctool pack <driver.manifest> <module> <out.adp>\n  arctool inspect <file.adp>\n  arctool image <out.img> --stage1 <bin> --stage2 <bin> --kernel <elf> --drivers <dir> [--size 128M] [--files <dir>]\n  arctool fs <image> ls [path] | cat <path> | put <local> <path> | get <path> <local> | mkdir <path> | rm <path> | check",
+            "usage:\n  arctool pack <driver.manifest> <module> <out.adp>\n  arctool inspect <file.adp>\n  arctool image <out.img> --stage1 <bin> --stage2 <bin> --kernel <elf> --drivers <dir> [--efi <BOOTX64.efi>] [--size 128M] [--files <dir>]\n  arctool fs <image> ls [path] | cat <path> | put <local> <path> | get <path> <local> | mkdir <path> | rm <path> | check",
         )),
     };
     match result {
@@ -161,7 +164,7 @@ fn copy_tree(fs: &mut Fs<FileBlocks>, host: &Path, inner: &str) -> Result<()> {
 fn cmd_image(args: &[String]) -> Result<()> {
     let mut out = None;
     let mut size = 128u64 << 20;
-    let (mut stage1, mut stage2, mut kernel, mut drivers, mut files) = (None, None, None, None, None);
+    let (mut stage1, mut stage2, mut kernel, mut drivers, mut files, mut efi) = (None, None, None, None, None, None);
     let mut i = 0;
     while i < args.len() {
         let next = || args.get(i + 1).cloned().ok_or(format!("{} needs a value", args[i]));
@@ -172,6 +175,7 @@ fn cmd_image(args: &[String]) -> Result<()> {
             "--kernel" => kernel = Some(next()?),
             "--drivers" => drivers = Some(next()?),
             "--files" => files = Some(next()?),
+            "--efi" => efi = Some(next()?),
             a if a.starts_with("--") => return Err(format!("unknown option {a}")),
             a => {
                 out = Some(a.to_string());
@@ -187,6 +191,7 @@ fn cmd_image(args: &[String]) -> Result<()> {
     let kernel_path = kernel.ok_or("missing --kernel")?;
     let kernel_elf = read(&kernel_path)?;
     let drivers = load_drivers(Path::new(&drivers.ok_or("missing --drivers")?))?;
+    let efi = efi.map(read).transpose()?;
 
     if stage1.len() != 512 {
         return Err("stage 1 must be exactly 512 bytes".into());
@@ -205,7 +210,10 @@ fn cmd_image(args: &[String]) -> Result<()> {
     let pack = build_boot_pack(&drivers)?;
     let pack_lba = (KERNEL_LBA + kernel_sectors).next_multiple_of(8);
     let pack_sectors = (pack.len() as u64).div_ceil(SECTOR);
-    let part_lba = (pack_lba + pack_sectors).next_multiple_of(2048).max(2048);
+    // With a UEFI loader: the EFI system partition, then the system volume.
+    let esp_lba = (pack_lba + pack_sectors).next_multiple_of(2048).max(2048);
+    let esp_sectors = if efi.is_some() { ESP_SIZE / SECTOR } else { 0 };
+    let part_lba = esp_lba + esp_sectors;
     let total_sectors = size / SECTOR;
     if part_lba + 4096 > total_sectors {
         return Err(format!("the image is too small: the system needs at least {} MiB", (part_lba + 4096) * SECTOR >> 20));
@@ -217,7 +225,7 @@ fn cmd_image(args: &[String]) -> Result<()> {
     let mut f = OpenOptions::new().read(true).write(true).create(true).truncate(true).open(&out).map_err(|e| format!("{out}: {e}"))?;
     f.set_len(size).map_err(|e| format!("{out}: {e}"))?;
 
-    // MBR: boot code, boot table, one ArcFS partition.
+    // MBR: boot code, boot table, the ArcFS partition and the ESP.
     let mut mbr = stage1.clone();
     mbr[0x190..0x194].copy_from_slice(b"ARCB");
     mbr[0x194..0x196].copy_from_slice(&(stage2_sectors as u16).to_le_bytes());
@@ -230,14 +238,20 @@ fn cmd_image(args: &[String]) -> Result<()> {
     let signature: u32 = 0x4152_4300 | (std::process::id() & 0xFF);
     mbr[0x1B8..0x1BC].copy_from_slice(&signature.to_le_bytes());
     let part_sectors = total_sectors - part_lba;
-    let entry = &mut mbr[0x1BE..0x1CE];
-    entry.fill(0);
-    entry[0] = 0x80;
-    entry[1..4].copy_from_slice(&[0xFE, 0xFF, 0xFF]);
-    entry[4] = 0xAC;
-    entry[5..8].copy_from_slice(&[0xFE, 0xFF, 0xFF]);
-    entry[8..12].copy_from_slice(&(part_lba as u32).to_le_bytes());
-    entry[12..16].copy_from_slice(&(part_sectors as u32).to_le_bytes());
+    let mut partition = |slot: usize, active: bool, kind: u8, lba: u64, sectors: u64| {
+        let entry = &mut mbr[0x1BE + slot * 16..0x1CE + slot * 16];
+        entry.fill(0);
+        entry[0] = if active { 0x80 } else { 0 };
+        entry[1..4].copy_from_slice(&[0xFE, 0xFF, 0xFF]);
+        entry[4] = kind;
+        entry[5..8].copy_from_slice(&[0xFE, 0xFF, 0xFF]);
+        entry[8..12].copy_from_slice(&(lba as u32).to_le_bytes());
+        entry[12..16].copy_from_slice(&(sectors as u32).to_le_bytes());
+    };
+    partition(0, true, 0xAC, part_lba, part_sectors);
+    if esp_sectors > 0 {
+        partition(1, false, 0xEF, esp_lba, esp_sectors);
+    }
 
     let mut write_at = |lba: u64, data: &[u8]| -> Result<()> {
         f.seek(SeekFrom::Start(lba * SECTOR)).and_then(|_| f.write_all(data)).map_err(|e| format!("{out}: {e}"))
@@ -246,6 +260,17 @@ fn cmd_image(args: &[String]) -> Result<()> {
     write_at(1, &stage2)?;
     write_at(KERNEL_LBA, &flat)?;
     write_at(pack_lba, &pack)?;
+    if let Some(loader) = efi {
+        // KERNEL.BIN: magic, entry, memory size, file size, flat image.
+        let mut kernel_bin = Vec::with_capacity(32 + flat.len());
+        kernel_bin.extend_from_slice(b"ARCKERN1");
+        for v in [elf.entry, memsz, flat.len() as u64] {
+            kernel_bin.extend_from_slice(&v.to_le_bytes());
+        }
+        kernel_bin.extend_from_slice(&flat);
+        let files = vec![("EFI/BOOT/BOOTX64.EFI", loader), ("ARCOS/KERNEL.BIN", kernel_bin), ("ARCOS/BOOTPACK.IMG", pack.clone())];
+        write_at(esp_lba, &fat::build(ESP_SIZE, esp_lba, files)?)?;
+    }
 
     // The system volume.
     let file = f.try_clone().map_err(|e| e.to_string())?;
@@ -267,8 +292,9 @@ fn cmd_image(args: &[String]) -> Result<()> {
 
     let boot: Vec<&str> = drivers.iter().filter(|d| d.boot).map(|d| d.name.as_str()).collect();
     println!(
-        "{out}: {} MiB — kernel {} KiB, boot pack {} KiB ({}), {} drivers in the store",
+        "{out}: {} MiB, {} — kernel {} KiB, boot pack {} KiB ({}), {} drivers in the store",
         size >> 20,
+        if esp_sectors > 0 { "BIOS and UEFI" } else { "BIOS" },
         flat.len() >> 10,
         pack.len() >> 10,
         boot.join(", "),
