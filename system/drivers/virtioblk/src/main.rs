@@ -1,7 +1,8 @@
-//! virtio block driver (legacy PCI interface).
+//! virtio block driver.
 //!
 //! One virtqueue, one request at a time: header, data (bounce buffer) and
 //! status descriptors chained together, completion polled on the used ring.
+//! Works on the legacy and the modern virtio interface.
 
 #![no_std]
 #![no_main]
@@ -9,9 +10,9 @@
 extern crate alloc;
 
 use alloc::boxed::Box;
-use arcdrv::{port, BlockDesc, DeviceInfo, Dma, Mutex, Status, BLOCK_READONLY, E_INVAL, E_IO, E_NODEV, E_NOMEM, E_TIMEOUT, OK, RES_IO};
+use arcdrv::{BlockDesc, DeviceInfo, Dma, Mutex, Status, BLOCK_READONLY, E_INVAL, E_IO, E_NODEV, E_NOMEM, E_TIMEOUT, OK};
+use arcvirtio::{Queue, Virtio, DESC_NEXT, DESC_WRITE};
 use core::ffi::c_void;
-use core::sync::atomic::{fence, Ordering};
 
 arcdrv::driver! {
     name: "virtioblk",
@@ -19,26 +20,8 @@ arcdrv::driver! {
     probe: probe,
 }
 
-// Legacy virtio PCI registers (I/O BAR 0).
-const DEVICE_FEATURES: u16 = 0x00;
-const GUEST_FEATURES: u16 = 0x04;
-const QUEUE_PFN: u16 = 0x08;
-const QUEUE_SIZE: u16 = 0x0C;
-const QUEUE_SELECT: u16 = 0x0E;
-const QUEUE_NOTIFY: u16 = 0x10;
-const DEVICE_STATUS: u16 = 0x12;
-const CONFIG: u16 = 0x14;
-
-const STATUS_ACK: u8 = 1;
-const STATUS_DRIVER: u8 = 2;
-const STATUS_DRIVER_OK: u8 = 4;
-const STATUS_FAILED: u8 = 0x80;
-
-const FEATURE_RO: u32 = 1 << 5;
-const FEATURE_FLUSH: u32 = 1 << 9;
-
-const DESC_NEXT: u16 = 1;
-const DESC_WRITE: u16 = 2;
+const F_RO: u64 = 1 << 5;
+const F_FLUSH: u64 = 1 << 9;
 
 const T_IN: u32 = 0;
 const T_OUT: u32 = 1;
@@ -47,61 +30,46 @@ const T_FLUSH: u32 = 4;
 const MAX_SECTORS: u32 = 128;
 
 struct Device {
-    io: u16,
-    size: u16,
-    ring: Dma,
-    avail: usize,
-    used: usize,
-    last_used: u16,
+    queue: Queue,
     req: Dma,
     bounce: Dma,
     flush: bool,
 }
 
 struct Disk {
+    vio: Virtio,
     dev: Mutex<Device>,
     sectors: u64,
 }
 
 impl Device {
-    fn desc(&self, i: u16, addr: u64, len: u32, flags: u16, next: u16) {
-        let at = i as usize * 16;
-        self.ring.write::<u64>(at, addr);
-        self.ring.write::<u32>(at + 8, len);
-        self.ring.write::<u16>(at + 12, flags);
-        self.ring.write::<u16>(at + 14, next);
-    }
-
-    fn request(&mut self, kind: u32, sector: u64, bytes: usize) -> Status {
+    fn request(&mut self, vio: &Virtio, kind: u32, sector: u64, bytes: usize) -> Status {
         // Header: type, reserved, sector. Status byte after it.
         self.req.write::<u32>(0, kind);
         self.req.write::<u32>(4, 0);
         self.req.write::<u64>(8, sector);
         self.req.write::<u8>(16, 0xFF);
         let header = self.req.phys();
+        let q = &mut self.queue;
         if bytes > 0 {
-            self.desc(0, header, 16, DESC_NEXT, 1);
+            q.desc(0, header, 16, DESC_NEXT, 1);
             let data_flags = DESC_NEXT | if kind == T_IN { DESC_WRITE } else { 0 };
-            self.desc(1, self.bounce.phys(), bytes as u32, data_flags, 2);
-            self.desc(2, header + 16, 1, DESC_WRITE, 0);
+            q.desc(1, self.bounce.phys(), bytes as u32, data_flags, 2);
         } else {
-            self.desc(0, header, 16, DESC_NEXT, 2);
-            self.desc(2, header + 16, 1, DESC_WRITE, 0);
+            q.desc(0, header, 16, DESC_NEXT, 2);
         }
-        // Publish descriptor 0 in the available ring.
-        let idx = self.ring.read::<u16>(self.avail + 2);
-        self.ring.write::<u16>(self.avail + 4 + (idx % self.size) as usize * 2, 0);
-        fence(Ordering::SeqCst);
-        self.ring.write::<u16>(self.avail + 2, idx.wrapping_add(1));
-        fence(Ordering::SeqCst);
-        port::outw(self.io + QUEUE_NOTIFY, 0);
-        let target = self.last_used.wrapping_add(1);
-        if !arcdrv::wait_until(5000, || self.ring.read::<u16>(self.used + 2) == target) {
+        q.desc(2, header + 16, 1, DESC_WRITE, 0);
+        q.publish(0);
+        vio.notify(&self.queue);
+        let mut done = false;
+        if !arcdrv::wait_until(5000, || {
+            done = self.queue.take_used().is_some();
+            done
+        }) {
             return E_TIMEOUT;
         }
-        self.last_used = target;
         // Reading the ISR register acknowledges the interrupt line.
-        port::inb(self.io + 0x13);
+        vio.isr();
         if self.req.read::<u8>(16) == 0 {
             OK
         } else {
@@ -125,7 +93,7 @@ impl Disk {
             if write {
                 d.bounce.as_mut_slice()[..bytes].copy_from_slice(chunk);
             }
-            let st = d.request(if write { T_OUT } else { T_IN }, lba + done as u64, bytes);
+            let st = d.request(&self.vio, if write { T_OUT } else { T_IN }, lba + done as u64, bytes);
             if st != OK {
                 return st;
             }
@@ -135,6 +103,17 @@ impl Disk {
             done += n;
         }
         OK
+    }
+}
+
+/// Completions are polled; the handler only acknowledges a line that the
+/// device raised anyway, which would otherwise stay asserted for every other
+/// device sharing it.
+unsafe extern "C" fn irq(ctx: *mut c_void) {
+    // SAFETY: ctx is the leaked Disk.
+    let disk = unsafe { &*(ctx as *const Disk) };
+    if !disk.vio.uses_msix() {
+        disk.vio.isr();
     }
 }
 
@@ -155,48 +134,36 @@ unsafe extern "C" fn flush(ctx: *mut c_void) -> Status {
     if !d.flush {
         return OK;
     }
-    d.request(T_FLUSH, 0, 0)
+    d.request(&disk.vio, T_FLUSH, 0, 0)
 }
 
 fn probe(dev: &DeviceInfo) -> Status {
-    if dev.vendor != 0x1AF4 || dev.device != 0x1001 {
+    if dev.vendor != 0x1AF4 || !(dev.device == 0x1001 || dev.device == 0x1042) {
         return E_NODEV;
     }
-    let Some(io) = (dev.resources[0].kind == RES_IO).then_some(dev.resources[0].base as u16) else {
-        arcdrv::warn!("no legacy I/O window: modern-only virtio is not supported yet");
+    let Some(vio) = Virtio::open(dev) else {
+        arcdrv::warn!("no usable virtio registers");
         return E_IO;
     };
-    arcdrv::Pci(dev.id).enable(true, false, true);
-    port::outb(io + DEVICE_STATUS, 0);
-    port::outb(io + DEVICE_STATUS, STATUS_ACK | STATUS_DRIVER);
-    let features = port::inl(io + DEVICE_FEATURES);
-    let accepted = features & (FEATURE_RO | FEATURE_FLUSH);
-    port::outl(io + GUEST_FEATURES, accepted);
-
-    port::outw(io + QUEUE_SELECT, 0);
-    let size = port::inw(io + QUEUE_SIZE);
-    if size == 0 || size > 1024 {
-        port::outb(io + DEVICE_STATUS, STATUS_FAILED);
+    let Some(accepted) = vio.negotiate(F_RO | F_FLUSH) else { return E_IO };
+    let Some(queue) = vio.queue(0, 16) else {
+        vio.set_status(arcvirtio::STATUS_FAILED);
         return E_IO;
-    }
-    // Legacy layout: descriptors, available ring, then the used ring on the
-    // next 4 KiB boundary.
-    let avail = size as usize * 16;
-    let used = (avail + 6 + 2 * size as usize).next_multiple_of(4096);
-    let total = used + 6 + 8 * size as usize;
-    let (Some(ring), Some(req), Some(bounce)) = (Dma::new(total), Dma::new(64), Dma::new(MAX_SECTORS as usize * 512)) else {
+    };
+    let (Some(req), Some(bounce)) = (Dma::new(64), Dma::new(MAX_SECTORS as usize * 512)) else {
         return E_NOMEM;
     };
-    port::outl(io + QUEUE_PFN, (ring.phys() >> 12) as u32);
-    port::outb(io + DEVICE_STATUS, STATUS_ACK | STATUS_DRIVER | STATUS_DRIVER_OK);
+    queue.quiet();
 
-    let sectors = port::inl(io + CONFIG) as u64 | (port::inl(io + CONFIG + 4) as u64) << 32;
-    let device = Device { io, size, ring, avail, used, last_used: 0, req, bounce, flush: accepted & FEATURE_FLUSH != 0 };
-    let disk: &'static Disk = Box::leak(Box::new(Disk { dev: Mutex::new(device), sectors }));
+    let sectors = vio.config32(0) as u64 | (vio.config32(4) as u64) << 32;
+    let device = Device { queue, req, bounce, flush: accepted & F_FLUSH != 0 };
+    let disk: &'static Disk = Box::leak(Box::new(Disk { vio, dev: Mutex::new(device), sectors }));
+    disk.vio.attach_irq(dev, irq, disk as *const Disk as *mut c_void);
+    disk.vio.ready();
     let desc: &'static BlockDesc = Box::leak(Box::new(BlockDesc {
         ctx: disk as *const Disk as *mut c_void,
         sector_size: 512,
-        flags: if accepted & FEATURE_RO != 0 { BLOCK_READONLY } else { 0 },
+        flags: if accepted & F_RO != 0 { BLOCK_READONLY } else { 0 },
         sector_count: sectors,
         read,
         write,

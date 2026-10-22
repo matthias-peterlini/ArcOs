@@ -1,0 +1,9 @@
+# Network cards of virtual machines (QEMU/KVM, cloud servers): virtio-net,
+# legacy and modern interface.
+name        = virtionet
+version     = 1.0.0
+class       = network
+description = virtio network card
+author      = arcOS
+match       = pci 1af4:1000     # transitional (legacy + modern)
+match       = pci 1af4:1041     # modern only

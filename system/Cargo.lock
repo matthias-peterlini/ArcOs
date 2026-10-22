@@ -47,6 +47,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "arcvirtio"
+version = "0.1.0"
+dependencies = [
+ "arcdrv",
+]
+
+[[package]]
 name = "ata"
 version = "1.0.0"
 dependencies = [
@@ -159,6 +166,15 @@ name = "virtioblk"
 version = "1.0.0"
 dependencies = [
  "arcdrv",
+ "arcvirtio",
+]
+
+[[package]]
+name = "virtionet"
+version = "1.0.0"
+dependencies = [
+ "arcdrv",
+ "arcvirtio",
 ]
 
 [[package]]

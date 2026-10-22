@@ -19,7 +19,10 @@ use alloc::collections::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use arcdrv::usb::*;
-use arcdrv::{DeviceInfo, Dma, Event, IrqLock, Mmio, Mutex, Pci, Status, E_BUSY, E_GONE, E_INVAL, E_IO, E_NODEV, E_NOMEM, E_STALL, E_TIMEOUT, OK, RES_MEMORY};
+use arcdrv::{
+    DeviceInfo, Dma, Event, IrqLock, Mmio, Mutex, Pci, Status, E_BUSY, E_GONE, E_INVAL, E_IO, E_NODEV, E_NOMEM, E_STALL, E_TIMEOUT, OK,
+    RES_MEMORY,
+};
 use arcusb::{Attach, Bus, Handle, Host, HubInfo, PortStatus};
 use core::ffi::c_void;
 use core::sync::atomic::{fence, AtomicBool, Ordering};
@@ -150,7 +153,6 @@ impl Ring {
     fn next(&self) -> u64 {
         self.mem.phys() + (self.enq * 16) as u64 | self.cycle as u64
     }
-
 }
 
 /// A completion the event thread handed to an endpoint: (TRB, code,
@@ -515,7 +517,12 @@ impl Xhci {
             ]));
             if len > 0 {
                 let p = ep.buf.phys();
-                trbs.push(ring.push([p as u32, (p >> 32) as u32, len as u32, TRB_DATA << 10 | TRB_ISP | if input { TRB_DIR_IN } else { 0 }]));
+                trbs.push(ring.push([
+                    p as u32,
+                    (p >> 32) as u32,
+                    len as u32,
+                    TRB_DATA << 10 | TRB_ISP | if input { TRB_DIR_IN } else { 0 },
+                ]));
             }
             let status_in = len == 0 || !input;
             trbs.push(ring.push([0, 0, 0, TRB_STATUS << 10 | TRB_IOC | if status_in { TRB_DIR_IN } else { 0 }]));
@@ -793,7 +800,17 @@ impl Host for Xhci {
             } else {
                 (0, 3072, 0)
             };
-            self.write_ep_ctx(&input, dci, xkind, mps, interval, if slot.speed == SPEED_HIGH { mult as u8 } else { burst }, ring, avg, esit);
+            self.write_ep_ctx(
+                &input,
+                dci,
+                xkind,
+                mps,
+                interval,
+                if slot.speed == SPEED_HIGH { mult as u8 } else { burst },
+                ring,
+                avg,
+                esit,
+            );
             add |= 1 << dci;
             max_dci = max_dci.max(dci);
             new_eps.push(ep);

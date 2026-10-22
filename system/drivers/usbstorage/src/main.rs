@@ -359,14 +359,8 @@ fn probe(dev: &DeviceInfo) -> Status {
     let config = unsafe { iface.config() };
     let bulk = |input: bool| endpoints(config, iface.number, 0).find(|e| e.kind() == EP_BULK && e.is_in() == input).map(|e| e.address);
     let (Some(bulk_in), Some(bulk_out)) = (bulk(true), bulk(false)) else { return E_NODEV };
-    let m: &'static Msd = Box::leak(Box::new(Msd {
-        iface,
-        bulk_in,
-        bulk_out,
-        lock: Mutex::new(0),
-        gone: AtomicBool::new(false),
-        busy: AtomicU32::new(0),
-    }));
+    let m: &'static Msd =
+        Box::leak(Box::new(Msd { iface, bulk_in, bulk_out, lock: Mutex::new(0), gone: AtomicBool::new(false), busy: AtomicU32::new(0) }));
     // Devices with one unit may stall this request.
     let mut max = [0u8; 1];
     let setup = Setup::new(DIR_IN | TYPE_CLASS | RECIP_INTERFACE, REQ_GET_MAX_LUN, 0, iface.number as u16, 1);

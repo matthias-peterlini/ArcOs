@@ -21,7 +21,9 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use arcdrv::port::{inw, outb, outl, outw};
 use arcdrv::usb::*;
-use arcdrv::{DeviceInfo, Dma, Event, IrqLock, Mutex, Pci, Status, E_BUSY, E_GONE, E_INVAL, E_IO, E_NODEV, E_NOMEM, E_STALL, E_TIMEOUT, OK};
+use arcdrv::{
+    DeviceInfo, Dma, Event, IrqLock, Mutex, Pci, Status, E_BUSY, E_GONE, E_INVAL, E_IO, E_NODEV, E_NOMEM, E_STALL, E_TIMEOUT, OK,
+};
 use arcusb::{Attach, Handle, Host, HubInfo, PortStatus, Table};
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU8, Ordering};
@@ -405,7 +407,13 @@ impl Uhci {
                 let last = k == packets - 1;
                 let link = if last { LINK_T } else { pipe.td_phys(k + 1) | LINK_DEPTH };
                 let ioc = if last { TD_IOC } else { 0 };
-                pipe.set_td(k, link, base | ioc, token(pid, addr, endpoint, toggle ^ (k % 2 == 1), len), pipe.buf_phys() + (k * mps) as u32);
+                pipe.set_td(
+                    k,
+                    link,
+                    base | ioc,
+                    token(pid, addr, endpoint, toggle ^ (k % 2 == 1), len),
+                    pipe.buf_phys() + (k * mps) as u32,
+                );
             }
             pipe.start(pipe.td_phys(0));
             let deadline = arcdrv::time_ms() + timeout_ms as u64;
@@ -438,7 +446,13 @@ impl Uhci {
         let mps = pipe.mps.load(Ordering::Relaxed) as usize;
         let ls = if low_speed { TD_LS } else { 0 };
         let toggle = pipe.toggle.load(Ordering::Relaxed);
-        pipe.set_td(0, LINK_T, TD_ACTIVE | TD_CERR | TD_IOC | TD_SPD | ls, token(PID_IN, addr, pipe.endpoint, toggle, mps), pipe.buf_phys());
+        pipe.set_td(
+            0,
+            LINK_T,
+            TD_ACTIVE | TD_CERR | TD_IOC | TD_SPD | ls,
+            token(PID_IN, addr, pipe.endpoint, toggle, mps),
+            pipe.buf_phys(),
+        );
         pipe.start(pipe.td_phys(0));
     }
 
@@ -536,7 +550,8 @@ impl Host for Uhci {
     fn add_device(&self, at: &Attach, mps0: u16) -> Result<Handle, Status> {
         let pipe = Pipe::new(EP_CONTROL, 0, mps0, CONTROL_TDS, CONTROL_BUF).ok_or(E_NOMEM)?;
         let h = self.next_handle.fetch_add(1, Ordering::Relaxed);
-        let dev = Arc::new(Dev { address: AtomicU8::new(0), low_speed: at.speed == SPEED_LOW, pipes: IrqLock::new(alloc::vec![pipe.clone()]) });
+        let dev =
+            Arc::new(Dev { address: AtomicU8::new(0), low_speed: at.speed == SPEED_LOW, pipes: IrqLock::new(alloc::vec![pipe.clone()]) });
         self.devices.insert(h, dev);
         self.schedule_add(&pipe);
         Ok(h)

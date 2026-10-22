@@ -19,7 +19,10 @@ use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use arcdrv::usb::*;
-use arcdrv::{DeviceInfo, Dma, Event, IrqLock, Mmio, Mutex, Pci, Status, E_BUSY, E_GONE, E_INVAL, E_IO, E_NODEV, E_NOMEM, E_STALL, E_TIMEOUT, OK, RES_MEMORY};
+use arcdrv::{
+    DeviceInfo, Dma, Event, IrqLock, Mmio, Mutex, Pci, Status, E_BUSY, E_GONE, E_INVAL, E_IO, E_NODEV, E_NOMEM, E_STALL, E_TIMEOUT, OK,
+    RES_MEMORY,
+};
 use arcusb::{Attach, Handle, Host, HubInfo, PortStatus, Table};
 use core::ffi::c_void;
 use core::sync::atomic::{fence, AtomicBool, AtomicU16, AtomicU32, AtomicU8, Ordering};

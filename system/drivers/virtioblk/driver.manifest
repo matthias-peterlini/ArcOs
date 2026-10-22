@@ -1,8 +1,10 @@
-# Disks of virtual machines (QEMU/KVM, cloud servers): virtio-blk.
+# Disks of virtual machines (QEMU/KVM, cloud servers): virtio-blk, legacy
+# and modern interface.
 name        = virtioblk
 version     = 1.0.0
 class       = storage
 description = virtio block device
 author      = arcOS
 boot        = yes
-match       = pci 1af4:1001
+match       = pci 1af4:1001     # transitional (legacy + modern)
+match       = pci 1af4:1042     # modern only

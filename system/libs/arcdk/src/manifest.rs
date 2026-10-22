@@ -276,7 +276,8 @@ mod tests {
 
     #[test]
     fn usb_rules() {
-        let m = Manifest::parse("name = usbhid\nversion = 1\nmatch = usb-class 03\nmatch = usb-class 03:01:01\nmatch = usb 046d:c077").unwrap();
+        let m =
+            Manifest::parse("name = usbhid\nversion = 1\nmatch = usb-class 03\nmatch = usb-class 03:01:01\nmatch = usb 046d:c077").unwrap();
         let mut dev = DeviceInfo::empty();
         dev.bus = BUS_USB;
         dev.class = 3;

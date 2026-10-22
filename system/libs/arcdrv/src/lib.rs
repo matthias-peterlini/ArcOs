@@ -474,6 +474,27 @@ impl Pci {
         unsafe { (api().pci_write)(self.0, off, 4, v) }
     }
 
+    /// The next capability with this id in the device's list, after the one
+    /// at `after` (0: from the start).
+    pub fn find_capability(&self, id: u8, after: u16) -> Option<u16> {
+        if self.read16(0x06) & (1 << 4) == 0 {
+            return None;
+        }
+        let mut passed = after == 0;
+        let mut at = (self.read8(0x34) & 0xFC) as u16;
+        for _ in 0..48 {
+            if at < 0x40 {
+                return None;
+            }
+            if passed && self.read8(at) == id {
+                return Some(at);
+            }
+            passed |= at == after;
+            at = (self.read8(at + 1) & 0xFC) as u16;
+        }
+        None
+    }
+
     /// Enables memory/I-O decoding and bus mastering (needed for DMA).
     pub fn enable(&self, io: bool, memory: bool, bus_master: bool) {
         let mut cmd = self.read16(0x04);

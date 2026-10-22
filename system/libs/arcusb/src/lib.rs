@@ -325,7 +325,14 @@ impl<H: Host> Bus<H> {
         let Some((status, change)) = self.hub_port_status(hub, port) else { return };
         // Acknowledge every change bit.
         let clears: &[(u16, u16)] = if ss {
-            &[(1, C_PORT_CONNECTION), (8, C_PORT_OVER_CURRENT), (16, C_PORT_RESET), (32, C_BH_PORT_RESET), (64, C_PORT_LINK_STATE), (128, C_PORT_CONFIG_ERROR)]
+            &[
+                (1, C_PORT_CONNECTION),
+                (8, C_PORT_OVER_CURRENT),
+                (16, C_PORT_RESET),
+                (32, C_BH_PORT_RESET),
+                (64, C_PORT_LINK_STATE),
+                (128, C_PORT_CONFIG_ERROR),
+            ]
         } else {
             &[(1, C_PORT_CONNECTION), (2, C_PORT_ENABLE), (8, C_PORT_OVER_CURRENT), (16, C_PORT_RESET)]
         };
@@ -587,7 +594,16 @@ impl<H: Host> Bus<H> {
         let label = if name.is_empty() { format!("{:04x}:{:04x}", desc.vendor, desc.product) } else { name.clone() };
         arcdrv::info!("{location}: {label} ({}, {})", speed_name(at.speed), if is_hub { "hub" } else { "device" });
 
-        let mut device = Device { handle: h, path: String::from(path), speed: at.speed, parent, attach: *at, hub: None, kernel_ids: Vec::new(), contexts: Vec::new() };
+        let mut device = Device {
+            handle: h,
+            path: String::from(path),
+            speed: at.speed,
+            parent,
+            attach: *at,
+            hub: None,
+            kernel_ids: Vec::new(),
+            contexts: Vec::new(),
+        };
         // The configuration stays alive for as long as the interfaces do.
         let config: &'static [u8] = Box::leak(config.into_boxed_slice());
 
@@ -597,7 +613,8 @@ impl<H: Host> Bus<H> {
             let label = if name.is_empty() { String::from(if ss { "USB 3 hub" } else { "USB hub" }) } else { name.clone() };
             let id = arcdrv::device_add(parent_kernel, &di, &label, DEVICE_OWNED);
             self.power_hub(h, &info, ss, at.depth, power_good);
-            device.hub = Some(Hub { ports: info.ports, superspeed: ss, children: vec![None; info.ports as usize], kernel_id: id.max(0) as u32 });
+            device.hub =
+                Some(Hub { ports: info.ports, superspeed: ss, children: vec![None; info.ports as usize], kernel_id: id.max(0) as u32 });
             self.state.lock().devices.push(device);
             return Ok(());
         }
