@@ -371,6 +371,80 @@ impl Mmio {
     }
 }
 
+/// Registers reachable either through I/O ports or through memory, for
+/// devices that offer both (many network cards).
+#[derive(Clone, Copy)]
+pub enum Regs {
+    Port(u16),
+    Mem(Mmio),
+}
+
+impl Regs {
+    /// The first usable window of `dev`: memory if `prefer_memory`, else
+    /// I/O ports, falling back to the other kind. `size` is the length
+    /// mapped for a memory window.
+    pub fn find(dev: &DeviceInfo, prefer_memory: bool, size: usize) -> Option<Regs> {
+        let pick = |memory: bool| {
+            dev.resources.iter().find_map(|r| match r.kind {
+                RES_MEMORY if memory && r.base != 0 => Mmio::map(r.base, size).map(Regs::Mem),
+                RES_IO if !memory && r.base != 0 && r.base <= 0xFFFF => Some(Regs::Port(r.base as u16)),
+                _ => None,
+            })
+        };
+        let regs = pick(prefer_memory).or_else(|| pick(!prefer_memory))?;
+        Pci(dev.id).enable(matches!(regs, Regs::Port(_)), matches!(regs, Regs::Mem(_)), true);
+        Some(regs)
+    }
+
+    #[inline]
+    pub fn read8(&self, off: u16) -> u8 {
+        match self {
+            Regs::Port(p) => port::inb(p + off),
+            Regs::Mem(m) => m.read8(off as usize),
+        }
+    }
+
+    #[inline]
+    pub fn read16(&self, off: u16) -> u16 {
+        match self {
+            Regs::Port(p) => port::inw(p + off),
+            Regs::Mem(m) => m.read16(off as usize),
+        }
+    }
+
+    #[inline]
+    pub fn read32(&self, off: u16) -> u32 {
+        match self {
+            Regs::Port(p) => port::inl(p + off),
+            Regs::Mem(m) => m.read32(off as usize),
+        }
+    }
+
+    #[inline]
+    pub fn write8(&self, off: u16, v: u8) {
+        match self {
+            Regs::Port(p) => port::outb(p + off, v),
+            Regs::Mem(m) => m.write8(off as usize, v),
+        }
+    }
+
+    #[inline]
+    pub fn write16(&self, off: u16, v: u16) {
+        match self {
+            Regs::Port(p) => port::outw(p + off, v),
+            Regs::Mem(m) => m.write16(off as usize, v),
+        }
+    }
+
+    #[inline]
+    pub fn write32(&self, off: u16, v: u32) {
+        match self {
+            Regs::Port(p) => port::outl(p + off, v),
+            Regs::Mem(m) => m.write32(off as usize, v),
+        }
+    }
+}
+
 /// A physically contiguous, zeroed buffer a device can read and write.
 pub struct Dma {
     virt: *mut u8,

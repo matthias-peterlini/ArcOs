@@ -1,0 +1,20 @@
+# Realtek RTL8139 Fast Ethernet and the many cards built on it.
+name        = rtl8139
+version     = 1.0.0
+class       = network
+description = Realtek RTL8139 Fast Ethernet
+author      = arcOS
+match       = pci 10ec:8139     # RTL8139 (QEMU, most cards)
+match       = pci 10ec:8138     # RTL8139 CardBus
+match       = pci 1113:1211     # Accton SMC1211TX EZCard 10/100
+match       = pci 1186:1300     # D-Link DFE-538TX / DFE-530TX+
+match       = pci 1186:1340     # D-Link DFE-690TXD
+match       = pci 13d1:ab06     # Abocom FE2000VX
+match       = pci 1259:a117     # Allied Telesyn 8139
+match       = pci 14ea:ab06     # Planex FNW-3603-TX
+match       = pci 14ea:ab07     # Planex FNW-3800-TX
+match       = pci 4033:1360     # Addtron AEF-360TX
+match       = pci 1743:8139     # Peppercon ROL/F-100
+match       = pci 021b:8139     # Compaq HNE-300
+match       = pci 018a:0106     # LevelOne FPC-0106TX
+match       = pci 126c:1211     # Northern Telecom 10/100

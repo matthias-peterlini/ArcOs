@@ -119,6 +119,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pcnet"
+version = "1.0.0"
+dependencies = [
+ "arcdrv",
+]
+
+[[package]]
 name = "ps2kbd"
 version = "1.0.0"
 dependencies = [
@@ -127,6 +134,13 @@ dependencies = [
 
 [[package]]
 name = "ps2mouse"
+version = "1.0.0"
+dependencies = [
+ "arcdrv",
+]
+
+[[package]]
+name = "rtl8139"
 version = "1.0.0"
 dependencies = [
  "arcdrv",
