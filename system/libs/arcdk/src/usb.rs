@@ -266,7 +266,7 @@ pub fn decode_string(desc: &[u8], out: &mut [u8]) -> usize {
         return 0;
     }
     let len = (desc[0] as usize).min(desc.len());
-    let units = desc[2..len].chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]]));
+    let units = desc[2..len].as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c));
     let mut n = 0;
     for c in char::decode_utf16(units) {
         let c = c.unwrap_or('?');

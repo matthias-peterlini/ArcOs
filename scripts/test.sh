@@ -5,7 +5,8 @@
 # Lines starting with @sleep N pause; @raw TEXT sends TEXT as a printf
 # format without a trailing Enter (\\023 is Ctrl+S).
 #
-# DISK selects how the image is attached: ide (default), ahci, nvme, virtio.
+# DISK selects how the image is attached: ide (default), ahci, nvme, virtio
+# (virtio-modern and virtio-legacy force one of its two interfaces).
 # UEFI=1 starts it with UEFI firmware (OVMF_CODE, OVMF_VARS) instead of a BIOS.
 #
 # The image is not changed: the session runs on a copy.
@@ -27,6 +28,8 @@ case "${DISK:-ide}" in
     ahci)   DRIVE="-machine q35 -drive file=$IMAGE,format=raw,if=none,id=sys -device ahci,id=ahci -device ide-hd,drive=sys,bus=ahci.0,bootindex=0" ;;
     nvme)   DRIVE="-machine q35 -drive file=$IMAGE,format=raw,if=none,id=sys -device nvme,drive=sys,serial=arc0001,bootindex=0" ;;
     virtio) DRIVE="-drive file=$IMAGE,format=raw,if=none,id=sys -device virtio-blk-pci,drive=sys,bootindex=0" ;;
+    virtio-modern) DRIVE="-drive file=$IMAGE,format=raw,if=none,id=sys -device virtio-blk-pci,drive=sys,bootindex=0,disable-legacy=on" ;;
+    virtio-legacy) DRIVE="-drive file=$IMAGE,format=raw,if=none,id=sys -device virtio-blk-pci,drive=sys,bootindex=0,disable-modern=on" ;;
     *) echo "unknown DISK=$DISK" >&2; exit 2 ;;
 esac
 OUT=$(mktemp)

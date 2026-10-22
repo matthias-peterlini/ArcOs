@@ -7,6 +7,8 @@
 #   make run-uefi   start it in QEMU with UEFI firmware (OVMF) instead of a BIOS
 #   make test       boot headless and run a scripted session
 #   make test-uefi  the same, started by UEFI firmware
+#   make test-drivers  boot once per emulated disk, network card and USB
+#                   controller and check that its driver works
 #   make check      unit tests of the shared libraries and the host tool
 
 PROFILE  ?= release
@@ -32,7 +34,7 @@ ifeq ($(PROFILE),release)
 CARGO_PROFILE := --release
 endif
 
-.PHONY: all uefi system tools root image run run-q35 run-nvme run-uefi test test-uefi check clean $(PACKAGES)
+.PHONY: all uefi system tools root image run run-q35 run-nvme run-uefi test test-uefi test-drivers check clean $(PACKAGES)
 
 all: image
 
@@ -91,6 +93,9 @@ test: image
 
 test-uefi: image
 	UEFI=1 OVMF_CODE=$(OVMF_CODE) OVMF_VARS=$(OVMF_VARS) scripts/test.sh $(IMAGE)
+
+test-drivers: image
+	scripts/test-drivers.sh $(IMAGE)
 
 check:
 	cd system && $(CARGO) test --target x86_64-unknown-linux-gnu -p arcdk -p arcfs

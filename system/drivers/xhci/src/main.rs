@@ -151,7 +151,7 @@ impl Ring {
 
     /// The dequeue pointer for Set TR Dequeue: the next free TRB.
     fn next(&self) -> u64 {
-        self.mem.phys() + (self.enq * 16) as u64 | self.cycle as u64
+        (self.mem.phys() + (self.enq * 16) as u64) | self.cycle as u64
     }
 }
 
@@ -617,6 +617,8 @@ impl Xhci {
         self.ctx_offset(1 + dci as usize)
     }
 
+    // One argument per field of the endpoint context.
+    #[allow(clippy::too_many_arguments)]
     fn write_ep_ctx(&self, input: &Dma, dci: u8, kind: u32, mps: u16, interval: u8, burst: u8, ring: u64, avg: u16, esit: u32) {
         let at = self.input_ep(dci);
         let cerr = if kind == 1 || kind == 5 { 0 } else { 3 };
@@ -781,7 +783,7 @@ impl Host for Xhci {
                 continue; // isochronous streams are not supported
             }
             let dci = e.number() * 2 + e.is_in() as u8;
-            if dci < 2 || dci > 31 || add & (1 << dci) != 0 {
+            if !(2..=31).contains(&dci) || add & (1 << dci) != 0 {
                 continue;
             }
             let xkind = match (kind, e.is_in()) {

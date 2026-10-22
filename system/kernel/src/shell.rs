@@ -784,21 +784,25 @@ impl Shell {
                 (Some(drv), _, _) => println!("  driver    {OK}{drv}{RESET}"),
                 (None, Some(b), _) => println!("  driver    {b}"),
                 (None, None, Some(p)) => println!("  driver    {WARN}none: {p}{RESET}"),
+                _ if d.owned => println!("  driver    {}, through the device it is plugged into", owner_driver(&d)),
                 _ => println!("  driver    {DIM}not needed{RESET}"),
             }
             return;
         }
-        println!("{DIM}   id  location          device                                driver{RESET}");
-        for d in dev::list() {
+        let list = dev::list();
+        let width = list.iter().map(|d| d.location().chars().count()).max().unwrap_or(0).max(8);
+        let names = list.iter().map(|d| d.description().chars().count()).max().unwrap_or(0).clamp(6, 44);
+        println!("{DIM}   id  {:<width$}  {:<names$}  driver{RESET}", "location", "device");
+        for d in list {
             let driver = match (&d.driver, d.builtin, &d.problem) {
                 (Some(drv), _, _) => alloc::format!("{OK}{drv}{RESET}"),
                 (None, Some(b), _) => alloc::format!("{DIM}{b}{RESET}"),
                 (None, None, Some(p)) => alloc::format!("{WARN}{p}{RESET}"),
+                _ if d.owned => alloc::format!("{OK}{}{RESET}", owner_driver(&d)),
                 _ => alloc::format!("{DIM}—{RESET}"),
             };
-            let mut desc = d.description();
-            desc.truncate(36);
-            println!("  {:>3}  {:<16}  {:<36}  {}", d.info.id, d.location(), desc, driver);
+            let desc: String = d.description().chars().take(names).collect();
+            println!("  {:>3}  {:<width$}  {:<names$}  {}", d.info.id, d.location(), desc, driver);
         }
     }
 
@@ -929,4 +933,20 @@ fn hexdump(data: &[u8]) {
         }
         println!();
     }
+}
+
+/// The driver that handles a device for its parent (a USB hub is run by
+/// the controller's driver): "ehci (hub)".
+fn owner_driver(d: &dev::Device) -> String {
+    let mut parent = d.info.parent;
+    while let Some(p) = dev::get(parent) {
+        if let Some(drv) = &p.driver {
+            return if d.info.class == 0x09 { alloc::format!("{drv} (hub)") } else { drv.clone() };
+        }
+        if p.info.parent == parent {
+            break;
+        }
+        parent = p.info.parent;
+    }
+    String::from("—")
 }
