@@ -82,6 +82,8 @@ make test       # avvio senza schermo con una sessione di comandi scritta
 make test-uefi  # la stessa, avviata da UEFI
 make test-drivers  # un avvio per ogni disco, scheda di rete e controller
                 # USB emulato da QEMU, controllando che il driver funzioni
+scripts/build-qemu.sh  # un QEMU con i modelli di tools/qemu (RTL8169 e
+                # RTL8168), usato da make test-drivers per provarne i driver
 make check      # test delle librerie condivise e dello strumento host
 ```
 
@@ -106,9 +108,10 @@ Da sapere prima di provarlo:
 - non ci sono ancora driver per Wi-Fi, schede video (si usa il framebuffer
   del firmware), audio, né per le schede di rete Intel I225/I226 e
   Realtek RTL8125 (2,5 Gbit);
-- alcuni driver sono scritti dalla documentazione dei chip ma non sono
-  ancora stati provati su hardware vero perché QEMU non li emula: sono
-  segnati come tali in [docs/driver.md](docs/driver.md#hardware-supportato).
+- alcuni driver sono scritti dalla documentazione dei chip e non sono
+  ancora stati provati su hardware vero perché QEMU non li emula; per le
+  Realtek RTL8169/8111 c'è un modello scritto apposta. Lo stato di ognuno
+  è in [docs/driver.md](docs/driver.md#hardware-supportato).
 
 Per un disco dati in più (una chiavetta da usare con arcOS):
 
@@ -134,8 +137,9 @@ crea un'immagine con una partizione ArcFS, che arcOS monta come `dati:`.
 | `system/drivers/` | i driver, uno per cartella, ognuno con il suo `driver.manifest` |
 | `system/apps/` | i programmi |
 | `tools/arctool/` | strumento host: crea pacchetti e immagini, legge e scrive volumi ArcFS |
+| `tools/qemu/` | modelli di dispositivi per QEMU che QEMU non ha (Realtek RTL8169/8168) |
 | `rootfs/` | file copiati nel volume di sistema |
-| `scripts/` | test automatici in QEMU (`test.sh`, `test-drivers.sh`) |
+| `scripts/` | test automatici in QEMU (`test.sh`, `test-drivers.sh`) e `build-qemu.sh` |
 
 ## Primi passi nella shell
 

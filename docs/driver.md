@@ -299,6 +299,18 @@ descrivere le sue code e i suoi messaggi.
 per il collegamento a caldo). Gli altri id elencati nei manifesti sono
 chip della stessa famiglia che usano la stessa interfaccia.
 
+"Provato su modello" vuol dire provato su un modello del chip scritto per
+arcOS, perché QEMU non lo emula: il sorgente è in `tools/qemu/` e
+`scripts/build-qemu.sh` costruisce un QEMU che lo contiene. Il modello è
+severo: segnala (con `-d guest_errors`, righe che iniziano con il nome del
+chip) ciò che il chip vero rifiuterebbe o ignorerebbe, e `make
+test-drivers` fallisce se ne compare una. Resta un modello: i dettagli
+delle singole revisioni del chip non ci sono.
+
+Il test di rete fallisce anche se un ping impiega 20 ms o più: le risposte
+arrivano allora dal thread di polling del driver, cioè le interruzioni
+della scheda non funzionano.
+
 | Driver | Hardware | Stato |
 |---|---|---|
 | `ata` | controller IDE/PATA | provato |
@@ -317,7 +329,8 @@ chip della stessa famiglia che usano la stessa interfaccia.
 | `rtl8139` | Realtek RTL8139 e schede derivate | provato |
 | `pcnet` | AMD PCnet-PCI II e successive | provato |
 | `virtionet` | schede di rete virtio (legacy e moderna) | provato |
-| `rtl8169` | Realtek RTL8169, RTL8111/8168, RTL810x | non verificato su hardware (QEMU non lo emula) |
+| `rtl8169` | Realtek RTL8169 (I/O, linea classica), RTL8111/8168 (MSI, MSI-X) | provato su modello |
+| `rtl8169` | Realtek RTL810x e le altre revisioni | stessa interfaccia, non provato su hardware |
 | `ps2kbd`, `ps2mouse` | tastiera e mouse PS/2 | provati |
 
 Mancano ancora i driver per: Wi-Fi, audio, schede video (il sistema usa il
