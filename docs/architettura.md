@@ -1,0 +1,143 @@
+# Architettura di arcOS
+
+## Avvio
+
+```
+ firmware ──► ArcBoot (BIOS o UEFI) ──► kernel ──► driver di avvio ──► sys: ──► tutti i driver ──► shell
+```
+
+### L'immagine del disco
+
+`arctool image` produce un disco con partizioni MBR che si avvia sia da BIOS
+sia da UEFI:
+
+| Settori | Contenuto |
+|---|---|
+| 0 | MBR: codice dello stadio 1, tabella di avvio (`ARCB`, a 0x190), tabella delle partizioni |
+| 1–63 | stadio 2 del loader BIOS |
+| 64– | kernel (immagine piatta) e, subito dopo, il pacchetto di avvio |
+| partizione 2 (tipo 0xEF) | partizione di sistema EFI, FAT16, 16 MiB: `EFI/BOOT/BOOTX64.EFI`, `ARCOS/KERNEL.BIN`, `ARCOS/BOOTPACK.IMG` |
+| partizione 1 (tipo 0xAC) | il volume ArcFS "System", che diventa `sys:` |
+
+Il **pacchetto di avvio** è un piccolo volume ArcFS in sola lettura con i
+driver marcati `boot = yes` (dischi e tastiera). Il loader lo carica in
+memoria e il kernel lo monta come `boot:`. Così il kernel può leggere il
+disco di sistema con un driver normale, installabile e aggiornabile,
+invece di averne uno incorporato.
+
+### ArcBoot per BIOS (`boot/bios`)
+
+- **Stadio 1** (512 byte, nell'MBR): legge lo stadio 2 con INT 13h esteso.
+- **Stadio 2**, in modo reale e "unreal":
+  1. abilita la linea A20;
+  2. carica il kernel a 1 MiB e il pacchetto di avvio subito dopo;
+  3. legge la mappa della memoria (E820), copia il font 8×16 del BIOS e
+     cerca la tabella RSDP di ACPI;
+  4. sceglie con VBE un modo grafico lineare a 32 bit (preferito
+     1024×768), altrimenti resta in modo testo 80×25;
+  5. costruisce le tabelle delle pagine, passa in modo lungo a 64 bit e
+     salta al kernel con `rdi` = indirizzo fisico della `BootInfo`.
+
+### ArcBoot per UEFI (`boot/uefi`)
+
+È un'applicazione EFI scritta in Rust senza librerie: le strutture e i
+GUID UEFI che usa sono dichiarati a mano in `efi.rs`. Esegue gli stessi
+passi del loader BIOS con i servizi del firmware:
+
+1. legge `KERNEL.BIN` e `BOOTPACK.IMG` dalla partizione da cui è stato
+   avviato (Loaded Image + Simple File System);
+2. sceglie un modo grafico con il Graphics Output Protocol;
+3. prende l'RSDP dalla tabella di configurazione;
+4. costruisce le tabelle delle pagine, legge la mappa della memoria e la
+   converte nel formato E820, poi chiama `ExitBootServices`;
+5. salta al kernel come il loader BIOS.
+
+Il kernel non viene caricato a 1 MiB, ma dove il firmware ha spazio, a un
+indirizzo ≡ 1 MiB (mod 2 MiB). Così le pagine da 2 MiB del kernel restano
+allineate. La memoria che il loader ha allocato (kernel, pacchetto, tabelle,
+mappa) è segnata come riservata. Il firmware non fornisce un font: il kernel
+usa il suo (`console/font.rs`).
+
+### La consegna: `BootInfo`
+
+Struttura `#[repr(C)]` definita in `system/kernel/src/boot.rs` (e copiata
+in `stage2.asm` e in `boot/uefi`): mappa della memoria, framebuffer
+(indirizzo, dimensioni, posizione dei canali di colore), font, posizione e
+dimensione del kernel e del pacchetto di avvio, RSDP e tipo di loader.
+
+## Memoria
+
+Spazio di indirizzi virtuale (metà alta, uguale in tutti i processi):
+
+| Inizio | Contenuto |
+|---|---|
+| `0xFFFF_8000_0000_0000` | mappa diretta di tutta la memoria fisica (pagine da 2 MiB) |
+| `0xFFFF_9000_0000_0000` | heap del kernel |
+| `0xFFFF_A000_0000_0000` | memoria dei dispositivi (MMIO), anche write-combining per il framebuffer |
+| `0xFFFF_B000_0000_0000` | moduli dei driver |
+| `0xFFFF_C000_0000_0000` | stack dei thread del kernel (64 KiB, con pagina di guardia) |
+| `0xFFFF_FFFF_8000_0000` | immagine del kernel |
+
+La metà bassa appartiene al programma in esecuzione.
+
+- **Pagine fisiche**: una bitmap, costruita dalla mappa della memoria.
+- **Heap del kernel**: lista libera ordinata per indirizzo, con fusione dei
+  blocchi vicini. Cresce mappando nuove pagine.
+
+## Kernel
+
+| Parte | File | Cosa fa |
+|---|---|---|
+| CPU | `arch/` | GDT con TSS, IDT, PIC 8259 rimappato a 32–47, PIT a 1 kHz |
+| scheduler | `task.rs` | thread del kernel, round-robin preemptivo (10 ms), code di attesa, sleep |
+| sincronizzazione | `sync.rs` | `IrqLock` (spinlock con interruzioni spente), `Mutex` (cede il processore mentre aspetta) |
+| console | `console/` | terminale con sequenze ANSI su framebuffer, VGA testo e porta seriale; giornale di sistema |
+| dispositivi | `dev/` | registro dei dispositivi, PCI, piattaforma (8042), IRQ condivisi, dischi e partizioni (MBR, GPT), tastiera, interfacce di rete |
+| driver | `driver/` | gestore dei driver, caricatore ELF dei moduli, tabella `KernelApi` |
+| file | `fs/` | volumi, percorsi `volume:/cartella/file`, montaggio automatico |
+| rete | `net.rs` | ARP, IPv4, ICMP, UDP, DHCP, DNS |
+| programmi | `user.rs` | processi, spazi di indirizzi, caricatore, chiamate di sistema |
+| ACPI | `acpi.rs` | tabelle, spegnimento (S5), riavvio |
+| shell | `shell.rs` | l'interfaccia a riga di comando |
+
+### Dispositivi e driver
+
+Il kernel conosce i bus (PCI e piattaforma), non i dispositivi: tutto il
+resto lo fanno i driver. Un driver è un'immagine ELF indipendente dalla
+posizione. Il kernel la carica nella regione dei moduli, applica le
+rilocazioni e chiama `arc_driver_entry` con la tabella dei servizi
+(`KernelApi`). In cambio riceve una `DriverInfo` con `probe` e `remove`. I
+driver registrano dischi, sorgenti di input e interfacce di rete; il kernel
+fa il resto: partizioni e volumi, tastiera e mappe dei tasti, IP. La scelta
+e l'installazione automatica sono descritte in [driver.md](driver.md).
+
+### File system: ArcFS
+
+```
+blocco 0             superblocco (etichetta, dimensioni, posizione delle aree)
+bitmap               un bit per blocco
+tabella dei nodi     nodi da 128 byte (il nodo 1 è la radice)
+dati                 contenuto di file e cartelle
+```
+
+- Blocchi da 4 KiB.
+- Ogni nodo descrive il contenuto con fino a 11 extent nel nodo, più 512 in
+  un blocco indiretto.
+- Le cartelle sono elenchi di voci da 64 byte; i nomi arrivano a 56 byte e
+  non distinguono maiuscole e minuscole.
+- `check` verifica la coerenza tra bitmap, nodi e cartelle.
+
+La stessa libreria (`system/libs/arcfs`) serve al kernel e ad `arctool`,
+che così crea e modifica i volumi dal computer di sviluppo.
+
+All'avvio ogni partizione ArcFS viene montata. La prima con etichetta
+"System" diventa `sys:`, le altre prendono il nome dalla loro etichetta.
+
+### Programmi
+
+Ogni processo ha la sua tabella delle pagine: la metà alta è condivisa con
+il kernel, la metà bassa è sua. Il programma gira in ring 3 e chiama il
+kernel con `int 0x80`. Il kernel controlla ogni puntatore che riceve. Un
+errore del programma (page fault, istruzione non valida...) termina solo
+quel processo e ne libera la memoria. L'elenco delle chiamate è in
+[programmi.md](programmi.md).

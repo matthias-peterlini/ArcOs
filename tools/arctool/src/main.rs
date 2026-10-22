@@ -27,8 +27,9 @@ type Result<T> = std::result::Result<T, String>;
 
 const KERNEL_LINK_BASE: u64 = 0xFFFF_FFFF_8010_0000;
 const SECTOR: u64 = 512;
-const STAGE2_MAX_SECTORS: u64 = 64;
 const KERNEL_LBA: u64 = 64;
+/// Stage 2 sits between the MBR and the kernel.
+const STAGE2_MAX_SECTORS: u64 = KERNEL_LBA - 1;
 /// Size of the EFI system partition (FAT16).
 const ESP_SIZE: u64 = 16 << 20;
 
