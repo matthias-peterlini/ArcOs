@@ -54,9 +54,9 @@ struct State {
     caps: bool,
     queue: VecDeque<KeyEvent>,
     pointer: Pointer,
+    pointer_seen: bool,
     serial: [u8; 8],
     serial_len: usize,
-    keys_seen: u64,
 }
 
 static STATE: IrqLock<State> = IrqLock::new(State {
@@ -70,9 +70,9 @@ static STATE: IrqLock<State> = IrqLock::new(State {
     caps: false,
     queue: VecDeque::new(),
     pointer: Pointer { x: 0, y: 0, buttons: 0, wheel: 0 },
+    pointer_seen: false,
     serial: [0; 8],
     serial_len: 0,
-    keys_seen: 0,
 });
 
 static WAITERS: WaitQueue = WaitQueue::new();
@@ -104,7 +104,6 @@ fn key(usage: u32, value: i32) {
         if !pressed || (0xE0..=0xE7).contains(&usage) {
             return;
         }
-        s.keys_seen += 1;
         let shift = s.lshift || s.rshift;
         let ctrl = s.lctrl || s.rctrl;
         let key = match usage {
@@ -142,6 +141,7 @@ pub fn driver_event(_device: u32, kind: u32, code: u32, value: i32) {
         INPUT_KEY => key(code, value),
         INPUT_REL => {
             let mut s = STATE.lock();
+            s.pointer_seen = true;
             match code {
                 arcdk::AXIS_X => s.pointer.x = s.pointer.x.saturating_add(value),
                 arcdk::AXIS_Y => s.pointer.y = s.pointer.y.saturating_add(value),
@@ -151,6 +151,7 @@ pub fn driver_event(_device: u32, kind: u32, code: u32, value: i32) {
         }
         INPUT_BUTTON if code < 8 => {
             let mut s = STATE.lock();
+            s.pointer_seen = true;
             if value != 0 {
                 s.pointer.buttons |= 1 << code;
             } else {
@@ -227,11 +228,8 @@ pub fn set_layout(layout: Layout) {
     STATE.lock().layout = layout;
 }
 
-pub fn pointer() -> Pointer {
-    STATE.lock().pointer
-}
-
-/// Number of keys pressed on real keyboards since boot.
-pub fn keys_seen() -> u64 {
-    STATE.lock().keys_seen
+/// Where the pointing device has moved since boot, once it has reported.
+pub fn pointer() -> Option<Pointer> {
+    let s = STATE.lock();
+    s.pointer_seen.then_some(s.pointer)
 }

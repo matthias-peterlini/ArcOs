@@ -74,11 +74,7 @@ fn handle(code: u8) {
     }
     let release = code & 0x80 != 0;
     let make = code & 0x7F;
-    let usage = if core::mem::replace(&mut s.prefix, false) {
-        extended(make)
-    } else {
-        NORMAL.get(make as usize).copied().unwrap_or(0)
-    };
+    let usage = if core::mem::replace(&mut s.prefix, false) { extended(make) } else { NORMAL.get(make as usize).copied().unwrap_or(0) };
     if usage == 0 {
         return;
     }

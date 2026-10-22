@@ -48,6 +48,8 @@ enum Esc {
     Csi { params: [u16; 4], count: usize },
 }
 
+// There is one screen: the size of the variants does not matter.
+#[allow(clippy::large_enum_variant)]
 enum Screen {
     Fb(fb::FbSurface),
     Vga(vga::VgaSurface),
@@ -74,8 +76,6 @@ struct Terminal {
     bright: bool,
     esc: Esc,
     cursor: bool,
-    utf8: [u8; 4],
-    utf8_len: usize,
 }
 
 static TERM: IrqLock<Terminal> = IrqLock::new(Terminal {
@@ -90,8 +90,6 @@ static TERM: IrqLock<Terminal> = IrqLock::new(Terminal {
     bright: false,
     esc: Esc::None,
     cursor: false,
-    utf8: [0; 4],
-    utf8_len: 0,
 });
 
 impl Terminal {
@@ -370,7 +368,8 @@ pub fn log(level: u32, source: &str, args: fmt::Arguments<'_>) {
         _ => ("\x1b[90m", "debug"),
     };
     let ms = crate::time::uptime_ms();
-    let line = alloc::format!("\x1b[90m[{:>5}.{:03}]\x1b[0m {}{}\x1b[0m \x1b[90m{}:\x1b[0m {}\n", ms / 1000, ms % 1000, color, tag, source, args);
+    let line =
+        alloc::format!("\x1b[90m[{:>5}.{:03}]\x1b[0m {}{}\x1b[0m \x1b[90m{}:\x1b[0m {}\n", ms / 1000, ms % 1000, color, tag, source, args);
     let show = level <= LEVEL_INFO || verbose();
     if show {
         emit(&line, true);
@@ -424,7 +423,14 @@ pub fn init_screen(boot: &BootInfo) {
                 };
                 let shift = (boot.red_pos, boot.green_pos, boot.blue_pos);
                 Screen::Fb(unsafe {
-                    fb::FbSurface::new(virt as *mut u8, boot.fb_width as usize, boot.fb_height as usize, boot.fb_pitch as usize, shift, font)
+                    fb::FbSurface::new(
+                        virt as *mut u8,
+                        boot.fb_width as usize,
+                        boot.fb_height as usize,
+                        boot.fb_pitch as usize,
+                        shift,
+                        font,
+                    )
                 })
             })
         }

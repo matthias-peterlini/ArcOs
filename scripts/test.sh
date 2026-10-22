@@ -8,6 +8,8 @@
 # DISK selects how the image is attached: ide (default), ahci, nvme, virtio.
 # UEFI=1 starts it with UEFI firmware (OVMF_CODE, OVMF_VARS) instead of a BIOS.
 #
+# The image is not changed: the session runs on a copy.
+#
 # Prints the whole session; exits non-zero if the kernel stopped.
 set -eu
 IMAGE=${1:?usage: test.sh <image> [commands-file] [qemu options...]}
@@ -17,6 +19,9 @@ COMMANDS=${1:-scripts/session.txt}
 QEMU=${QEMU:-qemu-system-x86_64}
 BOOT_WAIT=${BOOT_WAIT:-4}
 STEP_WAIT=${STEP_WAIT:-1}
+WORK=$(mktemp)
+cp --sparse=always "$IMAGE" "$WORK"
+IMAGE=$WORK
 case "${DISK:-ide}" in
     ide)    DRIVE="-drive file=$IMAGE,format=raw,if=ide" ;;
     ahci)   DRIVE="-machine q35 -drive file=$IMAGE,format=raw,if=none,id=sys -device ahci,id=ahci -device ide-hd,drive=sys,bus=ahci.0,bootindex=0" ;;
@@ -52,5 +57,5 @@ fi
 sed 's/\x1b\[[0-9;]*[A-Za-z]//g; s/\r//g' "$OUT"
 STATUS=0
 grep -q "arcOS stopped" "$OUT" && STATUS=1
-rm -f "$OUT" $VARS
+rm -f "$OUT" "$WORK" $VARS
 exit $STATUS

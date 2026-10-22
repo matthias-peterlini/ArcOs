@@ -66,7 +66,6 @@ impl PackageEntry {
 pub struct Loaded {
     pub name: String,
     pub version: String,
-    pub path: String,
     image: elf::Image,
     info: &'static DriverInfo,
     pub devices: Vec<u32>,
@@ -131,7 +130,8 @@ impl Manager {
 
     /// Packages that match a device, best first.
     fn candidates(&self, dev: &arcdk::DeviceInfo) -> Vec<(u32, PackageEntry)> {
-        let mut c: Vec<(u32, PackageEntry)> = self.packages.iter().filter_map(|p| p.manifest().score(dev).map(|s| (s, p.clone()))).collect();
+        let mut c: Vec<(u32, PackageEntry)> =
+            self.packages.iter().filter_map(|p| p.manifest().score(dev).map(|s| (s, p.clone()))).collect();
         c.sort_by(|a, b| {
             b.0.cmp(&a.0)
                 .then_with(|| compare_versions(b.1.manifest().version(), a.1.manifest().version()))
@@ -176,7 +176,7 @@ impl Manager {
         let info: &'static DriverInfo = unsafe { &*info };
         let version = pkg.manifest().version().to_string();
         crate::debug!("drivers", "loaded {name} {version} at {:#x} ({})", image.base, crate::util::Size(image.size()));
-        self.loaded.push(Loaded { name, version, path: pkg.path.clone(), image, info, devices: Vec::new() });
+        self.loaded.push(Loaded { name, version, image, info, devices: Vec::new() });
         Ok(self.loaded.len() - 1)
     }
 
@@ -270,7 +270,7 @@ pub fn init() {
     m.refresh();
     let n = m.packages.len();
     let bound = m.configure();
-    crate::debug!("drivers", "{n} packages in the boot pack, {bound} devices configured");
+    crate::debug!("drivers", "{n} packages in the boot pack, {bound} device{} configured", if bound == 1 { "" } else { "s" });
 }
 
 /// After the system volume is mounted: the whole store.
@@ -365,7 +365,7 @@ pub fn reload(name: &str) -> Result<String, String> {
     m.unload(name)?;
     m.refresh();
     let n = m.configure();
-    Ok(alloc::format!("{name} reloaded, {n} devices configured"))
+    Ok(alloc::format!("{name} reloaded, {n} device{} configured", if n == 1 { "" } else { "s" }))
 }
 
 /// Installs every package waiting in `sys:/inbox`. Returns the messages.
@@ -414,11 +414,9 @@ pub fn start_monitor() {
 pub struct DriverStatus {
     pub name: String,
     pub version: String,
-    pub description: String,
     pub class: String,
     pub origins: Vec<Origin>,
     pub loaded: Option<(String, u64, Vec<u32>, bool)>,
-    pub boot: bool,
 }
 
 /// Every known driver: packages merged by name, with what is loaded.
@@ -439,11 +437,9 @@ pub fn status() -> Vec<DriverStatus> {
             None => out.push(DriverStatus {
                 name: mf.name().to_string(),
                 version: mf.version().to_string(),
-                description: mf.description().to_string(),
                 class: mf.class().to_string(),
                 origins: alloc::vec![p.origin],
                 loaded: None,
-                boot: mf.is_boot(),
             }),
         }
     }
@@ -454,11 +450,9 @@ pub fn status() -> Vec<DriverStatus> {
             None => out.push(DriverStatus {
                 name: l.name.clone(),
                 version: l.version.clone(),
-                description: String::new(),
                 class: String::new(),
                 origins: Vec::new(),
                 loaded: Some(entry),
-                boot: false,
             }),
         }
     }
@@ -466,8 +460,11 @@ pub fn status() -> Vec<DriverStatus> {
     out
 }
 
+/// Where a driver's packages are: (path, origin, size).
+pub type PackageFiles = Vec<(String, Origin, usize)>;
+
 /// Manifest text and package paths of a driver.
-pub fn details(name: &str) -> Option<(String, Vec<(String, Origin, usize)>)> {
+pub fn details(name: &str) -> Option<(String, PackageFiles)> {
     let m = MANAGER.lock();
     let pkgs: Vec<&PackageEntry> = m.packages.iter().filter(|p| p.manifest().name().eq_ignore_ascii_case(name)).collect();
     let best = pkgs.iter().max_by(|a, b| compare_versions(a.manifest().version(), b.manifest().version()))?;

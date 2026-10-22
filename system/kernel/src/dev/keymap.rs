@@ -9,13 +9,7 @@ type Entry = (u8, char, char, char);
 const N: char = '\0';
 
 /// Keys that are the same on every layout.
-const COMMON: &[Entry] = &[
-    (0x2C, ' ', ' ', ' '),
-    (0x54, '/', '/', N),
-    (0x55, '*', '*', N),
-    (0x56, '-', '-', N),
-    (0x57, '+', '+', N),
-];
+const COMMON: &[Entry] = &[(0x2C, ' ', ' ', ' '), (0x54, '/', '/', N), (0x55, '*', '*', N), (0x56, '-', '-', N), (0x57, '+', '+', N)];
 
 const US: &[Entry] = &[
     (0x1E, '1', '!', N),

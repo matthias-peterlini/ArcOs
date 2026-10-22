@@ -28,7 +28,17 @@ pub fn register(device: u32, desc: *const NetDesc) -> Status {
     let d = unsafe { &*desc };
     let mut ifaces = IFACES.lock();
     let n = ifaces.len();
-    ifaces.push(Iface { device, mac: d.mac, mtu: d.mtu, desc, rx_packets: 0, rx_bytes: 0, tx_packets: 0, tx_bytes: 0, rx: VecDeque::new() });
+    ifaces.push(Iface {
+        device,
+        mac: d.mac,
+        mtu: d.mtu,
+        desc,
+        rx_packets: 0,
+        rx_bytes: 0,
+        tx_packets: 0,
+        tx_bytes: 0,
+        rx: VecDeque::new(),
+    });
     drop(ifaces);
     let m = d.mac;
     crate::info!("net", "net{n}: MAC {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}", m[0], m[1], m[2], m[3], m[4], m[5]);
@@ -77,16 +87,19 @@ pub fn list() -> Vec<IfaceInfo> {
         .lock()
         .iter()
         .enumerate()
-        .map(|(n, i)| IfaceInfo { index: n as u32, device: i.device, mac: i.mac, mtu: i.mtu, rx: (i.rx_packets, i.rx_bytes), tx: (i.tx_packets, i.tx_bytes) })
+        .map(|(n, i)| IfaceInfo {
+            index: n as u32,
+            device: i.device,
+            mac: i.mac,
+            mtu: i.mtu,
+            rx: (i.rx_packets, i.rx_bytes),
+            tx: (i.tx_packets, i.tx_bytes),
+        })
         .collect()
 }
 
 pub fn remove_device(device: u32) {
     IFACES.lock().retain(|i| i.device != device);
-}
-
-pub fn count() -> usize {
-    IFACES.lock().len()
 }
 
 #[allow(dead_code)]

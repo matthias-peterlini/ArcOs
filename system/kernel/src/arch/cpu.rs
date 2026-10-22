@@ -67,14 +67,6 @@ pub fn irq_restore(enabled: bool) {
 }
 
 #[inline]
-pub fn irq_enabled() -> bool {
-    let flags: u64;
-    // SAFETY: reads RFLAGS.
-    unsafe { asm!("pushfq; pop {}", out(reg) flags, options(nomem, preserves_flags)) };
-    flags & (1 << 9) != 0
-}
-
-#[inline]
 pub fn enable_irq() {
     // SAFETY: ring 0.
     unsafe { asm!("sti", options(nomem, nostack)) };
@@ -179,10 +171,4 @@ pub fn brand(out: &mut [u8; 48]) -> &str {
     }
     let len = out.iter().position(|&b| b == 0).unwrap_or(48);
     core::str::from_utf8(&out[..len]).unwrap_or("unknown CPU").trim()
-}
-
-#[inline]
-pub fn rdtsc() -> u64 {
-    // SAFETY: rdtsc has no side effects.
-    unsafe { core::arch::x86_64::_rdtsc() }
 }

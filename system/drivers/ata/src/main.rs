@@ -174,7 +174,12 @@ impl Disk {
             port::outb(ch.base + COMMAND, cmd);
             for i in 0..n {
                 if let Err(e) = ch.wait_drq() {
-                    arcdrv::warn!("{} sector {}: error {:#x}", if write { "write" } else { "read" }, lba + (done + i) as u64, port::inb(ch.base + ERROR));
+                    arcdrv::warn!(
+                        "{} sector {}: error {:#x}",
+                        if write { "write" } else { "read" },
+                        lba + (done + i) as u64,
+                        port::inb(ch.base + ERROR)
+                    );
                     return e;
                 }
                 // SAFETY: the kernel passes a buffer of `count` sectors.

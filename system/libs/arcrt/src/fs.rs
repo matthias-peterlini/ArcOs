@@ -90,7 +90,8 @@ pub fn list_dir(path: &str) -> Result<Vec<Entry>> {
     let mut cap = 4096;
     loop {
         let mut buf = vec![0u8; cap];
-        let n = sys::check(sys::call(sys::LIST_DIR, path.as_ptr() as u64, path.len() as u64, buf.as_mut_ptr() as u64, cap as u64, 0))? as usize;
+        let n =
+            sys::check(sys::call(sys::LIST_DIR, path.as_ptr() as u64, path.len() as u64, buf.as_mut_ptr() as u64, cap as u64, 0))? as usize;
         if n > cap {
             cap = n;
             continue;

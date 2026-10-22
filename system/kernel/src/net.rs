@@ -369,7 +369,8 @@ pub fn start() {
         for info in nic::list() {
             let start_dhcp = {
                 let mut s = STACK.lock();
-                let iface = s.ifaces.entry(info.index).or_insert(Iface { mac: info.mac, config: Config::default(), dhcp: Dhcp::Idle, attempts: 0 });
+                let iface =
+                    s.ifaces.entry(info.index).or_insert(Iface { mac: info.mac, config: Config::default(), dhcp: Dhcp::Idle, attempts: 0 });
                 let now = time::uptime_ms();
                 match iface.dhcp {
                     Dhcp::Idle => true,
@@ -420,10 +421,7 @@ pub fn ping(dst: Ip, seq: u16, timeout_ms: u64) -> Result<u64, &'static str> {
     STACK.lock().pings.insert((id, seq), (start, None));
     let sent = send_ipv4(dst, 1, &msg);
     let result = sent.and_then(|_| {
-        EVENTS
-            .wait_for_timeout(timeout_ms, || STACK.lock().pings.get(&(id, seq)).and_then(|e| e.1))
-            .map(|t| t - start)
-            .ok_or("timed out")
+        EVENTS.wait_for_timeout(timeout_ms, || STACK.lock().pings.get(&(id, seq)).and_then(|e| e.1)).map(|t| t - start).ok_or("timed out")
     });
     STACK.lock().pings.remove(&(id, seq));
     result

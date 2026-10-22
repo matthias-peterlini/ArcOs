@@ -13,9 +13,9 @@ arcrt::main!(main);
 
 fn size(bytes: u64) -> String {
     if bytes >= 1 << 30 {
-        alloc::format!("{}.{} GiB", bytes >> 30, (bytes % (1 << 30)) * 10 >> 30)
+        alloc::format!("{}.{} GiB", bytes >> 30, ((bytes % (1 << 30)) * 10) >> 30)
     } else {
-        alloc::format!("{}.{} MiB", bytes >> 20, (bytes % (1 << 20)) * 10 >> 20)
+        alloc::format!("{}.{} MiB", bytes >> 20, ((bytes % (1 << 20)) * 10) >> 20)
     }
 }
 

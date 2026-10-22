@@ -23,23 +23,29 @@ static FRAMES: IrqLock<Frames> =
 const LOW_RESERVED: u64 = 0x100000;
 
 impl Frames {
-    fn word(&self, i: usize) -> &mut u64 {
+    fn word(&self, i: usize) -> u64 {
+        // SAFETY: i < words, checked by callers.
+        unsafe { *self.bitmap.add(i) }
+    }
+
+    fn word_mut(&mut self, i: usize) -> &mut u64 {
         // SAFETY: i < words, checked by callers.
         unsafe { &mut *self.bitmap.add(i) }
     }
 
     fn is_used(&self, f: u64) -> bool {
-        *self.word((f / 64) as usize) & (1 << (f % 64)) != 0
+        self.word((f / 64) as usize) & (1 << (f % 64)) != 0
     }
 
     fn set(&mut self, f: u64, used: bool) {
-        let w = self.word((f / 64) as usize);
+        let i = (f / 64) as usize;
         let bit = 1u64 << (f % 64);
-        if used && *w & bit == 0 {
-            *w |= bit;
+        let w = self.word(i);
+        if used && w & bit == 0 {
+            *self.word_mut(i) = w | bit;
             self.free -= 1;
-        } else if !used && *w & bit != 0 {
-            *w &= !bit;
+        } else if !used && w & bit != 0 {
+            *self.word_mut(i) = w & !bit;
             self.free += 1;
         }
     }
@@ -91,7 +97,7 @@ pub fn init(boot: &BootInfo) {
     f.words = words;
     f.frames = frames;
     for i in 0..words {
-        *f.word(i) = u64::MAX;
+        *f.word_mut(i) = u64::MAX;
     }
     f.free = 0;
     // Free the usable regions, then take back what is in use.
@@ -138,7 +144,7 @@ pub fn alloc_contiguous(count: u64, limit: u64) -> Option<u64> {
                 continue;
             }
             // Skip whole used words quickly.
-            if start % 64 == 0 && *f.word((start / 64) as usize) == u64::MAX {
+            if start.is_multiple_of(64) && f.word((start / 64) as usize) == u64::MAX {
                 start += 64;
                 continue;
             }

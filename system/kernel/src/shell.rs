@@ -55,6 +55,7 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("disks", "", "list disks and partitions"),
     ("format", "<disk> <label>", "create an ArcFS volume on a disk"),
     ("check", "<volume>", "check a volume for errors"),
+    ("unmount", "<volume>", "detach a volume (before removing its disk)"),
     ("dev", "[id | scan]", "list devices and their drivers"),
     ("drv", "[list|info|add|remove|reload|inbox]", "manage drivers"),
     ("kbd", "[us|it]", "show or set the keyboard layout"),
@@ -404,11 +405,7 @@ impl Shell {
                         if fs::is_dir(&b) {
                             b = b.join(a.name());
                         }
-                        let r = if a.volume == b.volume {
-                            fs::rename(&a, &b)
-                        } else {
-                            fs::copy_file(&a, &b).and_then(|_| fs::remove(&a))
-                        };
+                        let r = if a.volume == b.volume { fs::rename(&a, &b) } else { fs::copy_file(&a, &b).and_then(|_| fs::remove(&a)) };
                         if let Err(e) = r {
                             println!("{ERR}{e}{RESET}");
                         }
@@ -448,12 +445,33 @@ impl Shell {
                     Err(e) => println!("{ERR}{v}: {e}{RESET}"),
                 }
             }
+            "unmount" | "eject" => {
+                if need(1, "<volume>") {
+                    let v = rest[0].trim_end_matches(':');
+                    if v.eq_ignore_ascii_case("sys") || v.eq_ignore_ascii_case("boot") {
+                        println!("{ERR}{v}: the system needs this volume{RESET}");
+                    } else {
+                        match fs::unmount(v) {
+                            Ok(()) => {
+                                if self.cwd.volume.eq_ignore_ascii_case(v) {
+                                    self.cwd = fs::Path::root("sys");
+                                }
+                                println!("{OK}{v}: unmounted{RESET}");
+                            }
+                            Err(e) => println!("{ERR}{v}: {e}{RESET}"),
+                        }
+                    }
+                }
+            }
             "dev" | "devices" => self.devices(rest.first().copied()),
             "drv" | "drivers" => self.drivers(&rest),
             "kbd" | "keyboard" => match rest.first() {
                 None => {
                     let names: Vec<&str> = dev::keymap::Layout::ALL.iter().map(|l| l.name()).collect();
                     println!("layout: {} (available: {})", input::layout().name(), names.join(", "));
+                    if let Some(p) = input::pointer() {
+                        println!("mouse:  moved {}, {}  wheel {}  buttons {:03b}", p.x, p.y, p.wheel, p.buttons);
+                    }
                 }
                 Some(name) => match dev::keymap::Layout::from_name(name) {
                     Some(l) => {
@@ -495,7 +513,13 @@ impl Shell {
                 for (line, count, owners) in dev::irq::stats() {
                     let names: Vec<String> = owners
                         .iter()
-                        .map(|&o| if o == 0 { String::from("kernel") } else { dev::get(o).and_then(|d| d.driver).unwrap_or_else(|| alloc::format!("device {o}")) })
+                        .map(|&o| {
+                            if o == 0 {
+                                String::from("kernel")
+                            } else {
+                                dev::get(o).and_then(|d| d.driver).unwrap_or_else(|| alloc::format!("device {o}"))
+                            }
+                        })
                         .collect();
                     println!("IRQ {:>2}  {:>10}  {}", line, count, names.join(", "));
                 }
@@ -507,12 +531,17 @@ impl Shell {
                 }
                 for i in list {
                     let m = i.mac;
+                    let card = dev::get(i.device).map(|d| d.description()).unwrap_or_default();
                     println!(
-                        "{BOLD}net{}{RESET}  {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}  mtu {}  rx {} ({})  tx {} ({})",
-                        i.index, m[0], m[1], m[2], m[3], m[4], m[5], i.mtu, i.rx.0, Size(i.rx.1), i.tx.0, Size(i.tx.1)
+                        "{BOLD}net{}{RESET}  {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}  {DIM}{card}{RESET}",
+                        i.index, m[0], m[1], m[2], m[3], m[4], m[5]
                     );
+                    println!("      mtu {}  received {} ({})  sent {} ({})", i.mtu, i.rx.0, Size(i.rx.1), i.tx.0, Size(i.tx.1));
                     match crate::net::config(i.index) {
-                        Some((c, true)) => println!("      address {} mask {} gateway {} DNS {}", c.ip, c.mask, c.gateway, c.dns),
+                        Some((c, true)) => {
+                            println!("      address {} mask {} gateway {} DNS {}", c.ip, c.mask, c.gateway, c.dns);
+                            println!("      {DIM}lease {} min (DHCP){RESET}", c.lease_s / 60);
+                        }
                         _ => println!("      {DIM}waiting for an address (DHCP){RESET}"),
                     }
                 }
@@ -520,7 +549,16 @@ impl Shell {
                 if !arp.is_empty() {
                     println!("{DIM}neighbours{RESET}");
                     for (ip, m, age) in arp {
-                        println!("      {:<15} {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}  {age}s", ip.to_string(), m[0], m[1], m[2], m[3], m[4], m[5]);
+                        println!(
+                            "      {:<15} {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}  {age}s",
+                            ip.to_string(),
+                            m[0],
+                            m[1],
+                            m[2],
+                            m[3],
+                            m[4],
+                            m[5]
+                        );
                     }
                 }
             }
@@ -568,7 +606,16 @@ impl Shell {
             "sysinfo" => self.sysinfo(),
             "date" => {
                 let t = time::from_epoch(time::now());
-                println!("{} {:04}-{:02}-{:02} {:02}:{:02}:{:02}", time::WEEKDAYS[t.weekday as usize], t.year, t.month, t.day, t.hour, t.min, t.sec);
+                println!(
+                    "{} {:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+                    time::WEEKDAYS[t.weekday as usize],
+                    t.year,
+                    t.month,
+                    t.day,
+                    t.hour,
+                    t.min,
+                    t.sec
+                );
             }
             "uptime" => {
                 let s = time::uptime_ms() / 1000;
@@ -678,7 +725,15 @@ impl Shell {
         for v in fs::volumes() {
             let (total, free) = v.space();
             let ro = if v.read_only() { " (read-only)" } else { "" };
-            println!("  {ACCENT}{:<8}{RESET} {:<14} {:>10}  {:>10}  {}{}", alloc::format!("{}:", v.name), v.label, Size(total).to_string(), Size(free).to_string(), v.source, ro);
+            println!(
+                "  {ACCENT}{:<8}{RESET} {:<14} {:>10}  {:>10}  {}{}",
+                alloc::format!("{}:", v.name),
+                v.label,
+                Size(total).to_string(),
+                Size(free).to_string(),
+                v.source,
+                ro
+            );
         }
     }
 
@@ -709,7 +764,10 @@ impl Shell {
             let i = &d.info;
             println!("{BOLD}{}{RESET}  {}", d.description(), d.location());
             if i.bus == arcdk::BUS_PCI {
-                println!("  id        {:04x}:{:04x}  (subsystem {:04x}:{:04x}, revision {:02x})", i.vendor, i.device, i.subsystem_vendor, i.subsystem, i.revision);
+                println!(
+                    "  id        {:04x}:{:04x}  (subsystem {:04x}:{:04x}, revision {:02x})",
+                    i.vendor, i.device, i.subsystem_vendor, i.subsystem, i.revision
+                );
                 println!("  class     {:02x}:{:02x}:{:02x}", i.class, i.subclass, i.prog_if);
             }
             if i.irq != arcdk::IRQ_NONE {
@@ -751,7 +809,9 @@ impl Shell {
                 for d in driver::status() {
                     let origin: Vec<&str> = d.origins.iter().map(|o| o.name()).collect();
                     let status = match &d.loaded {
-                        Some((v, _, devs, _)) => alloc::format!("{OK}running{RESET} {v}, {} device{}", devs.len(), if devs.len() == 1 { "" } else { "s" }),
+                        Some((v, _, devs, _)) => {
+                            alloc::format!("{OK}running{RESET} {v}, {} device{}", devs.len(), if devs.len() == 1 { "" } else { "s" })
+                        }
                         None => alloc::format!("{DIM}installed, idle{RESET}"),
                     };
                     println!("  {BOLD}{:<13}{RESET} {:<8} {:<9} {:<18} {}", d.name, d.version, d.class, origin.join(" + "), status);
@@ -773,7 +833,11 @@ impl Shell {
                         }
                         if let Some(s) = driver::status().into_iter().find(|s| s.name.eq_ignore_ascii_case(name)) {
                             if let Some((v, size, devs, unload)) = s.loaded {
-                                println!("  {OK}running{RESET} version {v}, {} in memory, {}", Size(size), if unload { "can be unloaded" } else { "stays loaded" });
+                                println!(
+                                    "  {OK}running{RESET} version {v}, {} in memory, {}",
+                                    Size(size),
+                                    if unload { "can be unloaded" } else { "stays loaded" }
+                                );
                                 for id in devs {
                                     if let Some(d) = dev::get(id) {
                                         println!("    device {id}: {} ({})", d.description(), d.location());

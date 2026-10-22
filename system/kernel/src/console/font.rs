@@ -132,17 +132,17 @@ const fn row_bits(s: &str) -> u8 {
 
 /// Box-drawing pieces as (left, right, up, down) arms.
 const BOX: &[(u8, [bool; 4])] = &[
-    (0xC4, [true, true, false, false]),  // ─
-    (0xB3, [false, false, true, true]),  // │
-    (0xDA, [false, true, false, true]),  // ┌
-    (0xBF, [true, false, false, true]),  // ┐
-    (0xC0, [false, true, true, false]),  // └
-    (0xD9, [true, false, true, false]),  // ┘
-    (0xC3, [false, true, true, true]),   // ├
-    (0xB4, [true, false, true, true]),   // ┤
-    (0xC2, [true, true, false, true]),   // ┬
-    (0xC1, [true, true, true, false]),   // ┴
-    (0xC5, [true, true, true, true]),    // ┼
+    (0xC4, [true, true, false, false]), // ─
+    (0xB3, [false, false, true, true]), // │
+    (0xDA, [false, true, false, true]), // ┌
+    (0xBF, [true, false, false, true]), // ┐
+    (0xC0, [false, true, true, false]), // └
+    (0xD9, [true, false, true, false]), // ┘
+    (0xC3, [false, true, true, true]),  // ├
+    (0xB4, [true, false, true, true]),  // ┤
+    (0xC2, [true, true, false, true]),  // ┬
+    (0xC1, [true, true, true, false]),  // ┴
+    (0xC5, [true, true, true, true]),   // ┼
 ];
 
 const fn build() -> [u8; 4096] {

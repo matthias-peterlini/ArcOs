@@ -98,10 +98,11 @@ fn probe(dev: &DeviceInfo) -> Status {
     }
     // IntelliMouse detection: sample rates 200, 100, 80, then read the id.
     let mut size = 3;
-    if [200u8, 100, 80].iter().all(|&r| write_mouse(0xF3) == Some(0xFA) && write_mouse(r) == Some(0xFA)) && write_mouse(0xF2) == Some(0xFA) {
-        if read_byte() == Some(3) {
-            size = 4;
-        }
+    if [200u8, 100, 80].iter().all(|&r| write_mouse(0xF3) == Some(0xFA) && write_mouse(r) == Some(0xFA))
+        && write_mouse(0xF2) == Some(0xFA)
+        && read_byte() == Some(3)
+    {
+        size = 4;
     }
     write_mouse(0xF4); // start reporting
     {

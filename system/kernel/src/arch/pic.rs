@@ -28,7 +28,7 @@ pub fn init() {
     outb(PIC2_DATA, 1);
     io_wait();
     let mut mask = MASK.lock();
-    *mask = 0xFFFF & !(1 << 2); // everything masked but the cascade
+    *mask = !(1 << 2); // everything masked but the cascade
     apply(*mask);
 }
 

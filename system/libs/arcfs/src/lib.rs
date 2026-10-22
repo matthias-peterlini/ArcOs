@@ -800,7 +800,7 @@ impl<D: BlockDevice> Fs<D> {
         } else {
             self.resize_blocks(&mut node, &mut extents, blocks)?;
             // Clear the tail of the last block so a later grow reads zeros.
-            if size % BLOCK_SIZE as u64 != 0 {
+            if !size.is_multiple_of(BLOCK_SIZE as u64) {
                 let end = blocks * BLOCK_SIZE as u64;
                 self.zero_range(&extents, size, end)?;
             }
@@ -829,17 +829,13 @@ impl<D: BlockDevice> Fs<D> {
         let mut raw = vec![0u8; node.size as usize];
         self.read_node(&node, 0, &mut raw)?;
         let mut out = Vec::new();
-        for e in raw.chunks_exact(DIRENT_SIZE) {
+        for e in raw.as_chunks::<DIRENT_SIZE>().0 {
             let id = le32(e, 0);
             if id == 0 {
                 continue;
             }
             let len = (e[5] as usize).min(MAX_NAME);
-            out.push(DirEntry {
-                name: String::from_utf8_lossy(&e[8..8 + len]).into_owned(),
-                node: id,
-                kind: Kind::from_u8(e[4]),
-            });
+            out.push(DirEntry { name: String::from_utf8_lossy(&e[8..8 + len]).into_owned(), node: id, kind: Kind::from_u8(e[4]) });
         }
         Ok(out)
     }
@@ -886,7 +882,7 @@ impl<D: BlockDevice> Fs<D> {
         entry[4] = kind as u8;
         entry[5] = name.len() as u8;
         entry[8..8 + name.len()].copy_from_slice(name.as_bytes());
-        let slot = raw.chunks_exact(DIRENT_SIZE).position(|e| le32(e, 0) == 0).unwrap_or(raw.len() / DIRENT_SIZE);
+        let slot = raw.as_chunks::<DIRENT_SIZE>().0.iter().position(|e| le32(e, 0) == 0).unwrap_or(raw.len() / DIRENT_SIZE);
         self.write_node_data(dir, &mut node, (slot * DIRENT_SIZE) as u64, &entry)
     }
 
@@ -894,7 +890,7 @@ impl<D: BlockDevice> Fs<D> {
         let mut node = self.node(dir)?;
         let mut raw = vec![0u8; node.size as usize];
         self.read_node(&node, 0, &mut raw)?;
-        let slot = raw.chunks_exact(DIRENT_SIZE).position(|e| le32(e, 0) == id).ok_or(Error::NotFound)?;
+        let slot = raw.as_chunks::<DIRENT_SIZE>().0.iter().position(|e| le32(e, 0) == id).ok_or(Error::NotFound)?;
         self.write_node_data(dir, &mut node, (slot * DIRENT_SIZE) as u64, &[0u8; DIRENT_SIZE])
     }
 

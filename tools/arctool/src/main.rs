@@ -216,7 +216,7 @@ fn cmd_image(args: &[String]) -> Result<()> {
     let part_lba = esp_lba + esp_sectors;
     let total_sectors = size / SECTOR;
     if part_lba + 4096 > total_sectors {
-        return Err(format!("the image is too small: the system needs at least {} MiB", (part_lba + 4096) * SECTOR >> 20));
+        return Err(format!("the image is too small: the system needs at least {} MiB", ((part_lba + 4096) * SECTOR) >> 20));
     }
     if memsz > (1 << 30) {
         return Err("kernel too big".into());

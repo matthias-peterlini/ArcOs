@@ -45,10 +45,6 @@ impl Disk {
         }
     }
 
-    pub fn is_gone(&self) -> bool {
-        *self.whole().0.gone.lock()
-    }
-
     /// Reads `buf.len() / sector_size` sectors at `lba`.
     pub fn read(&self, lba: u64, buf: &mut [u8]) -> Status {
         self.transfer(lba, buf.as_mut_ptr(), buf.len(), false)
@@ -63,7 +59,7 @@ impl Disk {
 
     fn transfer(&self, lba: u64, buf: *mut u8, len: usize, write: bool) -> Status {
         let ss = self.sector_size as usize;
-        if len % ss != 0 {
+        if !len.is_multiple_of(ss) {
             return E_INVAL;
         }
         let count = (len / ss) as u64;
@@ -269,7 +265,7 @@ fn scan_gpt(disk: &Arc<Disk>) -> Vec<Arc<Disk>> {
     let entries_lba = le64(&hdr, 72);
     let count = le32(&hdr, 80).min(256) as usize;
     let esize = le32(&hdr, 84) as usize;
-    if esize < 128 || esize > 1024 {
+    if !(128..=1024).contains(&esize) {
         return out;
     }
     let bytes = (count * esize).div_ceil(ss) * ss;

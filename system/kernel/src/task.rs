@@ -69,6 +69,8 @@ struct Sched {
     current: Tid,
     idle: Tid,
     next_tid: Tid,
+    // Boxed: a thread can die while its context is being saved into it.
+    #[allow(clippy::vec_box)]
     zombies: Vec<Box<Thread>>,
     slice: u32,
     started: bool,
@@ -174,7 +176,7 @@ pub(crate) fn spawn_in(name: &str, entry: Entry, arg: *mut c_void, cr3: u64, pid
     let stack = region::alloc_pages(&region::STACKS, STACK_PAGES, 1)?;
     let top = stack + STACK_PAGES * mem::PAGE_SIZE;
     let rsp = top - 9 * 8;
-    let frame = [0u64, 0, arg as u64, entry as usize as u64, 0, 0, thread_trampoline as usize as u64, 0, 0];
+    let frame = [0u64, 0, arg as u64, entry as usize as u64, 0, 0, thread_trampoline as *const () as u64, 0, 0];
     // SAFETY: the stack was just mapped and is owned by the new thread.
     unsafe { core::ptr::copy_nonoverlapping(frame.as_ptr(), rsp as *mut u64, frame.len()) };
     let mut s = SCHED.lock();
@@ -374,10 +376,6 @@ pub fn leave_address_space() {
     unsafe { cpu::write_cr3(mem::paging::kernel_pml4()) };
 }
 
-pub fn current() -> Tid {
-    SCHED.lock().current
-}
-
 pub fn current_pid() -> u32 {
     let s = SCHED.lock();
     s.threads.get(&s.current).map(|t| t.pid).unwrap_or(0)
@@ -481,13 +479,6 @@ impl WaitQueue {
             wake(t);
         }
     }
-
-    pub fn notify_one(&self) {
-        let t = self.waiters.lock().pop_front();
-        if let Some(t) = t {
-            wake(t);
-        }
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -511,23 +502,6 @@ pub fn list() -> Vec<ThreadInfo> {
             pid: t.pid,
         })
         .collect()
-}
-
-/// Ends another thread (it must not hold kernel locks: only used for user
-/// program threads, which are always stopped at a safe point).
-pub fn kill(tid: Tid) -> bool {
-    let mut s = SCHED.lock();
-    if tid == s.current || tid == s.idle {
-        return false;
-    }
-    match s.threads.remove(&tid) {
-        Some(mut t) => {
-            t.state = State::Dead;
-            s.zombies.push(t);
-            true
-        }
-        None => false,
-    }
 }
 
 // ----------------------------------------------------------------------------

@@ -37,7 +37,7 @@ pub struct TrapFrame {
 }
 
 impl TrapFrame {
-    pub fn from_user(&self) -> bool {
+    pub fn is_user(&self) -> bool {
         self.cs & 3 == 3
     }
 }
@@ -228,7 +228,7 @@ extern "C" fn trap_dispatch(frame: &mut TrapFrame) {
 
 fn exception(frame: &mut TrapFrame) {
     let vector = frame.vector as usize;
-    if frame.from_user() {
+    if frame.is_user() {
         crate::task::user_fault(frame, EXCEPTIONS[vector]);
         return;
     }

@@ -74,9 +74,7 @@ impl<'a> MatchRule<'a> {
     /// score where more specific rules win (an exact id beats a class).
     pub fn score(&self, dev: &DeviceInfo) -> Option<u32> {
         match *self {
-            MatchRule::PciId { vendor, device } => {
-                (dev.bus == BUS_PCI && dev.vendor == vendor && dev.device == device).then_some(100)
-            }
+            MatchRule::PciId { vendor, device } => (dev.bus == BUS_PCI && dev.vendor == vendor && dev.device == device).then_some(100),
             MatchRule::PciClass { class, subclass, prog_if } => {
                 if dev.bus != BUS_PCI || dev.class != class {
                     return None;

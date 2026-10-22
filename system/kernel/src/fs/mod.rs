@@ -19,7 +19,7 @@ use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use arcfs::{BlockDevice, DirEntry, Fs, Kind, MemDisk, NodeId};
+use arcfs::{BlockDevice, DirEntry, Fs, Kind, MemDisk};
 
 pub use arcfs::Error;
 
@@ -234,13 +234,6 @@ impl Path {
     pub fn name(&self) -> &str {
         self.inner.rsplit('/').next().unwrap_or("")
     }
-
-    pub fn parent(&self) -> Path {
-        match self.inner.rfind('/') {
-            Some(0) | None => Path::root(&self.volume),
-            Some(i) => Path { volume: self.volume.clone(), inner: String::from(&self.inner[..i]) },
-        }
-    }
 }
 
 impl core::fmt::Display for Path {
@@ -263,8 +256,6 @@ pub struct Stat {
     pub kind: Kind,
     pub size: u64,
     pub modified: u64,
-    pub created: u64,
-    pub flags: u8,
 }
 
 pub fn stat(path: &Path) -> Result<Stat> {
@@ -272,7 +263,7 @@ pub fn stat(path: &Path) -> Result<Stat> {
     let mut fs = v.fs.lock();
     let id = fs.lookup(&path.inner)?;
     let n = fs.node(id)?;
-    Ok(Stat { kind: n.kind, size: n.size, modified: n.modified, created: n.created, flags: n.flags })
+    Ok(Stat { kind: n.kind, size: n.size, modified: n.modified })
 }
 
 pub fn exists(path: &Path) -> bool {
@@ -344,7 +335,7 @@ pub fn list_dir(path: &Path) -> Result<Vec<(DirEntry, Stat)>> {
     let mut out = Vec::new();
     for e in fs.read_dir(id)? {
         let n = fs.node(e.node)?;
-        out.push((e, Stat { kind: n.kind, size: n.size, modified: n.modified, created: n.created, flags: n.flags }));
+        out.push((e, Stat { kind: n.kind, size: n.size, modified: n.modified }));
     }
     out.sort_by(|a, b| (a.0.kind != Kind::Dir).cmp(&(b.0.kind != Kind::Dir)).then(a.0.name.to_lowercase().cmp(&b.0.name.to_lowercase())));
     Ok(out)
@@ -392,13 +383,6 @@ pub fn rename(from: &Path, to: &Path) -> Result<()> {
 pub fn copy_file(from: &Path, to: &Path) -> Result<()> {
     let data = read_file(from)?;
     write_file(to, &data)
-}
-
-/// Node id of a path (for diagnostics).
-pub fn node_id(path: &Path) -> Result<NodeId> {
-    let v = vol(path)?;
-    let mut fs = v.fs.lock();
-    fs.lookup(&path.inner)
 }
 
 /// Runs the consistency check of a volume; returns the problems found.

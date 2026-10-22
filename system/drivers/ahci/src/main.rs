@@ -232,7 +232,8 @@ fn setup_port(dev: u32, hba: Mmio, index: usize) -> Status {
     }
     let id = &port.bounce.as_slice()[..512];
     let word = |i: usize| u16::from_le_bytes([id[i * 2], id[i * 2 + 1]]) as u64;
-    let sectors = if word(83) & (1 << 10) != 0 { word(100) | word(101) << 16 | word(102) << 32 | word(103) << 48 } else { word(60) | word(61) << 16 };
+    let sectors =
+        if word(83) & (1 << 10) != 0 { word(100) | word(101) << 16 | word(102) << 32 | word(103) << 48 } else { word(60) | word(61) << 16 };
     let name = model(id);
     if sectors == 0 {
         return E_IO;

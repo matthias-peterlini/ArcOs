@@ -71,7 +71,15 @@ struct Command {
 
 impl Queue {
     fn new(id: u16) -> Option<Queue> {
-        Some(Queue { sq: Dma::new(QUEUE_DEPTH as usize * 64)?, cq: Dma::new(QUEUE_DEPTH as usize * 16)?, sq_tail: 0, cq_head: 0, phase: true, id, cid: 0 })
+        Some(Queue {
+            sq: Dma::new(QUEUE_DEPTH as usize * 64)?,
+            cq: Dma::new(QUEUE_DEPTH as usize * 16)?,
+            sq_tail: 0,
+            cq_head: 0,
+            phase: true,
+            id,
+            cid: 0,
+        })
     }
 }
 
@@ -216,7 +224,9 @@ fn probe(dev: &DeviceInfo) -> Status {
     if !arcdrv::wait_until(timeout, || regs.read32(REG_CSTS) & 1 == 0) {
         return E_TIMEOUT;
     }
-    let (Some(admin), Some(bounce), Some(prp_list)) = (Queue::new(0), Dma::new(BOUNCE_PAGES * PAGE), Dma::new(PAGE)) else { return E_NOMEM };
+    let (Some(admin), Some(bounce), Some(prp_list)) = (Queue::new(0), Dma::new(BOUNCE_PAGES * PAGE), Dma::new(PAGE)) else {
+        return E_NOMEM;
+    };
     for i in 1..BOUNCE_PAGES {
         prp_list.write::<u64>((i - 1) * 8, bounce.phys() + (i * PAGE) as u64);
     }

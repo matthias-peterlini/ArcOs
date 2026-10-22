@@ -1,13 +1,40 @@
-# Commands typed by `make test`.
+# Commands typed by `make test` (and `make test-uefi`).
 help
 sysinfo
 dev
 drv
 vol
 disks
+# files
 ls sys:/
 cat sys:/home/welcome.txt
+mkdir ram:/test/deep
+write ram:/test/deep/note.txt hello from arcOS
+append ram:/test/deep/note.txt second line
+cp ram:/test/deep/note.txt sys:/home/note.txt
+cat sys:/home/note.txt
+mv sys:/home/note.txt sys:/home/renamed.txt
+ls sys:/home
+rm sys:/home/renamed.txt
+check sys
+unmount ram
+vol
+# programs
+hello world
+info
+calc 6 * 7 + 0.5
+hello --crash
 mem
+# drivers
+kbd
+drv info ps2mouse
+drv remove ps2mouse
+drv reload ps2kbd
+drv
+# network
+@sleep 2
+net
+ping 10.0.2.2 2
 ps
 uptime
 shutdown

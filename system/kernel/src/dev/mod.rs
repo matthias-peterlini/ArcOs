@@ -58,7 +58,8 @@ impl Device {
 
     /// Bridges and other devices that need no driver.
     pub fn needs_driver(&self) -> bool {
-        !(self.info.bus == BUS_PCI && (self.info.class == 0x06 || (self.info.class == 0x05) || (self.info.class == 0x08 && self.info.subclass == 0x80)))
+        !(self.info.bus == BUS_PCI
+            && (self.info.class == 0x06 || (self.info.class == 0x05) || (self.info.class == 0x08 && self.info.subclass == 0x80)))
     }
 }
 

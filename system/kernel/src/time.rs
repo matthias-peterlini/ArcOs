@@ -66,13 +66,8 @@ pub fn init() {
     BOOT_TIME.store(to_epoch(year, month, day, hour, min, sec), Ordering::Relaxed);
 }
 
-/// Sets the wall clock (and the CMOS clock is left alone).
-pub fn set_now(secs: u64) {
-    BOOT_TIME.store(secs.saturating_sub(uptime_ms() / 1000), Ordering::Relaxed);
-}
-
 fn is_leap(y: u64) -> bool {
-    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+    (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400)
 }
 
 fn days_in_month(y: u64, m: u64) -> u64 {

@@ -24,7 +24,7 @@ use core::alloc::{GlobalAlloc, Layout};
 use core::cell::UnsafeCell;
 use core::ffi::c_void;
 use core::fmt::{self, Write};
-use core::sync::atomic::{AtomicPtr, AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 
 static API: AtomicPtr<KernelApi> = AtomicPtr::new(core::ptr::null_mut());
 static NAME: AtomicPtr<&'static str> = AtomicPtr::new(core::ptr::null_mut());
@@ -39,9 +39,12 @@ pub fn api() -> &'static KernelApi {
 
 /// Called by the code [`driver!`] generates. Returns false if the kernel
 /// speaks another ABI version.
+///
+/// # Safety
+/// `table` must be the kernel's API table.
 #[doc(hidden)]
-pub fn init(table: *const KernelApi, name: &'static &'static str) -> bool {
-    // SAFETY: the kernel passes a valid table.
+pub unsafe fn init(table: *const KernelApi, name: &'static &'static str) -> bool {
+    // SAFETY: the caller passes the kernel's table.
     let version = unsafe { (*table).abi_version };
     if version != ABI_VERSION {
         return false;
@@ -84,7 +87,8 @@ macro_rules! driver {
         #[no_mangle]
         pub unsafe extern "C" fn arc_driver_entry(api: *const $crate::KernelApi) -> *const $crate::DriverInfo {
             static NAME: &str = $name;
-            if !$crate::init(api, &NAME) {
+            // SAFETY: the kernel calls the entry with its API table.
+            if !unsafe { $crate::init(api, &NAME) } {
                 return core::ptr::null();
             }
             &__ARC_DRIVER_INFO
@@ -207,6 +211,8 @@ pub fn wait_until(timeout_ms: u64, mut cond: impl FnMut() -> bool) -> bool {
 }
 
 /// Starts a kernel thread running `entry(ctx)`.
+// `ctx` is only handed back to `entry`, which knows what it points to.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn spawn(name: &str, entry: ThreadEntry, ctx: *mut c_void) -> Status {
     // SAFETY: valid name for the call.
     unsafe { (api().spawn)(name.as_ptr(), name.len(), entry, ctx) }
@@ -488,6 +494,8 @@ impl Pci {
 // Interrupts and locks
 
 /// Attaches `handler(ctx)` to a legacy interrupt line of `device`.
+// `ctx` is only handed back to `handler`, which knows what it points to.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn irq_attach(device: u32, irq: u8, handler: IrqHandler, ctx: *mut c_void) -> Status {
     // SAFETY: kernel call.
     unsafe { (api().irq_attach)(device, irq, handler, ctx) }

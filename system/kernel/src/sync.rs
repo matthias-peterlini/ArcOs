@@ -107,13 +107,6 @@ impl<T: ?Sized> Mutex<T> {
         }
         MutexGuard { lock: self }
     }
-
-    pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
-        self.locked
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_ok()
-            .then_some(MutexGuard { lock: self })
-    }
 }
 
 impl<T: ?Sized> Deref for MutexGuard<'_, T> {

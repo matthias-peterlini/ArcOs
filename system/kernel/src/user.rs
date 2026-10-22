@@ -76,7 +76,6 @@ pub fn find_program(name: &str, cwd: &Path) -> Option<Path> {
 struct Start {
     image: Vec<u8>,
     args: String,
-    pid: u32,
 }
 
 /// Starts a program. Returns its process id.
@@ -95,9 +94,18 @@ pub fn spawn(path: &Path, args: &str, cwd: Path) -> Result<u32, Error> {
     let name = String::from(path.name().trim_end_matches(".app"));
     PROCS.lock().insert(
         pid,
-        Process { name: name.clone(), cr3, tid: 0, handles: Vec::new(), heap_next: sys::USER_HEAP_BASE, cwd, state: State::Running, kill: false },
+        Process {
+            name: name.clone(),
+            cr3,
+            tid: 0,
+            handles: Vec::new(),
+            heap_next: sys::USER_HEAP_BASE,
+            cwd,
+            state: State::Running,
+            kill: false,
+        },
     );
-    let start = Box::into_raw(Box::new(Start { image, args: String::from(args), pid }));
+    let start = Box::into_raw(Box::new(Start { image, args: String::from(args) }));
     match task::spawn_in(&name, user_start, start as *mut c_void, cr3, pid) {
         Some(tid) => {
             if let Some(p) = PROCS.lock().get_mut(&pid) {
@@ -258,15 +266,10 @@ fn kill_requested() -> bool {
 
 /// Called on timer interrupts that hit user mode.
 pub fn check_kill(frame: &TrapFrame) {
-    if frame.from_user() && kill_requested() {
+    if frame.is_user() && kill_requested() {
         cpu::enable_irq();
         terminate(-130);
     }
-}
-
-/// (pid, name, running)
-pub fn list() -> Vec<(u32, String, bool)> {
-    PROCS.lock().iter().map(|(&pid, p)| (pid, p.name.clone(), p.state == State::Running)).collect()
 }
 
 pub fn count() -> usize {
@@ -556,7 +559,7 @@ fn call(n: u64, a: [u64; 5]) -> Result<u64, Error> {
 }
 
 pub fn syscall(frame: &mut TrapFrame) {
-    if !frame.from_user() {
+    if !frame.is_user() {
         frame.rax = (-(Error::Unknown as i64)) as u64;
         return;
     }

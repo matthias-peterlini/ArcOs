@@ -4,11 +4,11 @@ use core::mem::offset_of;
 
 pub const MAGIC: u64 = u64::from_le_bytes(*b"ARCBOOT1");
 
-pub const FB_NONE: u32 = 0;
+// fb_kind: 0 = no screen.
 pub const FB_RGB: u32 = 1;
 pub const FB_TEXT: u32 = 2;
 
-pub const LOADER_BIOS: u32 = 1;
+// loader: 1 = BIOS.
 pub const LOADER_UEFI: u32 = 2;
 
 #[repr(C)]
@@ -67,22 +67,9 @@ pub struct MemoryRegion {
     pub ext: u32,
 }
 
+/// Free RAM. Other kinds (2 reserved, 3 ACPI tables, 4 ACPI NVS, 5 bad)
+/// are never handed out.
 pub const MEM_USABLE: u32 = 1;
-pub const MEM_RESERVED: u32 = 2;
-pub const MEM_ACPI_RECLAIM: u32 = 3;
-pub const MEM_ACPI_NVS: u32 = 4;
-pub const MEM_BAD: u32 = 5;
-
-pub fn region_kind_name(kind: u32) -> &'static str {
-    match kind {
-        MEM_USABLE => "usable",
-        MEM_RESERVED => "reserved",
-        MEM_ACPI_RECLAIM => "ACPI tables",
-        MEM_ACPI_NVS => "ACPI NVS",
-        MEM_BAD => "bad",
-        _ => "other",
-    }
-}
 
 impl BootInfo {
     /// The memory map. The boot loader's identity map is still active, or
@@ -90,8 +77,6 @@ impl BootInfo {
     pub fn memory_map(&self) -> &'static [MemoryRegion] {
         // SAFETY: the loader stores `mmap_count` entries at `mmap_addr`, which
         // is reachable through the direct map.
-        unsafe {
-            core::slice::from_raw_parts(crate::mem::phys_to_virt(self.mmap_addr) as *const MemoryRegion, self.mmap_count as usize)
-        }
+        unsafe { core::slice::from_raw_parts(crate::mem::phys_to_virt(self.mmap_addr) as *const MemoryRegion, self.mmap_count as usize) }
     }
 }

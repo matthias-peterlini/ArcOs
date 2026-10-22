@@ -17,7 +17,6 @@ struct Fadt {
     reset_addr: u64,
     reset_value: u8,
     reset_supported: bool,
-    boot_arch: u16,
 }
 
 struct Acpi {
@@ -100,7 +99,6 @@ pub fn init(rsdp_hint: u64) {
                 pm1a_cnt: le32(t, 64),
                 pm1b_cnt: le32(t, 68),
                 dsdt: le32(t, 40) as u64,
-                boot_arch: le16(t, 109),
                 ..Fadt::default()
             };
             if t.len() >= 129 {

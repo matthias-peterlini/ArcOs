@@ -7,8 +7,8 @@
 
 use crate::arch::cpu::{inb, outb};
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicU8, Ordering};
 use arcdk::{DeviceInfo, Resource, BUS_PLATFORM, IRQ_NONE, RES_IO};
+use core::sync::atomic::{AtomicU8, Ordering};
 
 const DATA: u16 = 0x60;
 const STATUS: u16 = 0x64;
@@ -86,7 +86,7 @@ fn init_8042() -> Ps2 {
         return none;
     }
     write_config(config); // the self-test may reset it
-    // A second port exists if enabling it clears the "port 2 clock off" bit.
+                          // A second port exists if enabling it clears the "port 2 clock off" bit.
     command(0xA8);
     let dual = command_read(0x20).is_some_and(|c| c & 0x20 == 0);
     command(0xA7);
