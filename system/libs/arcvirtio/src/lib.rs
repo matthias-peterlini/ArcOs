@@ -222,7 +222,7 @@ impl Virtio {
     /// registers when MSI-X is on). Returns false if there is none.
     pub fn attach_irq(&self, dev: &DeviceInfo, handler: IrqHandler, ctx: *mut c_void) -> bool {
         if let Regs::Modern { common, .. } = &self.regs {
-            if arcdrv::irq_attach_msi(dev.id, handler, ctx) == OK {
+            if arcdrv::irq_attach_msi(dev.id, handler, ctx) >= 0 {
                 let msix = self.pci.find_capability(CAP_MSIX, 0).is_some_and(|c| self.pci.read16(c + 2) & (1 << 15) != 0);
                 if msix {
                     // Everything on the first vector.

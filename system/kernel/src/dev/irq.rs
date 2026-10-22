@@ -52,6 +52,7 @@ pub const MSI_FIRST: u8 = 48;
 pub const MSI_LAST: u8 = 127;
 
 static MSI: IrqLock<[Option<Entry>; (MSI_LAST - MSI_FIRST + 1) as usize]> = IrqLock::new([None; (MSI_LAST - MSI_FIRST + 1) as usize]);
+static MSI_COUNTS: IrqLock<[u64; (MSI_LAST - MSI_FIRST + 1) as usize]> = IrqLock::new([0; (MSI_LAST - MSI_FIRST + 1) as usize]);
 
 const CAP_MSI: u8 = 0x05;
 const CAP_MSIX: u8 = 0x11;
@@ -74,6 +75,7 @@ pub fn attach_msi(device: u32, handler: IrqHandler, ctx: *mut c_void) -> Result<
         let mut table = MSI.lock();
         let free = table.iter().position(|e| e.is_none()).ok_or(arcdk::E_BUSY)?;
         table[free] = Some(Entry { owner: device, handler: Handler::Driver(handler, ctx) });
+        MSI_COUNTS.lock()[free] = 0;
         MSI_FIRST + free as u8
     };
     let address = 0xFEE0_0000u32 | (apic_id & 0xFF) << 12;
@@ -159,6 +161,7 @@ fn disable_msi(device: u32) {
 
 /// Runs the handler of a message-signalled interrupt.
 pub fn dispatch_msi(vector: u8) {
+    MSI_COUNTS.lock()[(vector - MSI_FIRST) as usize] += 1;
     let entry = MSI.lock()[(vector - MSI_FIRST) as usize];
     if let Some(Entry { handler: Handler::Driver(f, ctx), .. }) = entry {
         // SAFETY: the driver registered this handler with this context.
@@ -213,4 +216,11 @@ pub fn stats() -> Vec<(u8, u64, Vec<u32>)> {
         .filter(|&i| counts[i as usize] != 0 || !lines[i as usize].is_empty())
         .map(|i| (i, counts[i as usize], lines[i as usize].iter().map(|e| e.owner).collect()))
         .collect()
+}
+
+/// (vector, interrupts so far, owner) for every message interrupt in use.
+pub fn msi_stats() -> Vec<(u8, u64, u32)> {
+    let table = MSI.lock();
+    let counts = MSI_COUNTS.lock();
+    table.iter().enumerate().filter_map(|(i, e)| e.map(|e| (MSI_FIRST + i as u8, counts[i], e.owner))).collect()
 }

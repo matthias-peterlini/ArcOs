@@ -63,7 +63,7 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("ps", "", "running programs and threads"),
     ("kill", "<pid>", "stop a program"),
     ("run", "<program> [args]", "start a program (also just: <program>)"),
-    ("irq", "", "interrupt lines"),
+    ("irq", "", "interrupt lines and message interrupts"),
     ("net", "", "network interfaces and addresses"),
     ("ping", "<host> [count]", "send ICMP echo requests"),
     ("host", "<name>", "look up the address of a host name"),
@@ -522,6 +522,10 @@ impl Shell {
                         })
                         .collect();
                     println!("IRQ {:>2}  {:>10}  {}", line, count, names.join(", "));
+                }
+                for (vector, count, owner) in dev::irq::msi_stats() {
+                    let name = dev::get(owner).and_then(|d| d.driver).unwrap_or_else(|| alloc::format!("device {owner}"));
+                    println!("MSI {vector:>2}  {count:>10}  {name}");
                 }
             }
             "net" => {
