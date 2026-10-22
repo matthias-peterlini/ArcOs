@@ -112,6 +112,20 @@ pub fn mount_boot_pack(phys: u64, size: u64) {
     }
 }
 
+/// Mounts the system volume the boot loader read from a live CD as `sys:`.
+/// It lives in memory: changes last until the computer is turned off.
+pub fn mount_live_system(phys: u64, size: u64) {
+    // SAFETY: the frame allocator keeps the volume's memory reserved.
+    let bytes = unsafe { core::slice::from_raw_parts(crate::mem::phys_to_virt(phys) as *const u8, size as usize) };
+    let disk = MemDisk { data: bytes.to_vec(), read_only: false };
+    match Fs::mount(Box::new(disk) as Box<dyn BlockDevice + Send>, &CLOCK) {
+        Ok(fs) => {
+            mount("sys", "memory (live CD)", fs);
+        }
+        Err(e) => crate::error!("fs", "live system volume: {e}"),
+    }
+}
+
 /// Creates the `ram:` volume.
 pub fn mount_ram(bytes: usize) {
     let disk = MemDisk::new(bytes / arcfs::BLOCK_SIZE);

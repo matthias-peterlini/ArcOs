@@ -1,6 +1,8 @@
 //! A FAT16 volume for the EFI system partition: the UEFI firmware reads the
 //! loader, the kernel and the boot pack from it. Written once, in one go:
-//! every file and folder gets contiguous clusters.
+//! every file and folder gets contiguous clusters, and the data area starts
+//! on a 2048-byte boundary, so on a CD the BIOS loader can read files
+//! straight from their sectors.
 
 use crate::Result;
 
@@ -87,6 +89,7 @@ struct Writer {
     fat: Vec<u16>,
     next: usize,
     data_start: usize,
+    offsets: Offsets,
 }
 
 impl Writer {
@@ -111,7 +114,7 @@ impl Writer {
 
     /// Writes the contents of `dir` (whose own cluster is `own`, 0 for the
     /// root) and returns its entry table.
-    fn write_dir(&mut self, dir: &Dir, own: u16, parent: u16) -> Result<Vec<u8>> {
+    fn write_dir(&mut self, dir: &Dir, own: u16, parent: u16, path: &str) -> Result<Vec<u8>> {
         let mut table = Vec::new();
         if own == 0 {
             table.extend_from_slice(&dir_entry(*LABEL, ATTR_LABEL, 0, 0));
@@ -123,12 +126,14 @@ impl Writer {
             let cluster = if data.is_empty() { 0 } else { self.alloc(data.len())? };
             if cluster != 0 {
                 self.put(cluster, data);
+                let at = self.data_start + (cluster as usize - 2) * CLUSTER;
+                self.offsets.push((format!("{path}{name}"), at as u64));
             }
             table.extend_from_slice(&dir_entry(short_name(name)?, ATTR_ARCHIVE, cluster, data.len() as u32));
         }
         for (name, sub) in &dir.dirs {
             let cluster = self.alloc(sub.entries(false) * 32)?;
-            let contents = self.write_dir(sub, cluster, own)?;
+            let contents = self.write_dir(sub, cluster, own, &format!("{path}{name}/"))?;
             self.put(cluster, &contents);
             table.extend_from_slice(&dir_entry(short_name(name)?, ATTR_DIR, cluster, 0));
         }
@@ -136,14 +141,21 @@ impl Writer {
     }
 }
 
+/// Where each file's data starts in the image, by path.
+pub type Offsets = Vec<(String, u64)>;
+
 /// Builds a FAT16 volume of `size` bytes holding `files` (paths with '/').
-/// `hidden` is the partition's first sector on the disk.
-pub fn build(size: u64, hidden: u64, files: Vec<(&str, Vec<u8>)>) -> Result<Vec<u8>> {
+/// `hidden` is the partition's first sector on the disk. Also returns
+/// where each file's data starts in the image.
+pub fn build(size: u64, hidden: u64, files: Vec<(&str, Vec<u8>)>) -> Result<(Vec<u8>, Offsets)> {
     let total = (size as usize) / SECTOR;
     let root_sectors = ROOT_ENTRIES * 32 / SECTOR;
     let clusters_estimate = (total - RESERVED_SECTORS - root_sectors) / SECTORS_PER_CLUSTER;
     let fat_sectors = ((clusters_estimate + 2) * 2).div_ceil(SECTOR);
-    let data_start = RESERVED_SECTORS + FATS * fat_sectors + root_sectors;
+    // Extra reserved sectors put the data area on a cluster boundary.
+    let unaligned = RESERVED_SECTORS + FATS * fat_sectors + root_sectors;
+    let reserved = RESERVED_SECTORS + unaligned.next_multiple_of(SECTORS_PER_CLUSTER) - unaligned;
+    let data_start = reserved + FATS * fat_sectors + root_sectors;
     let clusters = (total - data_start) / SECTORS_PER_CLUSTER;
     if !(4085..65525).contains(&clusters) {
         return Err(format!("a boot partition of {} MiB cannot be FAT16", size >> 20));
@@ -157,11 +169,17 @@ pub fn build(size: u64, hidden: u64, files: Vec<(&str, Vec<u8>)>) -> Result<Vec<
         return Err("too many files in the boot partition".into());
     }
 
-    let mut w = Writer { image: vec![0; total * SECTOR], fat: vec![0; clusters + 2], next: 2, data_start: data_start * SECTOR };
+    let mut w = Writer {
+        image: vec![0; total * SECTOR],
+        fat: vec![0; clusters + 2],
+        next: 2,
+        data_start: data_start * SECTOR,
+        offsets: Vec::new(),
+    };
     w.fat[0] = 0xFFF8;
     w.fat[1] = 0xFFFF;
-    let root_table = w.write_dir(&root, 0, 0)?;
-    let root_at = (RESERVED_SECTORS + FATS * fat_sectors) * SECTOR;
+    let root_table = w.write_dir(&root, 0, 0, "")?;
+    let root_at = (reserved + FATS * fat_sectors) * SECTOR;
     w.image[root_at..root_at + root_table.len()].copy_from_slice(&root_table);
 
     // Boot sector with the BIOS parameter block.
@@ -170,7 +188,7 @@ pub fn build(size: u64, hidden: u64, files: Vec<(&str, Vec<u8>)>) -> Result<Vec<
     b[3..11].copy_from_slice(b"ARCOS   ");
     b[11..13].copy_from_slice(&(SECTOR as u16).to_le_bytes());
     b[13] = SECTORS_PER_CLUSTER as u8;
-    b[14..16].copy_from_slice(&(RESERVED_SECTORS as u16).to_le_bytes());
+    b[14..16].copy_from_slice(&(reserved as u16).to_le_bytes());
     b[16] = FATS as u8;
     b[17..19].copy_from_slice(&(ROOT_ENTRIES as u16).to_le_bytes());
     if total < 0x10000 {
@@ -193,10 +211,10 @@ pub fn build(size: u64, hidden: u64, files: Vec<(&str, Vec<u8>)>) -> Result<Vec<
 
     let fat_bytes: Vec<u8> = w.fat.iter().flat_map(|e| e.to_le_bytes()).collect();
     for i in 0..FATS {
-        let at = (RESERVED_SECTORS + i * fat_sectors) * SECTOR;
+        let at = (reserved + i * fat_sectors) * SECTOR;
         w.image[at..at + fat_bytes.len()].copy_from_slice(&fat_bytes);
     }
-    Ok(w.image)
+    Ok((w.image, w.offsets))
 }
 
 #[cfg(test)]
@@ -213,11 +231,19 @@ mod tests {
 
     #[test]
     fn layout() {
-        let img = build(16 << 20, 2048, vec![("EFI/BOOT/BOOTX64.EFI", vec![1; 5000]), ("ARCOS/KERNEL.BIN", vec![2; 10])]).unwrap();
+        let (img, offsets) =
+            build(16 << 20, 2048, vec![("EFI/BOOT/BOOTX64.EFI", vec![1; 5000]), ("ARCOS/KERNEL.BIN", vec![2; 10])]).unwrap();
         assert_eq!(img.len(), 16 << 20);
         assert_eq!(&img[54..59], b"FAT16");
         let fat_sectors = u16::from_le_bytes([img[22], img[23]]) as usize;
-        let root = (RESERVED_SECTORS + FATS * fat_sectors) * SECTOR;
+        let reserved = u16::from_le_bytes([img[14], img[15]]) as usize;
+        let root = (reserved + FATS * fat_sectors) * SECTOR;
+        // Files start on 2048-byte boundaries, where their data is.
+        for (name, at) in &offsets {
+            assert_eq!(at % 2048, 0, "{name}");
+        }
+        let kernel = offsets.iter().find(|(n, _)| n == "ARCOS/KERNEL.BIN").unwrap().1 as usize;
+        assert_eq!(&img[kernel..kernel + 10], &[2; 10]);
         // Root: the folders, in the order they were first named.
         assert_eq!(&img[root..root + 11], LABEL);
         assert_eq!(&img[root + 32..root + 43], b"EFI        ");

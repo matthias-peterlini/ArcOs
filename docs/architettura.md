@@ -13,7 +13,7 @@ sia da UEFI:
 
 | Settori | Contenuto |
 |---|---|
-| 0 | MBR: codice dello stadio 1, tabella di avvio (`ARCB`, a 0x190), tabella delle partizioni |
+| 0 | MBR: codice dello stadio 1, tabella di avvio (da 0x180, firma `ARCB` a 0x190), tabella delle partizioni |
 | 1–63 | stadio 2 del loader BIOS |
 | 64– | kernel (immagine piatta) e, subito dopo, il pacchetto di avvio |
 | partizione 2 (tipo 0xEF) | partizione di sistema EFI, FAT16, 16 MiB: `EFI/BOOT/BOOTX64.EFI`, `ARCOS/KERNEL.BIN`, `ARCOS/BOOTPACK.IMG` |
@@ -26,12 +26,36 @@ memoria e il kernel lo monta come `boot:`. Così il kernel può leggere il
 disco di sistema con un driver normale, installabile e aggiornabile,
 invece di averne uno incorporato.
 
+### Il CD live
+
+`arctool iso` produce un CD ISO 9660 con un catalogo El Torito per BIOS e
+per UEFI (`tools/arctool/src/iso.rs`):
+
+| Settori da 2048 byte | Contenuto |
+|---|---|
+| 16–22 | descrittori del volume, catalogo di avvio, cartella radice (vuota) |
+| 23 | stadio 1 con la sua tabella di avvio (il BIOS lo carica senza emulazione) |
+| poi | stadio 2, kernel |
+| poi | immagine FAT dell'avvio UEFI: `BOOTX64.EFI`, `KERNEL.BIN`, `BOOTPACK.IMG`, `SYSTEM.IMG` |
+
+`SYSTEM.IMG` è il volume "System" (16 MiB, `make LIVE_SIZE=…`). Il loader
+BIOS legge il pacchetto di avvio e il volume di sistema direttamente dai
+settori dell'immagine FAT, dove i file sono contigui e allineati a 2048
+byte. Entrambi i loader caricano il volume di sistema in memoria e lo
+passano nella `BootInfo`; il kernel lo monta come `sys:` (in memoria: le
+modifiche si perdono allo spegnimento). Così non serve un driver per i
+lettori CD.
+
 ### ArcBoot per BIOS (`boot/bios`)
 
-- **Stadio 1** (512 byte, nell'MBR): legge lo stadio 2 con INT 13h esteso.
+- **Stadio 1** (512 byte, nell'MBR o nel primo settore di avvio del CD):
+  legge lo stadio 2 con INT 13h esteso. La tabella di avvio dà posizioni e
+  dimensioni in settori da 512 byte e dice se il disco è un CD: lì i
+  settori sono di 2048 byte e i loader convertono.
 - **Stadio 2**, in modo reale e "unreal":
   1. abilita la linea A20;
-  2. carica il kernel a 1 MiB e il pacchetto di avvio subito dopo;
+  2. carica il kernel a 1 MiB, il pacchetto di avvio subito dopo e, da un
+     CD live, il volume di sistema dopo ancora;
   3. legge la mappa della memoria (E820), copia il font 8×16 del BIOS e
      cerca la tabella RSDP di ACPI;
   4. sceglie con VBE un modo grafico lineare a 32 bit (preferito
@@ -45,8 +69,9 @@ invece di averne uno incorporato.
 GUID UEFI che usa sono dichiarati a mano in `efi.rs`. Esegue gli stessi
 passi del loader BIOS con i servizi del firmware:
 
-1. legge `KERNEL.BIN` e `BOOTPACK.IMG` dalla partizione da cui è stato
-   avviato (Loaded Image + Simple File System);
+1. legge `KERNEL.BIN`, `BOOTPACK.IMG` e, se c'è (un CD live),
+   `SYSTEM.IMG` dalla partizione da cui è stato avviato (Loaded Image +
+   Simple File System);
 2. sceglie un modo grafico con il Graphics Output Protocol;
 3. prende l'RSDP dalla tabella di configurazione;
 4. costruisce le tabelle delle pagine, legge la mappa della memoria e la
@@ -64,7 +89,8 @@ usa il suo (`console/font.rs`).
 Struttura `#[repr(C)]` definita in `system/kernel/src/boot.rs` (e copiata
 in `stage2.asm` e in `boot/uefi`): mappa della memoria, framebuffer
 (indirizzo, dimensioni, posizione dei canali di colore), font, posizione e
-dimensione del kernel e del pacchetto di avvio, RSDP e tipo di loader.
+dimensione del kernel, del pacchetto di avvio e del volume di sistema di un
+CD live, RSDP e tipo di loader.
 
 ## Memoria
 

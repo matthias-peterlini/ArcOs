@@ -3,7 +3,8 @@
 ; Loaded by stage 1 at 0000:7E00, entered in real mode with the boot drive in
 ; DL. It:
 ;   1. enables the A20 line and switches to "unreal" mode (4 GiB data limit);
-;   2. reads the kernel image to 1 MiB and the boot pack right after it;
+;   2. reads the kernel image to 1 MiB, the boot pack right after it and,
+;      when booting a live CD, the system volume after that;
 ;   3. collects the BIOS memory map (E820) and the 8x16 VGA font;
 ;   4. picks a 32-bit linear framebuffer mode with VBE (text mode otherwise);
 ;   5. builds the initial page tables and enters 64-bit long mode;
@@ -34,7 +35,11 @@ VBE_SEG         equ 0x3000
 KERNEL_PHYS     equ 0x100000
 
 ; Boot table inside stage 1 (see stage1.asm).
+BT_SYSTEM_LBA       equ 0x7C00 + 0x184
+BT_SYSTEM_SECTORS   equ 0x7C00 + 0x188
 BT_STAGE2_SECTORS   equ 0x7C00 + 0x194
+BT_FLAGS            equ 0x7C00 + 0x196
+BOOT_CD             equ 1
 BT_KERNEL_LBA       equ 0x7C00 + 0x198
 BT_KERNEL_SECTORS   equ 0x7C00 + 0x19C
 BT_KERNEL_MEMSZ     equ 0x7C00 + 0x1A0
@@ -64,6 +69,8 @@ BI_PACK_PHYS    equ 0x68
 BI_PACK_SIZE    equ 0x70
 BI_RSDP         equ 0x78
 BI_LOADER       equ 0x80
+BI_SYSTEM_PHYS  equ 0x88
+BI_SYSTEM_SIZE  equ 0x90
 
 FB_NONE         equ 0
 FB_RGB          equ 1
@@ -133,6 +140,26 @@ stage2:
     mov [load_lba], eax
     call load_image
 .no_pack:
+
+    ; --- Live system volume (a CD): after the boot pack, page aligned.
+    mov eax, [BT_SYSTEM_SECTORS]
+    test eax, eax
+    jz .no_system
+    mov si, msg_system
+    call print
+    mov [load_left], eax
+    shl eax, 9
+    mov [BOOTINFO + BI_SYSTEM_SIZE], eax
+    mov eax, [BOOTINFO + BI_PACK_PHYS]
+    add eax, [BOOTINFO + BI_PACK_SIZE]
+    add eax, 0xFFF
+    and eax, 0xFFFFF000
+    mov [BOOTINFO + BI_SYSTEM_PHYS], eax
+    mov [load_dest], eax
+    mov eax, [BT_SYSTEM_LBA]
+    mov [load_lba], eax
+    call load_image
+.no_system:
 
     call read_memory_map
     call read_font
@@ -245,15 +272,26 @@ enter_unreal:
     sti
     ret
 
-; load_image: reads load_left sectors from load_lba to physical load_dest.
+; load_image: reads load_left sectors from load_lba to physical load_dest
+; (512-byte units; on a CD they become 2048-byte sectors, rounded up).
 load_image:
+    mov word [chunk], BOUNCE_SECTORS
+    mov byte [dword_shift], 7
+    test byte [BT_FLAGS], BOOT_CD
+    jz .loop
+    shr dword [load_lba], 2
+    add dword [load_left], 3
+    shr dword [load_left], 2
+    mov word [chunk], BOUNCE_SECTORS / 4
+    mov byte [dword_shift], 9
 .loop:
     mov eax, [load_left]
     test eax, eax
     jz .done
-    cmp eax, BOUNCE_SECTORS
+    movzx ecx, word [chunk]
+    cmp eax, ecx
     jbe .count_ok
-    mov eax, BOUNCE_SECTORS
+    mov eax, ecx
 .count_ok:
     mov [dap_count], ax
     mov word [dap_offset], 0
@@ -268,8 +306,10 @@ load_image:
     jc err_disk
 
     call enter_unreal
-    movzx ecx, word [dap_count]
-    shl ecx, 7                      ; sectors -> dwords
+    movzx eax, word [dap_count]
+    mov cl, [dword_shift]
+    shl eax, cl                     ; sectors -> dwords
+    mov ecx, eax
     mov esi, BOUNCE
     mov edi, [load_dest]
     a32 rep movsd
@@ -614,6 +654,8 @@ boot_drive      db 0
 load_lba        dd 0
 load_left       dd 0
 load_dest       dd 0
+chunk           dw 0                ; sectors per read
+dword_shift     db 0                ; sector size in dwords, as a shift
 mode_list_seg   dw 0
 cur_mode        dw 0
 best_mode       dw 0
@@ -622,6 +664,7 @@ best_area       dd 0
 msg_stage2       db "stage 2", 13, 10, 0
 msg_kernel       db "kernel ", 0
 msg_pack         db "boot pack ", 0
+msg_system       db "system volume ", 0
 msg_ok           db "starting arcOS", 13, 10, 0
 msg_crlf         db 13, 10, 0
 msg_err_disk     db "disk read error", 0

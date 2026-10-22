@@ -1,0 +1,57 @@
+# Builds the live CD and the disk image and publishes them as a GitHub
+# release: on a pushed tag v*, or by hand (Actions > Release > Run workflow)
+# with the tag to create.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag of the release (made on the chosen branch if it does not exist)"
+        required: true
+        default: "v0.1.0"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nasm
+          # rust-toolchain.toml picks the toolchain, targets and rust-src.
+          rustup show
+
+      - name: Unit tests
+        run: make check
+
+      - name: Build
+        run: make image iso
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp build/arcos.iso dist/arcos.iso
+          # The disk image is mostly empty: compressed it is a few MiB.
+          (cd build && zip -9 ../dist/arcos-img.zip arcos.img)
+          (cd dist && sha256sum arcos.iso arcos-img.zip > SHA256SUMS)
+          ls -l dist
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --target "$GITHUB_SHA" \
+              --title "arcOS $TAG" --notes-file .github/release-notes.md
+          fi

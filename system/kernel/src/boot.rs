@@ -43,6 +43,9 @@ pub struct BootInfo {
     pub rsdp: u64,
     pub loader: u32,
     pub _pad2: u32,
+    /// A live system volume (booted from a CD), or 0.
+    pub system_phys: u64,
+    pub system_size: u64,
 }
 
 const _: () = {
@@ -55,6 +58,7 @@ const _: () = {
     assert!(offset_of!(BootInfo, pack_phys) == 0x68);
     assert!(offset_of!(BootInfo, rsdp) == 0x78);
     assert!(offset_of!(BootInfo, loader) == 0x80);
+    assert!(offset_of!(BootInfo, system_phys) == 0x88);
 };
 
 /// One entry of the firmware memory map (E820 layout).

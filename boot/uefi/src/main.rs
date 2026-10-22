@@ -73,6 +73,8 @@ struct BootInfo {
     rsdp: u64,
     loader: u32,
     _pad2: u32,
+    system_phys: u64,
+    system_size: u64,
 }
 
 const _: () = {
@@ -82,6 +84,7 @@ const _: () = {
     assert!(offset_of!(BootInfo, kernel_phys) == 0x58);
     assert!(offset_of!(BootInfo, rsdp) == 0x78);
     assert!(offset_of!(BootInfo, loader) == 0x80);
+    assert!(offset_of!(BootInfo, system_phys) == 0x88);
 };
 
 const FB_RGB: u32 = 1;
@@ -213,15 +216,25 @@ impl Volume {
     }
 
     fn open(&self, path: &str) -> *mut File {
+        match self.try_open(path) {
+            Ok(file) => file,
+            Err(status) => {
+                print!("{path}: not found\n");
+                fail("a system file is missing", status)
+            }
+        }
+    }
+
+    fn try_open(&self, path: &str) -> Result<*mut File, Status> {
         let name = ucs2::<64>(path);
         let mut file = null_mut();
         // SAFETY: valid protocol pointer and null-terminated name.
         let status = unsafe { ((*self.0).open)(self.0, &mut file, name.as_ptr(), FILE_MODE_READ, 0) };
-        if status != SUCCESS {
-            print!("{path}: not found\n");
-            fail("a system file is missing", status);
+        if status == SUCCESS {
+            Ok(file)
+        } else {
+            Err(status)
         }
-        file
     }
 }
 
@@ -287,6 +300,17 @@ fn load_boot_pack(vol: &Volume) -> (u64, u64) {
     let size = file_size(file);
     let phys = allocate_pages(size.div_ceil(PAGE).max(1), "no memory for the boot pack");
     read_exact(file, phys as *mut u8, size, "cannot read the boot pack");
+    close(file);
+    (phys, size)
+}
+
+/// The system volume of a live CD, if this boot medium has one: the kernel
+/// mounts it from memory as `sys:`.
+fn load_system(vol: &Volume) -> (u64, u64) {
+    let Ok(file) = vol.try_open("\\ARCOS\\SYSTEM.IMG") else { return (0, 0) };
+    let size = file_size(file);
+    let phys = allocate_pages(size.div_ceil(PAGE).max(1), "no memory for the system volume");
+    read_exact(file, phys as *mut u8, size, "cannot read the system volume");
     close(file);
     (phys, size)
 }
@@ -496,6 +520,7 @@ extern "efiapi" fn efi_main(image: Handle, st: *mut SystemTable) -> Status {
     let vol = Volume::of_image(image);
     let (kernel_phys, kernel_size, entry) = load_kernel(&vol);
     let (pack_phys, pack_size) = load_boot_pack(&vol);
+    let (system_phys, system_size) = load_system(&vol);
     close(vol.0);
 
     let info_phys = allocate_pages(1, "no memory");
@@ -510,7 +535,12 @@ extern "efiapi" fn efi_main(image: Handle, st: *mut SystemTable) -> Status {
     info.pack_size = pack_size;
     info.rsdp = find_rsdp();
     info.loader = LOADER_UEFI;
+    info.system_phys = system_phys;
+    info.system_size = system_size;
     print!("kernel {} KiB at {:#x}, boot pack {} KiB\n", kernel_size >> 10, kernel_phys, pack_size >> 10);
+    if system_size != 0 {
+        print!("live system volume {} KiB\n", system_size >> 10);
+    }
 
     // The screen is set last: after the mode change the firmware console
     // may not show text any more.

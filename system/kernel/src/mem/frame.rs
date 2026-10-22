@@ -68,6 +68,7 @@ pub fn init(boot: &BootInfo) {
 
     let (k_start, k_end) = super::kernel_range();
     let pack = (boot.pack_phys, boot.pack_phys + boot.pack_size);
+    let system = (boot.system_phys, boot.system_phys + boot.system_size);
     let overlaps = |a: u64, b: u64, c: u64, d: u64| a < d && c < b;
 
     // Put the bitmap in the first usable RAM above 1 MiB that is free and
@@ -81,6 +82,8 @@ pub fn init(boot: &BootInfo) {
                 at = align_up(k_end, PAGE_SIZE);
             } else if overlaps(at, at + bytes, pack.0, pack.1) {
                 at = align_up(pack.1, PAGE_SIZE);
+            } else if overlaps(at, at + bytes, system.0, system.1) {
+                at = align_up(system.1, PAGE_SIZE);
             } else {
                 place = Some(at);
                 break;
@@ -116,6 +119,7 @@ pub fn init(boot: &BootInfo) {
     f.reserve(0, LOW_RESERVED);
     f.reserve(k_start, k_end);
     f.reserve(pack.0, pack.1);
+    f.reserve(system.0, system.1);
     f.reserve(bitmap_phys, bitmap_phys + bytes);
     f.hint = LOW_RESERVED / PAGE_SIZE;
 }

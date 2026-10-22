@@ -1,12 +1,15 @@
 # arcOS build.
 #
 #   make            build the bootable disk image (build/arcos.img)
+#   make iso        build a live CD (build/arcos.iso), BIOS and UEFI
+#   make run-iso    start the live CD in QEMU, with no hard disk
 #   make run        start it in QEMU (PC with IDE disk)
 #   make run-q35    start it in QEMU (modern PC: AHCI/SATA disk)
 #   make run-nvme   start it in QEMU with the system disk on NVMe
 #   make run-uefi   start it in QEMU with UEFI firmware (OVMF) instead of a BIOS
 #   make test       boot headless and run a scripted session
 #   make test-uefi  the same, started by UEFI firmware
+#   make test-iso   the same session on the live CD, with BIOS and with UEFI
 #   make test-drivers  boot once per emulated disk, network card and USB
 #                   controller and check that its driver works
 #   make test-arcscript  run ArcScript programs on arcOS and check them
@@ -30,12 +33,15 @@ PACKAGES := $(DRIVERS:%=$(BUILD)/drivers/%.adp)
 APPS     := $(notdir $(wildcard system/apps/*))
 ROOT     := $(BUILD)/root
 IMAGE    := $(BUILD)/arcos.img
+ISO      := $(BUILD)/arcos.iso
+# Size of the live CD's system volume (it lives in memory).
+LIVE_SIZE ?= 16M
 
 ifeq ($(PROFILE),release)
 CARGO_PROFILE := --release
 endif
 
-.PHONY: all uefi system tools root image run run-q35 run-nvme run-uefi test test-uefi test-drivers test-arcscript check clean $(PACKAGES)
+.PHONY: all uefi system tools root image iso run-iso test-iso run run-q35 run-nvme run-uefi test test-uefi test-drivers test-arcscript check clean $(PACKAGES)
 
 all: image
 
@@ -72,6 +78,11 @@ image: $(BUILD)/stage1.bin $(BUILD)/stage2.bin uefi system tools $(PACKAGES) roo
 		--stage1 $(BUILD)/stage1.bin --stage2 $(BUILD)/stage2.bin --efi $(EFI_APP) \
 		--kernel $(TARGET)/arc-kernel --drivers $(BUILD)/drivers --files $(ROOT)
 
+iso: $(BUILD)/stage1.bin $(BUILD)/stage2.bin uefi system tools $(PACKAGES) root
+	$(ARCTOOL) iso $(ISO) --size $(LIVE_SIZE) \
+		--stage1 $(BUILD)/stage1.bin --stage2 $(BUILD)/stage2.bin --efi $(EFI_APP) \
+		--kernel $(TARGET)/arc-kernel --drivers $(BUILD)/drivers --files $(ROOT)
+
 QEMU_COMMON := -m $(MEMORY) -serial stdio -no-reboot -rtc base=localtime
 
 run: image
@@ -84,6 +95,9 @@ run-nvme: image
 	$(QEMU) $(QEMU_COMMON) -machine q35 -drive file=$(IMAGE),format=raw,if=none,id=sys -device nvme,drive=sys,serial=arc0001
 
 # The firmware keeps its settings (boot entries) in build/ovmf-vars.fd.
+run-iso: iso
+	$(QEMU) $(QEMU_COMMON) -cdrom $(ISO)
+
 run-uefi: image
 	@test -f $(BUILD)/ovmf-vars.fd || cp $(OVMF_VARS) $(BUILD)/ovmf-vars.fd
 	$(QEMU) $(QEMU_COMMON) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
@@ -97,6 +111,10 @@ test-uefi: image
 
 test-drivers: image
 	scripts/test-drivers.sh $(IMAGE)
+
+test-iso: iso
+	DISK=cdrom scripts/test.sh $(ISO)
+	UEFI=1 DISK=cdrom OVMF_CODE=$(OVMF_CODE) OVMF_VARS=$(OVMF_VARS) scripts/test.sh $(ISO)
 
 test-arcscript: image
 	scripts/test-arcscript.sh $(IMAGE)

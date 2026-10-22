@@ -6,7 +6,8 @@
 # format without a trailing Enter (\\023 is Ctrl+S).
 #
 # DISK selects how the image is attached: ide (default), ahci, nvme, virtio
-# (virtio-modern and virtio-legacy force one of its two interfaces).
+# (virtio-modern and virtio-legacy force one of its two interfaces), or
+# cdrom for a live CD (an .iso).
 # UEFI=1 starts it with UEFI firmware (OVMF_CODE, OVMF_VARS) instead of a BIOS.
 #
 # The image is not changed: the session runs on a copy.
@@ -30,6 +31,7 @@ case "${DISK:-ide}" in
     virtio) DRIVE="-drive file=$IMAGE,format=raw,if=none,id=sys -device virtio-blk-pci,drive=sys,bootindex=0" ;;
     virtio-modern) DRIVE="-drive file=$IMAGE,format=raw,if=none,id=sys -device virtio-blk-pci,drive=sys,bootindex=0,disable-legacy=on" ;;
     virtio-legacy) DRIVE="-drive file=$IMAGE,format=raw,if=none,id=sys -device virtio-blk-pci,drive=sys,bootindex=0,disable-modern=on" ;;
+    cdrom)  DRIVE="-cdrom $IMAGE" ;;
     *) echo "unknown DISK=$DISK" >&2; exit 2 ;;
 esac
 OUT=$(mktemp)

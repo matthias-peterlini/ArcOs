@@ -1,14 +1,18 @@
-; ArcBoot stage 1 — master boot record.
+; ArcBoot stage 1 — master boot record, and boot sector of the ISO.
 ;
-; The BIOS loads this sector at 0000:7C00. It reads stage 2 from the sectors
-; right after it (LBA 1..) to 0000:7E00 with the INT 13h extensions and jumps
-; there with the boot drive in DL. The boot table at offset 0x190 is filled in
-; by `arcimg` when the disk image is built; stage 2 reads it from memory.
+; The BIOS loads this sector at 0000:7C00. It reads stage 2 (from LBA 1 on a
+; disk) to 0000:7E00 with the INT 13h extensions and jumps there with the
+; boot drive in DL. The boot table at offset 0x180 is filled in by `arctool`
+; when the image is built; stage 2 reads it from memory.
+;
+; On a CD (El Torito, no emulation) sectors are 2048 bytes: the boot table
+; says so, and gives every position in 512-byte units, multiples of four.
 
 bits 16
 org 0x7C00
 
 STAGE2_ADDR     equ 0x7E00
+BOOT_CD         equ 1               ; boot_flags: 2048-byte sectors
 
 start:
     cli
@@ -38,12 +42,20 @@ start:
     cmp bx, 0xAA55
     jne fail_disk
 
-    ; Read stage 2 (LBA 1, boot_stage2_sectors sectors) to 0000:7E00.
+    ; Read stage 2 (boot_stage2_sectors sectors at boot_stage2_lba) to
+    ; 0000:7E00, in 2048-byte sectors on a CD.
     mov ax, [boot_stage2_sectors]
+    mov ebx, [boot_stage2_lba]
+    test byte [boot_flags], BOOT_CD
+    jz .units_ok
+    add ax, 3
+    shr ax, 2
+    shr ebx, 2
+.units_ok:
     mov [dap_count], ax
     mov word [dap_offset], STAGE2_ADDR
     mov word [dap_segment], 0
-    mov dword [dap_lba], 1
+    mov [dap_lba], ebx
     mov dword [dap_lba + 4], 0
     mov si, dap
     mov ah, 0x42
@@ -93,11 +105,16 @@ dap_segment dw 0
 dap_lba     dq 0
 
 ; ---------------------------------------------------------------------------
-; Boot table (written by arcimg). Layout shared with stage2.asm.
-times 0x190 - ($ - $$) db 0
+; Boot table (written by arctool). Layout shared with stage2.asm. Positions
+; and sizes count 512-byte sectors.
+times 0x180 - ($ - $$) db 0
+boot_stage2_lba     dd 0
+boot_system_lba     dd 0            ; a live system volume to load, if any
+boot_system_sectors dd 0
+boot_reserved       dd 0
 boot_magic          dd 0            ; "ARCB"
 boot_stage2_sectors dw 0
-boot_reserved       dw 0
+boot_flags          dw 0            ; BOOT_CD
 boot_kernel_lba     dd 0
 boot_kernel_sectors dd 0
 boot_kernel_memsz   dd 0            ; bytes, including .bss

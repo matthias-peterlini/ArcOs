@@ -99,6 +99,9 @@ extern "C" fn kmain(boot_phys: u64) -> ! {
     acpi::init(boot.rsdp);
 
     fs::mount_boot_pack(boot.pack_phys, boot.pack_size);
+    if boot.system_size != 0 {
+        fs::mount_live_system(boot.system_phys, boot.system_size);
+    }
     fs::mount_ram(4 << 20);
 
     let found = dev::scan().len();

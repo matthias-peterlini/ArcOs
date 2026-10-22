@@ -68,6 +68,16 @@ Hello from user mode!
 
 L'architettura è descritta in [docs/architettura.md](docs/architettura.md).
 
+## Scaricarlo
+
+Nelle [release](https://github.com/matthias-peterlini/ArcOs/releases) ci
+sono il **CD live** `arcos.iso`, da avviare in una macchina virtuale
+(VirtualBox, VMware, QEMU: `qemu-system-x86_64 -m 512M -cdrom arcos.iso`)
+o da un CD, e l'**immagine di disco** `arcos-img.zip`, da scrivere su una
+chiavetta USB per un PC vero (vedi sotto). Le costruisce il workflow
+`.github/workflows/release.yml` a ogni tag `v*`, o a mano dalla scheda
+Actions.
+
 ## Compilare
 
 Servono:
@@ -80,12 +90,15 @@ Servono:
 
 ```sh
 make            # costruisce build/arcos.img (128 MiB, avviabile BIOS e UEFI)
+make iso        # costruisce build/arcos.iso, un CD live (BIOS e UEFI)
+make run-iso    # avvia il CD live in QEMU, senza disco rigido
 make run        # lo avvia in QEMU (PC classico, disco IDE)
 make run-uefi   # lo avvia in QEMU con firmware UEFI
 make run-q35    # PC moderno, disco SATA (AHCI)
 make run-nvme   # disco NVMe
 make test       # avvio senza schermo con una sessione di comandi scritta
 make test-uefi  # la stessa, avviata da UEFI
+make test-iso   # la stessa sul CD live, con BIOS e con UEFI
 make test-drivers  # un avvio per ogni disco, scheda di rete e controller
                 # USB emulato da QEMU, controllando che il driver funzioni
 make test-arcscript  # programmi ArcScript eseguiti su arcOS, con l'uscita
@@ -95,8 +108,15 @@ scripts/build-qemu.sh  # un QEMU con i modelli di tools/qemu (RTL8169 e
 make check      # test delle librerie condivise e dello strumento host
 ```
 
-`make SIZE=1G` cambia la dimensione dell'immagine, `make MEMORY=2G` la
-memoria della macchina virtuale.
+`make SIZE=1G` cambia la dimensione dell'immagine, `make LIVE_SIZE=64M`
+quella del volume di sistema del CD live, `make MEMORY=2G` la memoria della
+macchina virtuale.
+
+Il CD live non ha bisogno di un driver per i lettori CD: i loader (BIOS e
+UEFI) leggono dal CD, oltre al kernel e al pacchetto di avvio, anche il
+volume di sistema, che il kernel monta dalla memoria come `sys:`. Si può
+scrivere e installare driver come sempre, ma tutto si perde allo
+spegnimento.
 
 ## Su un PC vero
 
