@@ -1,0 +1,52 @@
+# Intel Gigabit and 2.5 Gigabit Ethernet with advanced descriptors: the
+# 82575/82576/82580, I350 and I354 server chips, the I210/I211 of many
+# boards and the I225/I226 2.5 Gbit chips of recent PCs. Verified on the
+# 82576 (QEMU); the others share the interface but are not verified on
+# hardware.
+name        = igb
+version     = 1.0.0
+class       = network
+description = Intel 82576, I210, I211, I350, I225, I226 Ethernet
+author      = arcOS
+match       = pci 8086:10a7     # 82575EB
+match       = pci 8086:10a9     # 82575EB
+match       = pci 8086:10d6     # 82575GB
+match       = pci 8086:10c9     # 82576 (QEMU igb)
+match       = pci 8086:10e6     # 82576
+match       = pci 8086:10e7     # 82576
+match       = pci 8086:10e8     # 82576
+match       = pci 8086:150a     # 82576NS
+match       = pci 8086:1518     # 82576NS
+match       = pci 8086:1526     # 82576 quad
+match       = pci 8086:150d     # 82576 backplane
+match       = pci 8086:150e     # 82580
+match       = pci 8086:150f     # 82580
+match       = pci 8086:1510     # 82580
+match       = pci 8086:1511     # 82580
+match       = pci 8086:1516     # 82580
+match       = pci 8086:1527     # 82580
+match       = pci 8086:1521     # I350
+match       = pci 8086:1522     # I350
+match       = pci 8086:1523     # I350
+match       = pci 8086:1524     # I350
+match       = pci 8086:1533     # I210
+match       = pci 8086:1536     # I210
+match       = pci 8086:1537     # I210
+match       = pci 8086:1538     # I210
+match       = pci 8086:157b     # I210
+match       = pci 8086:157c     # I210
+match       = pci 8086:1539     # I211
+match       = pci 8086:1f40     # I354
+match       = pci 8086:1f41     # I354
+match       = pci 8086:1f45     # I354
+match       = pci 8086:15f2     # I225-LM
+match       = pci 8086:15f3     # I225-V
+match       = pci 8086:15f8     # I225-I
+match       = pci 8086:15fd     # I225 blank NVM
+match       = pci 8086:0d9f     # I225-IT
+match       = pci 8086:125b     # I226-LM
+match       = pci 8086:125c     # I226-V
+match       = pci 8086:125d     # I226-IT
+match       = pci 8086:3100     # I225-K
+match       = pci 8086:3101     # I226-K
+match       = pci 8086:5502     # I226-LMvP

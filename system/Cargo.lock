@@ -138,6 +138,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "igb"
+version = "1.0.0"
+dependencies = [
+ "arcdrv",
+]
+
+[[package]]
 name = "info"
 version = "1.0.0"
 dependencies = [

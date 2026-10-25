@@ -339,6 +339,8 @@ della scheda non funzionano.
 | `e1000` | Intel 82540/82545/82574 | provato |
 | `e1000` | Intel 8254x, 8257x, 82583 | stessa interfaccia, non provato su hardware |
 | `e1000` | Intel 82577/82578/82579, I217, I218, I219 | non verificato su hardware |
+| `igb` | Intel 82576 | provato (MSI-X) |
+| `igb` | Intel 82575, 82580, I350, I354, I210, I211, I225, I226 (2,5 Gbit) | stessa interfaccia, non provato su hardware |
 | `rtl8139` | Realtek RTL8139 e schede derivate | provato |
 | `pcnet` | AMD PCnet-PCI II e successive | provato |
 | `virtionet` | schede di rete virtio (legacy e moderna) | provato |
@@ -356,8 +358,7 @@ Senza un driver video lo schermo resta nel modo scelto dal firmware
 (VBE o GOP), che funziona su quasi ogni scheda ma non cambia risoluzione.
 
 Mancano ancora i driver per: Wi-Fi, schede video vere (Intel, AMD,
-nVidia: si usa il framebuffer del firmware), Intel I225/I226 e Realtek
-RTL8125 (2,5 Gbit), lettori di schede Realtek e Genesys su PCIe, batteria
+nVidia: si usa il framebuffer del firmware), Realtek RTL8125 (2,5 Gbit), lettori di schede Realtek e Genesys su PCIe, batteria
 dei portatili.
 
 ### Il pacchetto

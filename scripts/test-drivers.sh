@@ -25,7 +25,7 @@ WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
 ALL="ide ahci nvme virtio virtio-modern virtio-legacy
-e1000 e1000e rtl8139 pcnet virtio-net virtio-net-modern multi-nic rtl8169 rtl8168
+e1000 e1000e igb rtl8139 pcnet virtio-net virtio-net-modern multi-nic rtl8169 rtl8168
 xhci ehci uhci ohci sdhci sdhci-sdma sdhci-pio"
 CASES=${*:-$ALL}
 
@@ -83,6 +83,7 @@ for c in $CASES; do
         ide|ahci|nvme|virtio|virtio-modern|virtio-legacy) DISK=$c; EXPECT="written on this disk|sys: no problems found" ;;
         e1000|rtl8139|pcnet) ARGS="-nic user,model=$c"; CMDS=net ;;
         e1000e) DISK=ahci; ARGS="-nic user,model=e1000e"; CMDS=net ;;
+        igb) DISK=ahci; ARGS="-nic user,model=igb"; CMDS=net ;;
         virtio-net) ARGS="-nic user,model=virtio-net-pci"; CMDS=net ;;
         virtio-net-modern) ARGS="-netdev user,id=n -device virtio-net-pci,netdev=n,disable-legacy=on"; CMDS=net ;;
         multi-nic) ARGS="-nic user,model=e1000 -nic user,model=rtl8139,mac=52:54:00:00:00:02 -nic user,model=pcnet,mac=52:54:00:00:00:03"; CMDS=net ;;

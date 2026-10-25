@@ -28,7 +28,6 @@ match       = pci 8086:108b     # 82573V
 match       = pci 8086:108c     # 82573E
 match       = pci 8086:109a     # 82573L
 match       = pci 8086:10b9     # 82572EI
-match       = pci 8086:10d6     # 82566 (not verified on hardware)
 match       = pci 8086:10f6     # 82574LA
 match       = pci 8086:150c     # 82583V
 match       = pci 8086:10ea     # 82577LM (not verified on hardware)
