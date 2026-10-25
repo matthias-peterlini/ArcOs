@@ -66,6 +66,7 @@ impl Device {
                 alloc::format!("pci {:02x}:{:02x}.{}", l >> 8, (l >> 3) & 0x1F, l & 7)
             }
             BUS_USB => alloc::format!("usb {}", self.info.name()),
+            arcdk::BUS_SD => alloc::format!("sd {}", self.info.name()),
             _ => alloc::format!("platform {}", self.info.name()),
         }
     }

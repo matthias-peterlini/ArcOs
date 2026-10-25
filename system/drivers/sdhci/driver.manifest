@@ -1,0 +1,11 @@
+# SD and MMC card readers that follow the SD Host Controller standard:
+# the built-in readers of most laptops (Intel, O2 Micro, Ricoh, Toshiba,
+# AMD) and of virtual machines. Readers that sit on USB are handled by
+# usbstorage; Realtek and Genesys PCIe readers have their own interface and
+# are not supported yet.
+name        = sdhci
+version     = 1.0.0
+class       = storage
+description = SD card reader (SD host controller)
+author      = arcOS
+match       = pci-class 08:05

@@ -1023,12 +1023,17 @@ impl<D: BlockDevice> Fs<D> {
         for b in 0..self.sb.data_start as u64 {
             mark(&mut seen, b);
         }
+        // The node table is read a block at a time, not a node at a time.
+        let mut table = [0u8; BLOCK_SIZE];
         for id in 1..self.sb.node_count {
-            let node = match self.node(id) {
-                Ok(n) => n,
-                Err(Error::NotFound) => continue,
-                Err(e) => return Err(e),
-            };
+            if id == 1 || (id as usize).is_multiple_of(NODES_PER_BLOCK) {
+                self.dev.read_block(self.node_location(id)?.0, &mut table)?;
+            }
+            let off = (id as usize % NODES_PER_BLOCK) * NODE_SIZE;
+            let node = Node::decode(&table[off..off + NODE_SIZE]);
+            if node.kind == Kind::Free {
+                continue;
+            }
             let extents = self.load_extents(&node)?;
             if node.indirect != 0 {
                 problems += mark(&mut seen, node.indirect as u64);

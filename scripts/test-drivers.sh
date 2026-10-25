@@ -2,7 +2,8 @@
 # Boots an arcOS image once for every kind of hardware QEMU can emulate
 # and checks that the matching driver installs and works: disks (a file is
 # written and the file system checked), network cards (DHCP and ping) and
-# USB controllers (a keyboard and a USB stick behind each one). A ping
+# USB controllers (a keyboard and a USB stick behind each one) and SD card
+# readers (a file is written on the card). A ping
 # slower than 20 ms fails too: replies then come from the drivers' polling
 # thread, so the card's interrupts are broken.
 #
@@ -25,11 +26,15 @@ trap 'rm -rf "$WORK"' EXIT
 
 ALL="ide ahci nvme virtio virtio-modern virtio-legacy
 e1000 e1000e rtl8139 pcnet virtio-net virtio-net-modern multi-nic rtl8169 rtl8168
-xhci ehci uhci ohci"
+xhci ehci uhci ohci sdhci sdhci-sdma sdhci-pio"
 CASES=${*:-$ALL}
 
 # A USB stick: one ArcFS partition labelled "Stick".
 "$ARCTOOL" mkfs "$WORK/stick.img" --size 16M --label Stick >/dev/null || exit 2
+
+# SD cards: 64 MiB (byte addressing) and 4 GiB (SDHC, sector addressing).
+"$ARCTOOL" mkfs "$WORK/sd.img" --size 64M --label Card >/dev/null || exit 2
+"$ARCTOOL" mkfs "$WORK/sdhc.img" --size 4G --label Card >/dev/null || exit 2
 
 # Commands for each kind of case, and what the session has to show.
 cat > "$WORK/disk.txt" <<'EOT'
@@ -43,6 +48,14 @@ cat > "$WORK/net.txt" <<'EOT'
 @sleep 3
 net
 ping 10.0.2.2 3
+shutdown
+EOT
+cat > "$WORK/sd.txt" <<'EOT'
+@sleep 3
+dev
+write card:/t.txt written on the card
+cat card:/t.txt
+check card
 shutdown
 EOT
 cat > "$WORK/usb.txt" <<'EOT'
@@ -84,10 +97,26 @@ for c in $CASES; do
         ehci) ARGS="$EHCI $STICK -device usb-kbd,bus=u.0,port=1 -device usb-storage,bus=u.0,port=2,drive=stick"; CMDS=usb ;;
         uhci) ARGS="-device piix3-usb-uhci,id=u $STICK -device usb-hub,bus=u.0,port=1 -device usb-kbd,bus=u.0,port=1.1 -device usb-storage,bus=u.0,port=2,drive=stick"; CMDS=usb ;;
         ohci) ARGS="-device pci-ohci,id=u $STICK -device usb-hub,bus=u.0,port=1 -device usb-kbd,bus=u.0,port=1.1 -device usb-storage,bus=u.0,port=2,drive=stick"; CMDS=usb ;;
+        # The reader's capabilities choose how data moves: ADMA2 (QEMU's
+        # default), SDMA, or the data port.
+        sdhci|sdhci-sdma|sdhci-pio)
+            img=sd caps=
+            case $c in
+                sdhci) img=sdhc ;;
+                sdhci-sdma) caps=,capareg=0x057034b4 ;;
+                sdhci-pio) caps=,capareg=0x053034b4 ;;
+            esac
+            case $c in
+                sdhci) EXPECT_SD="ADMA2.*|SDHC card" ;;
+                sdhci-sdma) EXPECT_SD="SDMA|SD card" ;;
+                *) EXPECT_SD="no DMA|SD card" ;;
+            esac
+            ARGS="-device sdhci-pci$caps -drive if=none,id=card,format=raw,file=$WORK/$img.img -device sd-card,drive=card"; CMDS=sd ;;
         *) echo "unknown case: $c" >&2; exit 2 ;;
     esac
     case $CMDS in
         net) EXPECT="3 of 3 replies" ;;
+        sd) EXPECT="sdhci 1.0.0 installed|$EXPECT_SD|written on the card|card: no problems found" ;;
         usb) EXPECT="usbhid 1.0.0 installed|usbstorage 1.0.0 installed|Welcome|stick: no problems found" ;;
     esac
     [ "$c" = multi-nic ] && EXPECT="$EXPECT|^net2 "

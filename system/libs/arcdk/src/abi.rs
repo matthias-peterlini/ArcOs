@@ -104,6 +104,9 @@ pub const BUS_PLATFORM: u32 = 2;
 /// path ("3-1.2:0": controller 3, root port 1, hub port 2, interface 0) and
 /// `interface` points at a [`crate::usb::UsbInterface`].
 pub const BUS_USB: u32 = 3;
+/// A memory card in a card reader slot: `name` is the slot ("00:07.0-0":
+/// reader at PCI 00:07.0, slot 0). The reader's driver owns it.
+pub const BUS_SD: u32 = 4;
 
 /// `device_add` flag: the parent driver handles the device itself (a USB
 /// hub, for instance); the kernel does not look for a driver.
