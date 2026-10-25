@@ -1,13 +1,16 @@
 arcOS: un sistema operativo per PC x86-64 scritto da zero, con il linguaggio ArcScript.
 
-## Novità
+![La scrivania di arcOS](https://raw.githubusercontent.com/matthias-peterlini/ArcOs/main/docs/screenshots/scrivania.jpg)
 
-- **Interfaccia grafica**: avvio pulito con solo logo e barra di caricamento, configurazione guidata al primo avvio (pulsante **INIZIA**, nome, tastiera, sfondo), poi la scrivania: barra in alto, widget (orologio, calendario, sistema), dock, lanciatore con ricerca (Ctrl+Spazio) e finestre.
-- **App**: File, Terminale (la shell), Negozio (installa BusyBox e Lua con un clic), Impostazioni, Info sistema.
-- Icone, sfondi e caratteri disegnati per arcOS.
-- Restano i programmi **Linux** (ELF statici) e **Windows** (`.exe` x64 da console).
+## Novità della 0.4
 
-Dettagli in [docs/gui.md](https://github.com/matthias-peterlini/ArcOs/blob/main/docs/gui.md) e [docs/compat.md](https://github.com/matthias-peterlini/ArcOs/blob/main/docs/compat.md).
+- **Audio**: driver per Intel HD Audio (quasi ogni PC dal 2005) e AC'97. Una breve melodia all'avvio della scrivania (si può spegnere), volume nelle Impostazioni, `play file.wav`, `tone` e `volume` nel Terminale.
+- **Risoluzione dello schermo**: driver per le schede video di QEMU, Bochs, VirtualBox (VBoxVGA e VMSVGA), VMware e virtio-gpu. *Impostazioni → Schermo* cambia la risoluzione al volo (fino a 2560×1600) e arcOS la ricorda; nel Terminale `display 1920x1080`.
+- **Lettori di schede SD**: schede SD, SDHC, SDXC e MMC nei lettori standard dei portatili, inserite ed estratte a sistema avviato.
+- **Corretto**: il puntatore del mouse si muoveva al contrario in verticale.
+- Il controllo dei volumi (`check`) è molto più veloce sui dischi grandi.
+
+Ancora senza driver: Wi-Fi, schede video vere (Intel, AMD, nVidia: si usa il framebuffer del firmware), schede di rete a 2,5 Gbit, batteria dei portatili. Lo stato di ogni driver è in [docs/driver.md](https://github.com/matthias-peterlini/ArcOs/blob/main/docs/driver.md#hardware-supportato).
 
 ## File
 
@@ -19,7 +22,7 @@ Dettagli in [docs/gui.md](https://github.com/matthias-peterlini/ArcOs/blob/main/
 
 ## Provarlo
 
-- **QEMU**: `qemu-system-x86_64 -m 512M -cdrom arcos.iso`
+- **QEMU**: `qemu-system-x86_64 -m 512M -cdrom arcos.iso -device ich9-intel-hda -device hda-output`
 - **VirtualBox**: nuova macchina "Other/Unknown (64-bit)", 512 MiB di memoria, nessun disco, `arcos.iso` nel lettore CD.
 
 Al primo avvio arcOS chiede nome, tastiera e sfondo, poi apre la scrivania. Il Terminale (nel dock) ha la shell: `help` elenca i comandi. Documentazione nel [README](https://github.com/matthias-peterlini/ArcOs#readme).

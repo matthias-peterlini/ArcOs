@@ -43,9 +43,21 @@ conserva nulla, quindi mostra la configurazione ogni volta.
 | File | sfoglia i volumi: risorse a sinistra, cartelle e file a destra; doppio clic apre una cartella, avvia un programma (`.app`, `.exe`, `.as`, Linux), apre un testo nell'editor o un'immagine `.qoi` |
 | Terminale | la shell di arcOS in una finestra: tutti i comandi e i programmi a riga di comando (anche Linux e Windows) |
 | Negozio | installa con un clic i programmi di `sys:/store` (BusyBox, Lua) |
-| Impostazioni | nome, tastiera, sfondo, configurazione iniziale |
+| Impostazioni | nome, tastiera, sfondo, risoluzione dello schermo, volume e suono all'avvio, configurazione iniziale |
 | Info sistema | processore, memoria, schermo, dispositivi, programmi |
 | Editor, Calcolatrice, Snake, Note… | i programmi a riga di comando, aperti nel Terminale |
+
+## Schermo e suono
+
+Con un driver video (`bochsvga`, `vmsvga`, `virtiogpu`: le schede delle
+macchine virtuali) *Impostazioni → Schermo* elenca le risoluzioni comuni
+che lo schermo offre; un clic la cambia subito, e arcOS la riprende a ogni
+avvio. Senza driver resta la risoluzione scelta dal firmware. Dal
+Terminale: `display` elenca, `display 1920x1080` cambia.
+
+Con una scheda audio (`hda`, `ac97`) la scrivania suona una breve melodia
+quando compare (si può spegnere) e *Impostazioni → Suono* regola il
+volume. Dal Terminale: `play file.wav`, `tone 440 500`, `volume 60`.
 
 ## Com'è fatta
 
@@ -82,6 +94,8 @@ Caratteri, icone e sfondi sono generati in fase di sviluppo da script Python
   da zero nello stile arc (squircle con sfumatura e simbolo).
 - `gen_wallpapers.py` → `rootfs/system/gui/wallpapers/`: tre sfondi
   (Dolomiti, Alba, Notte) dipinti con rumore e sfumature.
+- `gen_sounds.py` → `rootfs/system/sounds/avvio.wav`: il suono d'avvio,
+  tre note di campana sintetizzate.
 
 `make assets` li rigenera (servono Python 3, Pillow e numpy).
 
@@ -89,4 +103,5 @@ Caratteri, icone e sfondi sono generati in fase di sviluppo da script Python
 
 `make run` apre arcOS in una finestra di QEMU. `make shots` avvia arcOS senza
 schermo, lo guida con mouse e tastiera (`scripts/gui-shots.py`, attraverso
-QMP) e salva le schermate in `build/shots/`.
+QMP) e salva le schermate in `build/shots/`; con `SCREEN=1920x1080` le
+coordinate del giro si riferiscono a uno schermo di quella misura.

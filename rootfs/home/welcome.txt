@@ -16,3 +16,4 @@ arcOS also runs Linux and Windows x86-64 programs: see docs/compat.md.
 Try: help, dev, drv, vol, ls sys:/system/drivers,
 or: cd sys:/home/arcscript, then hello.as
 or: install busybox, then seq 1 5
+or: display (screen resolutions), play sys:/system/sounds/avvio.wav

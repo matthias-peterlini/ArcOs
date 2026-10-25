@@ -1,211 +1,184 @@
+<div align="center">
+
 # arcOS
 
-arcOS è un sistema operativo per PC x86-64 scritto da zero. Non deriva da
-Linux, da Unix, da DOS o da Windows, e non ne imita le interfacce: boot
-loader, kernel, file system, formato dei driver, chiamate di sistema e shell
-sono progettati apposta. Il codice è Rust `no_std` (più due piccoli stadi di
-avvio in assembly) e non usa librerie esterne: niente crate di terze parti,
-solo il compilatore e la libreria `core`/`alloc` di Rust. Il linguaggio
-ArcScript viene dal suo repository, portato senza `std` anche lui.
+**Un sistema operativo per PC x86-64 scritto da zero.**
 
+Boot loader, kernel, file system, driver, interfaccia grafica e linguaggio
+di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
+
+[**Scarica la versione 0.4.0**](https://github.com/matthias-peterlini/ArcOs/releases/latest) ·
+[Documentazione](docs/) ·
+[Architettura](docs/architettura.md)
+
+![La scrivania di arcOS](docs/screenshots/scrivania.jpg)
+
+</div>
+
+## In breve
+
+- **Si avvia ovunque**: la stessa immagine parte da BIOS e da UEFI, da
+  chiavetta USB, da disco o come CD live.
+- **Un avvio pulito**: niente righe di testo, solo il logo e una barra di
+  caricamento. Al primo avvio una configurazione guidata (nome, tastiera,
+  sfondo), poi direttamente la scrivania.
+- **Una scrivania moderna**: pannelli in vetro smerigliato, dock, widget,
+  lanciatore con ricerca, finestre; icone, sfondi e suoni disegnati per
+  arcOS.
+- **I driver si installano da soli**: dischi SATA e NVMe, USB 1/2/3,
+  schede di rete Intel e Realtek, lettori di schede SD, audio HD e AC'97,
+  schede video delle macchine virtuali con cambio di risoluzione.
+- **Esegue programmi Linux e Windows** x86-64 senza modificarli, accanto
+  ai suoi.
+- **Ha il suo linguaggio**, ArcScript, con compilatore e macchina virtuale
+  che girano su arcOS.
+- **Scritto da zero**: niente codice di Linux, Unix, DOS o Windows, nessuna
+  crate di terze parti. Solo il compilatore Rust e `core`/`alloc`.
+
+## Com'è
+
+<table>
+<tr>
+<td width="50%"><img src="docs/screenshots/avvio.jpg" alt="Avvio"><br><b>Avvio</b>: solo il logo e una barra di caricamento.</td>
+<td width="50%"><img src="docs/screenshots/benvenuto.jpg" alt="Primo avvio"><br><b>Primo avvio</b>: la configurazione guidata parte con INIZIA.</td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/sfondo.jpg" alt="Scelta dello sfondo"><br><b>Configurazione</b>: nome, tastiera, sfondo, in un minuto.</td>
+<td><img src="docs/screenshots/finestre.jpg" alt="File e Terminale"><br><b>File e Terminale</b>: le cartelle e la shell, in finestre.</td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/impostazioni.jpg" alt="Impostazioni"><br><b>Impostazioni</b>: risoluzione, volume, tastiera, sfondo.</td>
+<td><img src="docs/screenshots/applicazioni.jpg" alt="Applicazioni"><br><b>Applicazioni</b>: tutte le app, con ricerca (Ctrl+Spazio).</td>
+</tr>
+</table>
+
+## Provarlo
+
+Nelle [release](https://github.com/matthias-peterlini/ArcOs/releases)
+ci sono due file:
+
+| File | Cosa farne |
+|---|---|
+| `arcos.iso` | **CD live**: si avvia in una macchina virtuale (VirtualBox, VMware, QEMU) o da un CD, con BIOS o UEFI. Il sistema gira in memoria e le modifiche si perdono allo spegnimento. |
+| `arcos-img.zip` | **Immagine di disco** da scrivere su una chiavetta USB (balenaEtcher, Rufus in modalità DD, `dd`) per avviare un PC vero. Secure Boot va disattivato. |
+
+Il modo più veloce, con QEMU:
+
+```sh
+qemu-system-x86_64 -m 512M -cdrom arcos.iso -device ich9-intel-hda -device hda-output
 ```
-  arcOS 0.1.0
-  QEMU Virtual CPU version 2.5+ · 1024x768 framebuffer · loader: UEFI
 
-[    0.047] info  fs: mounted sys: (System, disk0p1)
-[    0.050] info  drivers: nvme 1.0.0 installed for Red Hat (QEMU) NVMe controller (pci 00:03.0)
-[    0.065] info  drivers: ps2kbd 1.0.0 installed for PS/2 keyboard (platform ps2-keyboard)
-[    0.113] info  drivers: e1000 1.0.0 installed for Intel Ethernet controller (pci 00:02.0)
-Type help for the list of commands.
+In VirtualBox basta una macchina "Other/Unknown (64-bit)" con 512 MiB di
+memoria e `arcos.iso` nel lettore CD.
 
-sys:/ › hello world
-Hello from user mode!
-```
+## Cosa c'è dentro
 
-## Cosa c'è
+| Parte | Cosa fa | Dettagli |
+|---|---|---|
+| **ArcBoot** | loader per BIOS (MBR + secondo stadio in assembly) e per UEFI (un'applicazione EFI in Rust); entrambi passano al kernel la stessa `BootInfo` | [architettura](docs/architettura.md#avvio) |
+| **Kernel** | 64 bit, memoria virtuale a 4 livelli, scheduler preemptivo, thread, code di attesa, MSI/MSI-X, ACPI per spegnere e riavviare | [architettura](docs/architettura.md#kernel) |
+| **Driver** | pacchetti `.adp` indipendenti dal kernel: il kernel confronta i manifesti con l'hardware e carica il driver giusto da solo, all'avvio e a sistema avviato | [driver](docs/driver.md) |
+| **ArcFS** | il file system nativo: blocchi da 4 KiB, extent, controllo di coerenza; volumi con nome (`sys:`, `ram:`, `chiavetta:`) | [architettura](docs/architettura.md#file-system-arcfs) |
+| **Interfaccia** | splash, configurazione guidata, scrivania, finestre e app: File, Terminale, Negozio, Impostazioni, Info sistema | [gui](docs/gui.md) |
+| **Programmi** | in modalità utente, ognuno nel suo spazio di indirizzi; `hello`, `info`, `calc`, `edit`, `snake` | [programmi](docs/programmi.md) |
+| **Compatibilità** | eseguibili ELF statici Linux e `.exe` Windows x64 da console; il Negozio installa BusyBox e Lua | [compatibilità](docs/compat.md) |
+| **ArcScript** | il linguaggio di arcOS: `arcc` compila ed esegue `.as` e pacchetti `.arc` | [ArcScript](docs/arcscript.md) |
+| **Rete** | ARP, IPv4, ICMP, UDP, DHCP, DNS | |
+| **Shell** | una quarantina di comandi, cronologia, completamento con Tab | [primi passi](#primi-passi-nel-terminale) |
 
-- **Avvio BIOS e UEFI dalla stessa immagine.** ArcBoot per BIOS (MBR +
-  secondo stadio, in assembly) e ArcBoot per UEFI (un'applicazione EFI in
-  Rust, con l'interfaccia UEFI dichiarata a mano). Entrambi passano al kernel
-  la stessa struttura `BootInfo`.
-- **Kernel** a 64 bit: memoria virtuale a 4 livelli, allocatore di pagine e
-  heap, scheduler preemptivo a 1 kHz, thread del kernel, code di attesa,
-  console su framebuffer (con un font proprio) o testo VGA, più la porta
-  seriale.
-- **Driver installabili, che si installano da soli.** Ogni driver è un
-  pacchetto `.adp` (modulo + manifesto). Il kernel confronta i manifesti con
-  l'hardware trovato e carica il driver più adatto, senza comandi:
-  all'avvio, dopo ogni scansione dei dispositivi e quando un pacchetto viene
-  lasciato in `sys:/inbox`. I driver si possono anche aggiornare e rimuovere
-  a sistema avviato. Dettagli in [docs/driver.md](docs/driver.md).
-- **Driver inclusi** (elenco completo in [docs/driver.md](docs/driver.md#hardware-supportato)):
-  - dischi IDE/ATA, AHCI (SATA), NVMe, virtio-blk;
-  - USB con tutti e quattro i tipi di controller (xHCI, EHCI, UHCI, OHCI),
-    hub, tastiere e mouse (HID), chiavette e dischi esterni; i dispositivi
-    si possono collegare e scollegare a sistema avviato;
-  - rete Intel PRO/1000 (e1000, 8254x/8257x), Realtek RTL8139 e
-    RTL8169/8111, AMD PCnet, virtio-net;
-  - tastiera e mouse PS/2.
-  Interruzioni MSI/MSI-X dove il dispositivo le offre, e più schede dello
-  stesso tipo insieme.
-- **ArcFS**, il file system nativo: blocchi da 4 KiB, extent, nomi
-  indipendenti da maiuscole/minuscole, controllo di coerenza (`check`).
-  Volumi con nome: `sys:` (il disco di sistema), `boot:` (il pacchetto di
-  avvio), `ram:` (in memoria).
-- **Programmi in modalità utente** (ring 3), ognuno nel proprio spazio di
-  indirizzi, con chiamate di sistema basate su handle. Un programma che
-  sbaglia viene fermato senza toccare il resto; Ctrl+C interrompe quello in
-  primo piano. Programmi inclusi: `hello`, `info`, `calc`, `edit`, `snake`.
-  Vedi [docs/programmi.md](docs/programmi.md).
-- **ArcScript**, il linguaggio applicativo di arcOS, con il suo compilatore
-  e la sua macchina virtuale: `arcc` compila ed esegue i sorgenti `.as` e i
-  pacchetti `.arc`, che la shell avvia come qualsiasi programma (`hello.as`,
-  `notes add …`). Le interfacce (`view`) per ora sono mostrate come testo.
-  Vedi [docs/arcscript.md](docs/arcscript.md).
-- **Interfaccia grafica**: avvio con solo logo e barra di caricamento,
-  configurazione guidata al primo avvio (pulsante INIZIA, nome, tastiera,
-  sfondo), poi una scrivania con barra in alto, widget, dock, lanciatore con
-  ricerca e finestre: File, Terminale, Negozio, Impostazioni, Info sistema.
-  Icone, sfondi e caratteri antialiasati disegnati per arcOS. Vedi
-  [docs/gui.md](docs/gui.md).
-- **Programmi Linux e Windows** per x86-64, eseguiti senza modificarli: un
-  eseguibile ELF statico (musl) è un programma Linux, servito da un livello di
-  compatibilità nel kernel; un `.exe` è un programma Windows, caricato da
-  `winrun` con un `kernel32`/`msvcrt` minimi. `install` copia programmi liberi
-  già pronti dal negozio `sys:/store` (BusyBox, Lua). Vedi
-  [docs/compat.md](docs/compat.md).
-- **Rete**: ARP, IPv4, ICMP (ping), UDP, client DHCP e DNS.
-- **Shell** con cronologia, completamento con Tab e una quarantina di comandi
-  (`help` li elenca).
+### Hardware
 
-L'architettura è descritta in [docs/architettura.md](docs/architettura.md).
+| Tipo | Supportato |
+|---|---|
+| Dischi | IDE, SATA (AHCI), NVMe, virtio |
+| USB | controller USB 3, 2 e 1.1, hub, tastiere, mouse, tavolette, chiavette e dischi (anche come disco di sistema), collegamento a caldo |
+| Schede SD | lettori standard (SD Host Controller): schede SD, SDHC, SDXC, MMC |
+| Rete | Intel PRO/1000 (e1000, 82574, I217–I219), Realtek RTL8139 e RTL8169/8111/8168, AMD PCnet, virtio |
+| Audio | Intel HD Audio (quasi ogni PC dal 2005), AC'97 |
+| Video | il framebuffer del firmware su qualunque scheda; cambio di risoluzione con le schede di QEMU, VirtualBox (VBoxVGA, VMSVGA), VMware e virtio-gpu |
+| Input | tastiera e mouse PS/2 e USB |
 
-## Scaricarlo
-
-Nelle [release](https://github.com/matthias-peterlini/ArcOs/releases) ci
-sono il **CD live** `arcos.iso`, da avviare in una macchina virtuale
-(VirtualBox, VMware, QEMU: `qemu-system-x86_64 -m 512M -cdrom arcos.iso`)
-o da un CD, e l'**immagine di disco** `arcos-img.zip`, da scrivere su una
-chiavetta USB per un PC vero (vedi sotto). Le costruisce il workflow
-`.github/workflows/release.yml` a ogni tag `v*`, o a mano dalla scheda
-Actions.
+Mancano ancora il Wi-Fi, i driver per le schede video vere (Intel, AMD,
+nVidia), le schede di rete a 2,5 Gbit e la batteria dei portatili. Lo stato
+di ogni driver, provato o no, è in [docs/driver.md](docs/driver.md#hardware-supportato).
 
 ## Compilare
 
-Servono:
-
-- Rust stable (la versione e i target giusti li installa `rustup` da solo,
-  grazie a `rust-toolchain.toml`);
-- `nasm` per i due stadi di avvio BIOS;
-- `qemu-system-x86_64` per provarlo;
-- OVMF (pacchetto `ovmf`) per provarlo con firmware UEFI.
+Servono Rust stable (`rustup` installa da solo la versione e i target
+giusti, grazie a `rust-toolchain.toml`), `nasm`, `qemu-system-x86_64` e,
+per provare l'avvio UEFI, OVMF.
 
 ```sh
-make            # costruisce build/arcos.img (128 MiB, avviabile BIOS e UEFI)
-make iso        # costruisce build/arcos.iso, un CD live (BIOS e UEFI)
-make run-iso    # avvia il CD live in QEMU, senza disco rigido
-make run        # lo avvia in QEMU (PC classico, disco IDE)
-make run-uefi   # lo avvia in QEMU con firmware UEFI
-make run-q35    # PC moderno, disco SATA (AHCI)
-make run-nvme   # disco NVMe
-make test       # avvio senza schermo con una sessione di comandi scritta
-make test-uefi  # la stessa, avviata da UEFI
-make test-iso   # la stessa sul CD live, con BIOS e con UEFI
-make test-drivers  # un avvio per ogni disco, scheda di rete e controller
-                # USB emulato da QEMU, controllando che il driver funzioni
-make test-arcscript  # programmi ArcScript eseguiti su arcOS, con l'uscita
-                # controllata
-make test-compat  # un programma Linux e uno Windows eseguiti su arcOS,
-                # con l'uscita controllata
-make shots      # avvia arcOS, usa l'interfaccia con mouse e tastiera e
-                # salva le schermate in build/shots
-scripts/build-qemu.sh  # un QEMU con i modelli di tools/qemu (RTL8169 e
-                # RTL8168), usato da make test-drivers per provarne i driver
-make check      # test delle librerie condivise e dello strumento host
+make            # l'immagine di disco build/arcos.img (BIOS e UEFI)
+make iso        # il CD live build/arcos.iso
+make run        # avvia arcOS in QEMU (anche run-uefi, run-q35, run-nvme, run-iso)
 ```
 
-`make SIZE=1G` cambia la dimensione dell'immagine, `make LIVE_SIZE=64M`
-quella del volume di sistema del CD live, `make MEMORY=2G` la memoria della
-macchina virtuale.
+I test girano tutti in QEMU, senza schermo:
 
-Il CD live non ha bisogno di un driver per i lettori CD: i loader (BIOS e
-UEFI) leggono dal CD, oltre al kernel e al pacchetto di avvio, anche il
-volume di sistema, che il kernel monta dalla memoria come `sys:`. Si può
-scrivere e installare driver come sempre, ma tutto si perde allo
-spegnimento.
+```sh
+make test           # una sessione di comandi scritta (anche test-uefi, test-iso)
+make test-drivers   # un avvio per ogni disco, scheda di rete, controller USB e lettore SD
+make test-audio     # suoni su ogni scheda audio emulata, registrati e controllati
+make test-display   # cambio di risoluzione su ogni scheda video emulata
+make test-compat    # un programma Linux e uno Windows
+make test-arcscript # programmi ArcScript
+make shots          # usa l'interfaccia con mouse e tastiera e salva le schermate
+make check          # test delle librerie e dello strumento host
+```
+
+`make SIZE=1G` cambia la dimensione dell'immagine, `make MEMORY=2G` la
+memoria della macchina virtuale.
 
 ## Su un PC vero
 
-`build/arcos.img` è un'immagine di disco completa: scritta su una chiavetta
-USB (per esempio con `dd`, facendo molta attenzione a scegliere il
-dispositivo giusto) si avvia sia in modalità BIOS/legacy sia in UEFI. Il
-loader non è firmato, quindi Secure Boot va disattivato.
-
-Il disco di sistema può essere la chiavetta stessa: i driver USB sono nel
-pacchetto di avvio e il kernel aspetta i dischi USB prima di cercare
-`sys:`. Tastiere e mouse USB funzionano senza l'emulazione PS/2 del
-firmware.
+`build/arcos.img` (o `arcos-img.zip` delle release) scritta su una
+chiavetta USB si avvia sia in modalità BIOS/legacy sia UEFI; il loader non
+è firmato, quindi Secure Boot va disattivato. Il disco di sistema può
+essere la chiavetta stessa.
 
 Da sapere prima di provarlo:
 
 - il kernel usa un solo processore;
-- non ci sono ancora driver per Wi-Fi, schede video (si usa il framebuffer
-  del firmware), audio, né per le schede di rete Intel I225/I226 e
-  Realtek RTL8125 (2,5 Gbit);
-- alcuni driver sono scritti dalla documentazione dei chip e non sono
-  ancora stati provati su hardware vero perché QEMU non li emula; per le
-  Realtek RTL8169/8111 c'è un modello scritto apposta. Lo stato di ognuno
-  è in [docs/driver.md](docs/driver.md#hardware-supportato).
+- lo schermo resta nella risoluzione scelta dal firmware (le schede video
+  vere non hanno ancora un driver);
+- molti driver sono scritti dalla documentazione dei chip e provati in
+  QEMU, non ancora su hardware vero.
 
-Per un disco dati in più (una chiavetta da usare con arcOS):
+## Primi passi nel Terminale
 
-```sh
-tools/target/release/arctool mkfs chiavetta.img --size 1G --label Dati
 ```
-
-crea un'immagine con una partizione ArcFS, che arcOS monta come `dati:`.
+help                   tutti i comandi
+dev / drv              dispositivi trovati e driver installati
+vol / disks            volumi montati, dischi e partizioni
+ls sys:/home           i tuoi file
+display 1920x1080      cambia risoluzione (con un driver video)
+play sys:/system/sounds/avvio.wav
+volume 60
+net / ping 10.0.2.2    rete
+install busybox        un programma dal negozio
+cd sys:/home/arcscript
+hello.as               un programma ArcScript
+shutdown / restart
+```
 
 ## Struttura del repository
 
 | Percorso | Contenuto |
 |---|---|
-| `boot/bios/` | ArcBoot per BIOS: `stage1.asm` (MBR) e `stage2.asm` |
-| `boot/uefi/` | ArcBoot per UEFI (`BOOTX64.EFI`) |
-| `system/kernel/` | il kernel |
-| `system/libs/arcdk/` | Arc Development Kit: ABI dei driver, manifesti, pacchetti, chiamate di sistema |
-| `system/libs/arcdrv/` | libreria di supporto per scrivere driver |
-| `system/libs/arcrt/` | libreria di supporto per scrivere programmi |
-| `system/libs/arcfs/` | ArcFS, condiviso tra kernel e strumenti host |
-| `system/libs/arcusb/` | il nucleo USB comune ai driver dei controller (enumerazione, hub, collegamento a caldo) |
-| `system/libs/arcvirtio/` | interfaccia virtio (legacy e moderna) comune ai driver virtio |
-| `system/libs/arcc-core/`, `system/libs/arc-vm/` | compilatore e macchina virtuale di ArcScript |
+| `boot/bios/`, `boot/uefi/` | ArcBoot per BIOS e per UEFI |
+| `system/kernel/` | il kernel, con l'interfaccia grafica (`src/gui`) |
 | `system/drivers/` | i driver, uno per cartella, ognuno con il suo `driver.manifest` |
-| `system/apps/` | i programmi |
-| `tools/arctool/` | strumento host: crea pacchetti e immagini, legge e scrive volumi ArcFS |
-| `tools/qemu/` | modelli di dispositivi per QEMU che QEMU non ha (Realtek RTL8169/8168) |
-| `rootfs/` | file copiati nel volume di sistema |
-| `scripts/` | test automatici in QEMU (`test.sh`, `test-drivers.sh`, `test-arcscript.sh`) e `build-qemu.sh` |
-
-## Primi passi nella shell
-
-```
-help                   tutti i comandi
-dev                    dispositivi trovati e il loro driver
-drv                    driver disponibili, installati, in esecuzione
-drv info e1000         manifesto e stato di un driver
-vol / disks            volumi montati, dischi e partizioni
-ls sys:/system/drivers il magazzino dei driver
-cat sys:/home/welcome.txt
-edit sys:/home/nota.txt
-net / ping 10.0.2.2    rete
-info / snake / calc    programmi
-cd sys:/home/arcscript
-hello.as               un programma ArcScript
-arcc help              compilare ed eseguire ArcScript
-kbd it                 tastiera italiana
-shutdown / restart
-```
+| `system/apps/` | i programmi, tra cui `winrun` (programmi Windows) e `arcc` (ArcScript) |
+| `system/libs/` | le librerie: ABI dei driver (`arcdk`, `arcdrv`), programmi (`arcrt`), ArcFS, USB, virtio, ArcScript |
+| `tools/arctool/` | strumento host: crea pacchetti, immagini e CD, legge e scrive volumi ArcFS |
+| `tools/assets/` | i generatori di caratteri, icone, sfondi e suoni |
+| `tools/qemu/` | modelli per QEMU di dispositivi che QEMU non ha (Realtek RTL8169/8168) |
+| `rootfs/` | i file del volume di sistema |
+| `scripts/` | i test automatici in QEMU |
+| `docs/` | la documentazione |
 
 ## Licenza
 
-Proprietaria: vedi [LICENSE](LICENSE).
+Proprietaria: vedi [LICENSE](LICENSE). I caratteri Inter e DejaVu Sans
+Mono hanno le loro licenze libere, in `system/kernel/assets/LICENSES.md`.

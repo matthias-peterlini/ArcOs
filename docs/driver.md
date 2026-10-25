@@ -228,13 +228,23 @@ funzioni sicure:
 | dischi | `block_register` con un `BlockDesc` (lettura, scrittura, flush) |
 | input | `input_event` (tasti come usage HID, movimenti, pulsanti) |
 | rete | `net_register` con un `NetDesc`, `net_receive` per i frame in arrivo |
+| suono | `audio_register` con un `AudioDesc` (scrittura di campioni a 16 bit, svuotamento); `pcm::PcmRing` gestisce il buffer circolare che quasi ogni scheda audio legge in loop |
+| schermo | `display_register` con un `DisplayDesc` (modi, cambio di modo, aggiornamento di un rettangolo); `map_framebuffer` mappa la memoria video in write-combining |
 
 Il driver dichiara la versione dell'ABI per cui è compilato
 (`ABI_VERSION`, oggi 2). Il kernel rifiuta i pacchetti di un'ABI diversa
 invece di caricarli e rischiare un errore. L'ABI 2 ha aggiunto MSI, gli
 eventi e i dispositivi figli; i servizi nuovi si aggiungono in fondo alla
 tabella, quindi un driver compilato per l'ABI 2 funziona anche con un
-kernel più recente della stessa ABI.
+kernel più recente della stessa ABI (non il contrario: i driver audio e
+video della versione 0.4 chiedono un kernel 0.4).
+
+Il kernel converte ogni suono al formato dell'uscita (frequenza, canali) e
+applica il volume da sé: un driver audio dichiara un solo formato e lascia
+il guadagno dell'hardware fisso. Un driver video descrive il framebuffer
+di ogni modo; se il dispositivo non legge da solo la memoria che arcOS
+disegna (virtio-gpu, VMware SVGA), fornisce anche `flush`, che il kernel
+chiama per ogni rettangolo cambiato.
 
 ### Più dispositivi, interruzioni e polling
 
@@ -295,8 +305,11 @@ descrivere le sue code e i suoi messaggi.
 
 ## Hardware supportato
 
-"Provato" vuol dire verificato in QEMU da `make test-drivers` (e a mano
-per il collegamento a caldo). Gli altri id elencati nei manifesti sono
+"Provato" vuol dire verificato in QEMU da `make test-drivers` (dischi,
+rete, USB, lettori SD), `make test-audio` (il suono registrato da QEMU
+deve avere l'altezza e la durata giuste) o `make test-display` (lo schermo
+che QEMU mostra deve avere la nuova risoluzione), e a mano per il
+collegamento a caldo. Gli altri id elencati nei manifesti sono
 chip della stessa famiglia che usano la stessa interfaccia.
 
 "Provato su modello" vuol dire provato su un modello del chip scritto per
@@ -332,10 +345,20 @@ della scheda non funzionano.
 | `rtl8169` | Realtek RTL8169 (I/O, linea classica), RTL8111/8168 (MSI, MSI-X) | provato su modello |
 | `rtl8169` | Realtek RTL810x e le altre revisioni | stessa interfaccia, non provato su hardware |
 | `ps2kbd`, `ps2mouse` | tastiera e mouse PS/2 | provati |
+| `sdhci` | lettori di schede SD/MMC standard (per classe PCI): Intel, O2 Micro, Ricoh, AMD | provato con ADMA2, SDMA e senza DMA, schede SD e SDHC |
+| `hda` | audio HD Intel (per classe PCI), codec Realtek, Conexant, IDT, VIA, Cirrus | provato con uscita di linea e altoparlante; sui codec veri non verificato |
+| `ac97` | audio AC'97 Intel ICH, SiS, nVidia, AMD | provato (82801AA) |
+| `bochsvga` | schermo di QEMU (VGA standard, bochs-display), Bochs, VirtualBox VBoxVGA | provato in QEMU |
+| `vmsvga` | VMware SVGA II: VMware, VirtualBox VMSVGA | provato in QEMU |
+| `virtiogpu` | virtio GPU (2D) | provato |
 
-Mancano ancora i driver per: Wi-Fi, audio, schede video (il sistema usa il
-framebuffer del firmware), Intel I225/I226 e Realtek RTL8125 (2,5 Gbit),
-lettori di schede SD.
+Senza un driver video lo schermo resta nel modo scelto dal firmware
+(VBE o GOP), che funziona su quasi ogni scheda ma non cambia risoluzione.
+
+Mancano ancora i driver per: Wi-Fi, schede video vere (Intel, AMD,
+nVidia: si usa il framebuffer del firmware), Intel I225/I226 e Realtek
+RTL8125 (2,5 Gbit), lettori di schede Realtek e Genesys su PCIe, batteria
+dei portatili.
 
 ### Il pacchetto
 

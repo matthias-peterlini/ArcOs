@@ -121,7 +121,7 @@ La metà bassa appartiene al programma in esecuzione.
 | console | `console/` | terminale con sequenze ANSI su framebuffer, VGA testo e porta seriale; giornale di sistema; con la grafica attiva è una griglia mostrata dalla finestra Terminale |
 | grafica | `gui/` | splash d'avvio, configurazione guidata, scrivania, finestre e app ([gui.md](gui.md)) |
 | Linux | `linux.rs` | caricatore ELF statico e chiamate di sistema Linux ([compat.md](compat.md)) |
-| dispositivi | `dev/` | registro dei dispositivi, PCI, piattaforma (8042), IRQ condivisi, dischi e partizioni (MBR, GPT), tastiera, interfacce di rete |
+| dispositivi | `dev/` | registro dei dispositivi, PCI, piattaforma (8042), IRQ condivisi, dischi e partizioni (MBR, GPT), tastiera, interfacce di rete, uscite audio (conversione, volume, WAV), controller video (risoluzioni) |
 | driver | `driver/` | gestore dei driver, caricatore ELF dei moduli, tabella `KernelApi` |
 | file | `fs/` | volumi, percorsi `volume:/cartella/file`, montaggio automatico |
 | rete | `net.rs` | ARP, IPv4, ICMP, UDP, DHCP, DNS |
@@ -136,8 +136,10 @@ resto lo fanno i driver. Un driver è un'immagine ELF indipendente dalla
 posizione. Il kernel la carica nella regione dei moduli, applica le
 rilocazioni e chiama `arc_driver_entry` con la tabella dei servizi
 (`KernelApi`). In cambio riceve una `DriverInfo` con `probe` e `remove`. I
-driver registrano dischi, sorgenti di input e interfacce di rete; il kernel
-fa il resto: partizioni e volumi, tastiera e mappe dei tasti, IP. La scelta
+driver registrano dischi, sorgenti di input, interfacce di rete, uscite
+audio e controller video; il kernel fa il resto: partizioni e volumi,
+tastiera e mappe dei tasti, IP, conversione dei suoni, ridisegno
+dell'interfaccia alla nuova risoluzione. La scelta
 e l'installazione automatica sono descritte in [driver.md](driver.md).
 
 I bus che il kernel non conosce li gestiscono i driver. Il driver di un

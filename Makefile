@@ -14,6 +14,8 @@
 #                   controller and check that its driver works
 #   make test-arcscript  run ArcScript programs on arcOS and check them
 #   make test-compat   run a Linux and a Windows program on arcOS and check them
+#   make test-audio    play sounds on every emulated sound card and check them
+#   make test-display  switch the resolution on every emulated display
 #   make shots      boot headless, drive the GUI and save screenshots (build/shots)
 #   make assets     regenerate fonts, icons, wallpapers and sounds (Python, Pillow, numpy)
 #   make check      unit tests of the shared libraries and the host tool
@@ -44,7 +46,7 @@ ifeq ($(PROFILE),release)
 CARGO_PROFILE := --release
 endif
 
-.PHONY: all uefi system tools root image iso run-iso test-iso run run-q35 run-nvme run-uefi test test-uefi test-drivers test-arcscript test-compat shots assets check clean $(PACKAGES)
+.PHONY: all uefi system tools root image iso run-iso test-iso run run-q35 run-nvme run-uefi test test-uefi test-drivers test-arcscript test-compat test-audio test-display shots assets check clean $(PACKAGES)
 
 all: image
 
@@ -124,6 +126,12 @@ test-arcscript: image
 
 test-compat: image
 	scripts/test-compat.sh $(IMAGE)
+
+test-audio: image
+	scripts/test-audio.sh $(IMAGE)
+
+test-display: image
+	scripts/test-display.sh $(IMAGE)
 
 shots: image
 	scripts/gui-shots.py $(IMAGE) scripts/gui/tour.txt $(BUILD)/shots
