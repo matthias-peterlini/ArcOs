@@ -92,9 +92,10 @@ impl Cursor {
             self.y = p.y;
         } else {
             if let Some((rx, ry)) = self.raw {
+                // Drivers report motion in screen directions (down is
+                // positive), whatever the device counts.
                 self.x += p.x - rx;
-                // Mice report "up" as positive.
-                self.y -= p.y - ry;
+                self.y += p.y - ry;
             }
             self.raw = Some((p.x, p.y));
         }

@@ -17,7 +17,8 @@ A script is a list of steps, one per line:
 
 Usage: scripts/gui-shots.py <image> <script> <out folder> [qemu options...]
 Environment: QEMU (default qemu-system-x86_64), UEFI=1 for OVMF, CDROM=1 to
-boot the image as a CD, KEEP=<file> to keep the disk as the session left it.
+boot the image as a CD, KEEP=<file> to keep the disk as the session left it,
+SCREEN=<w>x<h> when the screen is not 1024x768.
 """
 import json
 import os
@@ -28,7 +29,9 @@ import sys
 import tempfile
 import time
 
-W, H = 1024, 768
+# Screen size the pointer positions refer to (SCREEN=1920x1080 for a
+# loader that picked another mode).
+W, H = map(int, os.environ.get("SCREEN", "1024x768").split("x"))
 
 
 class Qmp:
