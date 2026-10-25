@@ -1,7 +1,8 @@
 #!/bin/sh
 # Builds a QEMU with the extra device models in tools/qemu (the Realtek
-# RTL8169 and RTL8168, which stock QEMU lacks), so that their drivers can be
-# tested: scripts/test-drivers.sh runs the rtl8169 and rtl8168 cases with it.
+# RTL8169, RTL8168 and RTL8125, which stock QEMU lacks), so that their
+# drivers can be tested: scripts/test-drivers.sh runs the rtl8169, rtl8168
+# and rtl8125 cases with it.
 #
 # Usage: scripts/build-qemu.sh [directory]
 # The default directory is build/qemu; the binary ends up in

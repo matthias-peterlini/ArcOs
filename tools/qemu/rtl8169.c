@@ -14,6 +14,10 @@
  *            the transmitter and receiver are on.
  *   rtl8168  10ec:8168 (RTL8111E-VL): BAR0 I/O, BAR2 64-bit memory, BAR4
  *            MSI-X table; MSI and MSI-X, edge-triggered.
+ *   rtl8125  10ec:8125 (RTL8125B, 2.5 Gbit): like the rtl8168, but the
+ *            interrupt mask and status are 32-bit registers at 0x38 and
+ *            0x3C and the transmit poll is at 0x90 (bit 0, normal queue);
+ *            the old poll and interrupt registers do nothing there.
  *
  * Not modelled: checksum and segmentation offload, VLAN tags, the high
  * priority queue, tally counters, power management, interrupt mitigation.
@@ -46,6 +50,8 @@ enum {
     TCR = 0x40, RCR = 0x44, MPC = 0x4C, CFG9346 = 0x50,
     CONFIG0 = 0x51, CONFIG5 = 0x56, PHYAR = 0x60, PHYSTATUS = 0x6C,
     RMS = 0xDA, CPCR = 0xE0, INTRMIT = 0xE2, RDSAR = 0xE4, MTPS = 0xEC,
+    /* RTL8125 */
+    IMR8125 = 0x38, ISR8125 = 0x3C, TPPOLL8125 = 0x90,
 };
 
 #define CR_RST  0x10
@@ -91,6 +97,7 @@ struct RTL8169State {
     NICConf conf;
 
     bool is_8168;
+    bool is_8125;
     uint8_t regs[256];
     uint16_t phy[32];
     uint32_t rx_index;
@@ -117,6 +124,16 @@ static uint64_t reg64(RTL8169State *s, int off)
     return ldq_le_p(&s->regs[off]);
 }
 
+static uint32_t isr(RTL8169State *s)
+{
+    return s->is_8125 ? reg32(s, ISR8125) : reg16(s, ISR);
+}
+
+static uint32_t imr(RTL8169State *s)
+{
+    return s->is_8125 ? reg32(s, IMR8125) : reg16(s, IMR);
+}
+
 static bool link_up(RTL8169State *s)
 {
     return !qemu_get_queue(s->nic)->link_down;
@@ -130,7 +147,7 @@ static bool config_unlocked(RTL8169State *s)
 static void update_irq(RTL8169State *s)
 {
     PCIDevice *d = PCI_DEVICE(s);
-    bool level = (reg16(s, ISR) & reg16(s, IMR)) != 0;
+    bool level = (isr(s) & imr(s)) != 0;
 
     if (msix_enabled(d)) {
         /* Message interrupts are edges: one per transition. */
@@ -149,7 +166,11 @@ static void update_irq(RTL8169State *s)
 
 static void raise_irq(RTL8169State *s, uint16_t bits)
 {
-    stw_le_p(&s->regs[ISR], reg16(s, ISR) | bits);
+    if (s->is_8125) {
+        stl_le_p(&s->regs[ISR8125], reg32(s, ISR8125) | bits);
+    } else {
+        stw_le_p(&s->regs[ISR], reg16(s, ISR) | bits);
+    }
     update_irq(s);
 }
 
@@ -206,8 +227,13 @@ static void soft_reset(RTL8169State *s)
 {
     /* What the RST bit does: both units stop, rings start over. */
     s->regs[CR] &= ~(CR_RE | CR_TE | CR_RST);
-    stw_le_p(&s->regs[ISR], 0);
-    stw_le_p(&s->regs[IMR], 0);
+    if (s->is_8125) {
+        stl_le_p(&s->regs[ISR8125], 0);
+        stl_le_p(&s->regs[IMR8125], 0);
+    } else {
+        stw_le_p(&s->regs[ISR], 0);
+        stw_le_p(&s->regs[IMR], 0);
+    }
     s->rx_index = 0;
     s->tx_index = 0;
     update_irq(s);
@@ -219,8 +245,8 @@ static void rtl8169_reset(DeviceState *dev)
 
     memset(s->regs, 0, sizeof(s->regs));
     memcpy(&s->regs[IDR0], s->conf.macaddr.a, 6);
-    /* Hardware version in TxConfig: RTL8169s, or RTL8168E-VL. */
-    stl_le_p(&s->regs[TCR], s->is_8168 ? 0x2C800000 : 0x00800000);
+    /* Hardware version in TxConfig: RTL8169s, RTL8168E-VL or RTL8125B. */
+    stl_le_p(&s->regs[TCR], s->is_8125 ? 0x64100000 : s->is_8168 ? 0x2C800000 : 0x00800000);
     s->regs[CONFIG0] = 0x00;
     phy_reset(s);
     s->rx_index = 0;
@@ -495,8 +521,20 @@ static void write_byte(RTL8169State *s, int off, uint8_t v)
         break;
     case ISR:
     case ISR + 1:
+        if (s->is_8125) {
+            /* The upper half of the 8125's interrupt status. */
+            s->regs[off] &= ~v;
+            return;
+        }
         s->regs[off] &= ~v;     /* write 1 to clear */
         return;
+    case ISR8125:
+    case ISR8125 + 1:
+        if (s->is_8125) {
+            s->regs[off] &= ~v;
+            return;
+        }
+        break;
     case TCR ... TCR + 3:
         if (!s->is_8168 && !running) {
             return;             /* early RTL8169: only with both units on */
@@ -574,7 +612,15 @@ static void rtl8169_write(void *opaque, hwaddr addr, uint64_t val, unsigned size
     if (touches(addr, size, TNPDS)) {
         s->tx_index = 0;
     }
-    if (touches(addr, size, TPPOLL)) {
+    if (s->is_8125) {
+        if (touches(addr, size, TPPOLL8125)) {
+            uint8_t poll = s->regs[TPPOLL8125];
+            s->regs[TPPOLL8125] = 0;
+            if (poll & 1) {
+                transmit(s);
+            }
+        }
+    } else if (touches(addr, size, TPPOLL)) {
         uint8_t poll = s->regs[TPPOLL];
         s->regs[TPPOLL] = 0;
         if (poll & POLL_HPQ) {
@@ -588,7 +634,8 @@ static void rtl8169_write(void *opaque, hwaddr addr, uint64_t val, unsigned size
         phy_access(s);
     }
     if (touches(addr, size, ISR) || touches(addr, size, ISR + 1) ||
-        touches(addr, size, IMR) || touches(addr, size, IMR + 1)) {
+        touches(addr, size, IMR) || touches(addr, size, IMR + 1) ||
+        (s->is_8125 && (touches(addr, size, IMR8125) || touches(addr, size, IMR8125 + 3)))) {
         update_irq(s);
     }
 }
@@ -614,13 +661,15 @@ static void rtl8169_realize(PCIDevice *dev, Error **errp)
     RTL8169State *s = RTL8169_BASE(dev);
     DeviceState *d = DEVICE(dev);
 
-    s->is_8168 = pci_get_word(dev->config + PCI_DEVICE_ID) == 0x8168;
+    s->is_8125 = pci_get_word(dev->config + PCI_DEVICE_ID) == 0x8125;
+    s->is_8168 = pci_get_word(dev->config + PCI_DEVICE_ID) == 0x8168 || s->is_8125;
     dev->config[PCI_INTERRUPT_PIN] = 1;
 
     memory_region_init_io(&s->io, OBJECT(s), &rtl8169_ops, s, "rtl8169-io", 0x100);
     pci_register_bar(dev, 0, PCI_BASE_ADDRESS_SPACE_IO, &s->io);
     if (s->is_8168) {
-        memory_region_init_io(&s->mmio, OBJECT(s), &rtl8169_ops, s, "rtl8168-mmio", 0x1000);
+        memory_region_init_io(&s->mmio, OBJECT(s), &rtl8169_ops, s,
+                              s->is_8125 ? "rtl8125-mmio" : "rtl8168-mmio", 0x1000);
         pci_register_bar(dev, 2, PCI_BASE_ADDRESS_SPACE_MEMORY | PCI_BASE_ADDRESS_MEM_TYPE_64,
                          &s->mmio);
         if (msi_init(dev, 0x50, 1, true, false, errp) < 0) {
@@ -697,6 +746,15 @@ static void rtl8168_class_init(ObjectClass *klass, void *data)
     DEVICE_CLASS(klass)->desc = "Realtek RTL8111/8168 Gigabit Ethernet";
 }
 
+static void rtl8125_class_init(ObjectClass *klass, void *data)
+{
+    PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
+
+    k->device_id = 0x8125;
+    k->revision = 0x05;
+    DEVICE_CLASS(klass)->desc = "Realtek RTL8125 2.5 Gigabit Ethernet";
+}
+
 static const TypeInfo rtl8169_types[] = {
     {
         .name = TYPE_RTL8169_BASE,
@@ -719,6 +777,11 @@ static const TypeInfo rtl8169_types[] = {
         .name = "rtl8168",
         .parent = TYPE_RTL8169_BASE,
         .class_init = rtl8168_class_init,
+    },
+    {
+        .name = "rtl8125",
+        .parent = TYPE_RTL8169_BASE,
+        .class_init = rtl8125_class_init,
     },
 };
 

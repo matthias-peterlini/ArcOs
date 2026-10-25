@@ -7,7 +7,7 @@
 # slower than 20 ms fails too: replies then come from the drivers' polling
 # thread, so the card's interrupts are broken.
 #
-# The rtl8169 and rtl8168 cases need a QEMU with the models from
+# The rtl8169, rtl8168 and rtl8125 cases need a QEMU with the models from
 # tools/qemu (scripts/build-qemu.sh builds one; QEMU_MODELS names another)
 # and are skipped without it. Those models report what the real chip would
 # not accept; any such report fails the case.
@@ -25,7 +25,7 @@ WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
 ALL="ide ahci nvme virtio virtio-modern virtio-legacy
-e1000 e1000e igb rtl8139 pcnet virtio-net virtio-net-modern multi-nic rtl8169 rtl8168
+e1000 e1000e igb rtl8139 pcnet virtio-net virtio-net-modern multi-nic rtl8169 rtl8168 rtl8125
 xhci ehci uhci ohci sdhci sdhci-sdma sdhci-pio"
 CASES=${*:-$ALL}
 
@@ -87,7 +87,7 @@ for c in $CASES; do
         virtio-net) ARGS="-nic user,model=virtio-net-pci"; CMDS=net ;;
         virtio-net-modern) ARGS="-netdev user,id=n -device virtio-net-pci,netdev=n,disable-legacy=on"; CMDS=net ;;
         multi-nic) ARGS="-nic user,model=e1000 -nic user,model=rtl8139,mac=52:54:00:00:00:02 -nic user,model=pcnet,mac=52:54:00:00:00:03"; CMDS=net ;;
-        rtl8169|rtl8168)
+        rtl8169|rtl8168|rtl8125)
             if [ ! -x "$QEMU_MODELS" ]; then
                 printf '  skip  %s: no QEMU with the model (scripts/build-qemu.sh)\n' "$c"
                 continue

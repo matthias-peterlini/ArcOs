@@ -114,6 +114,7 @@ extern "C" fn kmain(boot_phys: u64) -> ! {
     gui::boot_progress(28);
 
     let found = dev::scan().len();
+    acpi::start_events();
     debug!("kernel", "{found} devices found");
     gui::boot_progress(38);
     driver::init();

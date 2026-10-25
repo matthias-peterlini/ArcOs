@@ -1,4 +1,5 @@
-//! Just enough ACPI to find the tables and to power off or restart.
+//! Just enough ACPI to find the tables, to power off or restart, and to
+//! turn the computer off cleanly when its power button is pressed.
 
 use crate::arch::cpu::{self, inw, outb, outw};
 use crate::mem::phys_to_virt;
@@ -17,6 +18,13 @@ struct Fadt {
     reset_addr: u64,
     reset_value: u8,
     reset_supported: bool,
+    /// Interrupt line of the SCI (System Control Interrupt).
+    sci: u16,
+    pm1a_evt: u32,
+    pm1b_evt: u32,
+    pm1_evt_len: u8,
+    /// The power button is a fixed feature (not a control method one).
+    fixed_power_button: bool,
 }
 
 struct Acpi {
@@ -101,6 +109,11 @@ pub fn init(rsdp_hint: u64) {
                 dsdt: le32(t, 40) as u64,
                 ..Fadt::default()
             };
+            f.sci = le16(t, 46);
+            f.pm1a_evt = le32(t, 56);
+            f.pm1b_evt = le32(t, 60);
+            f.pm1_evt_len = t[88];
+            f.fixed_power_button = le32(t, 112) & (1 << 4) == 0;
             if t.len() >= 129 {
                 f.reset_supported = le32(t, 112) & (1 << 10) != 0;
                 f.reset_space = t[116];
@@ -152,6 +165,72 @@ fn s5_sleep_type(dsdt: u64) -> Option<(u16, u16)> {
     Some((a, b))
 }
 
+/// Switches the chipset from legacy (SMI) to ACPI mode if the firmware left
+/// it in the former.
+fn enable_acpi_mode(f: &Fadt) {
+    if f.pm1a_cnt == 0 || inw(f.pm1a_cnt as u16) & 1 != 0 || f.smi_cmd == 0 || f.acpi_enable == 0 {
+        return;
+    }
+    outb(f.smi_cmd as u16, f.acpi_enable);
+    for _ in 0..1_000_000 {
+        if inw(f.pm1a_cnt as u16) & 1 != 0 {
+            break;
+        }
+    }
+}
+
+/// PM1 status: the power button was pressed.
+const PWRBTN: u16 = 1 << 8;
+
+/// Set by the SCI when the power button was pressed.
+static POWER_BUTTON: crate::task::Event = crate::task::Event::new();
+
+/// The PM1 status and enable registers of the first and second block.
+fn pm1_regs(f: &Fadt) -> impl Iterator<Item = (u16, u16)> {
+    let half = (f.pm1_evt_len / 2) as u32;
+    [f.pm1a_evt, f.pm1b_evt].into_iter().filter(|&b| b != 0 && b <= 0xFFFF).map(move |b| (b as u16, (b + half) as u16))
+}
+
+fn sci() {
+    let Some(f) = ACPI.lock().fadt else { return };
+    for (status, enable) in pm1_regs(&f) {
+        let pending = inw(status) & inw(enable);
+        if pending != 0 {
+            outw(status, pending); // write 1 to clear
+            if pending & PWRBTN != 0 {
+                POWER_BUTTON.signal();
+            }
+        }
+    }
+}
+
+/// The interrupt line of ACPI events (for the device list), if there is one.
+pub fn sci_line() -> Option<u8> {
+    ACPI.lock().fadt.filter(|f| f.fixed_power_button && f.pm1a_evt != 0 && f.sci < 16).map(|f| f.sci as u8)
+}
+
+/// Listens for the power button: pressing it turns the computer off cleanly
+/// (the file systems are written out first).
+pub fn start_events() {
+    let Some(f) = ACPI.lock().fadt else { return };
+    let Some(line) = sci_line() else { return };
+    if f.pm1_evt_len < 4 {
+        return;
+    }
+    enable_acpi_mode(&f);
+    for (status, enable) in pm1_regs(&f) {
+        outw(status, 0xFFFF);
+        outw(enable, (inw(enable) | PWRBTN) & PWRBTN);
+    }
+    crate::dev::irq::attach_kernel(line, sci);
+    crate::task::spawn("acpi", || loop {
+        POWER_BUTTON.wait(None);
+        crate::info!("acpi", "power button pressed: turning off");
+        power_off();
+    });
+    crate::debug!("acpi", "power button on line {line}");
+}
+
 /// Turns the machine off. Returns only if every method failed.
 pub fn power_off() {
     crate::fs::sync_all();
@@ -159,14 +238,7 @@ pub fn power_off() {
     let fadt = ACPI.lock().fadt;
     if let Some(f) = fadt {
         if f.pm1a_cnt != 0 {
-            if inw(f.pm1a_cnt as u16) & 1 == 0 && f.smi_cmd != 0 && f.acpi_enable != 0 {
-                outb(f.smi_cmd as u16, f.acpi_enable);
-                for _ in 0..1_000_000 {
-                    if inw(f.pm1a_cnt as u16) & 1 != 0 {
-                        break;
-                    }
-                }
-            }
+            enable_acpi_mode(&f);
             if let Some((a, b)) = s5_sleep_type(f.dsdt) {
                 outw(f.pm1a_cnt as u16, (a << 10) | (1 << 13));
                 if f.pm1b_cnt != 0 {

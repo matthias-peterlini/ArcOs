@@ -344,7 +344,7 @@ della scheda non funzionano.
 | `rtl8139` | Realtek RTL8139 e schede derivate | provato |
 | `pcnet` | AMD PCnet-PCI II e successive | provato |
 | `virtionet` | schede di rete virtio (legacy e moderna) | provato |
-| `rtl8169` | Realtek RTL8169 (I/O, linea classica), RTL8111/8168 (MSI, MSI-X) | provato su modello |
+| `rtl8169` | Realtek RTL8169 (I/O, linea classica), RTL8111/8168 (MSI, MSI-X), RTL8125 2,5 Gbit (MSI-X) | provato su modello |
 | `rtl8169` | Realtek RTL810x e le altre revisioni | stessa interfaccia, non provato su hardware |
 | `ps2kbd`, `ps2mouse` | tastiera e mouse PS/2 | provati |
 | `sdhci` | lettori di schede SD/MMC standard (per classe PCI): Intel, O2 Micro, Ricoh, AMD | provato con ADMA2, SDMA e senza DMA, schede SD e SDHC |
@@ -357,8 +357,11 @@ della scheda non funzionano.
 Senza un driver video lo schermo resta nel modo scelto dal firmware
 (VBE o GOP), che funziona su quasi ogni scheda ma non cambia risoluzione.
 
+Il pulsante di accensione non ha un driver: lo gestisce il kernel (ACPI,
+`make test-acpi`), e premerlo spegne il computer in modo pulito.
+
 Mancano ancora i driver per: Wi-Fi, schede video vere (Intel, AMD,
-nVidia: si usa il framebuffer del firmware), Realtek RTL8125 (2,5 Gbit), lettori di schede Realtek e Genesys su PCIe, batteria
+nVidia: si usa il framebuffer del firmware), lettori di schede Realtek e Genesys su PCIe, batteria
 dei portatili.
 
 ### Il pacchetto

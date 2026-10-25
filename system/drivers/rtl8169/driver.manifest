@@ -1,10 +1,10 @@
-# Realtek RTL8169, RTL8111/8168 and RTL810x: the Ethernet chip of most
-# desktop and laptop boards. Written from the chip documentation; not yet
-# verified on hardware (QEMU has no model of it).
+# Realtek RTL8169, RTL8111/8168, RTL810x and RTL8125: the Ethernet chip of most
+# desktop and laptop boards. Written from the chip documentation; verified
+# on the models in tools/qemu, not yet on hardware.
 name        = rtl8169
 version     = 1.0.0
 class       = network
-description = Realtek RTL8169/8111 Gigabit Ethernet
+description = Realtek RTL8169/8111/8125 Ethernet
 author      = arcOS
 match       = pci 10ec:8161     # RTL8111/8168 (PCIe)
 match       = pci 10ec:8168     # RTL8111/8168 (PCIe)
@@ -16,3 +16,5 @@ match       = pci 1186:4302     # D-Link DGE-530T rev C
 match       = pci 1259:c107     # Allied Telesyn AT-2812
 match       = pci 1737:1032     # Linksys EG1032
 match       = pci 16ec:0116     # USRobotics USR997902
+match       = pci 10ec:8125     # RTL8125 2.5 Gbit (verified on the model only)
+match       = pci 10ec:3000     # Killer E3000 (RTL8125)

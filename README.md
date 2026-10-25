@@ -93,13 +93,13 @@ memoria e `arcos.iso` nel lettore CD.
 | Dischi | IDE, SATA (AHCI), NVMe, virtio |
 | USB | controller USB 3, 2 e 1.1, hub, tastiere, mouse, tavolette, chiavette e dischi (anche come disco di sistema), collegamento a caldo |
 | Schede SD | lettori standard (SD Host Controller): schede SD, SDHC, SDXC, MMC |
-| Rete | Intel PRO/1000 (e1000, 82574, I217–I219), Realtek RTL8139 e RTL8169/8111/8168, AMD PCnet, virtio |
+| Rete | Intel PRO/1000 (e1000, 82574, I217–I219), Intel 82576, I210/I211, I350 e I225/I226 (2,5 Gbit), Realtek RTL8139, RTL8169/8111/8168 e RTL8125 (2,5 Gbit), AMD PCnet, virtio |
 | Audio | Intel HD Audio (quasi ogni PC dal 2005), AC'97 |
 | Video | il framebuffer del firmware su qualunque scheda; cambio di risoluzione con le schede di QEMU, VirtualBox (VBoxVGA, VMSVGA), VMware e virtio-gpu |
-| Input | tastiera e mouse PS/2 e USB |
+| Input | tastiera e mouse PS/2 e USB, pulsante di accensione (ACPI) |
 
 Mancano ancora il Wi-Fi, i driver per le schede video vere (Intel, AMD,
-nVidia), le schede di rete a 2,5 Gbit e la batteria dei portatili. Lo stato
+nVidia) e la batteria dei portatili. Lo stato
 di ogni driver, provato o no, è in [docs/driver.md](docs/driver.md#hardware-supportato).
 
 ## Compilare
@@ -121,6 +121,7 @@ make test           # una sessione di comandi scritta (anche test-uefi, test-iso
 make test-drivers   # un avvio per ogni disco, scheda di rete, controller USB e lettore SD
 make test-audio     # suoni su ogni scheda audio emulata, registrati e controllati
 make test-display   # cambio di risoluzione su ogni scheda video emulata
+make test-acpi      # il pulsante di accensione spegne arcOS
 make test-compat    # un programma Linux e uno Windows
 make test-arcscript # programmi ArcScript
 make shots          # usa l'interfaccia con mouse e tastiera e salva le schermate
@@ -173,7 +174,7 @@ shutdown / restart
 | `system/libs/` | le librerie: ABI dei driver (`arcdk`, `arcdrv`), programmi (`arcrt`), ArcFS, USB, virtio, ArcScript |
 | `tools/arctool/` | strumento host: crea pacchetti, immagini e CD, legge e scrive volumi ArcFS |
 | `tools/assets/` | i generatori di caratteri, icone, sfondi e suoni |
-| `tools/qemu/` | modelli per QEMU di dispositivi che QEMU non ha (Realtek RTL8169/8168) |
+| `tools/qemu/` | modelli per QEMU di dispositivi che QEMU non ha (Realtek RTL8169, RTL8168, RTL8125) |
 | `rootfs/` | i file del volume di sistema |
 | `scripts/` | i test automatici in QEMU |
 | `docs/` | la documentazione |

@@ -1,4 +1,5 @@
-//! Realtek RTL8169 / RTL8111 / RTL8168 / RTL810x Ethernet driver.
+//! Realtek RTL8169 / RTL8111 / RTL8168 / RTL810x and RTL8125 (2.5 Gbit)
+//! Ethernet driver.
 //!
 //! Descriptor rings for receive and transmit (16-byte descriptors owned by
 //! the card until it is done), 2 KiB buffers, interrupts by MSI or the
@@ -7,7 +8,9 @@
 //!
 //! The chips come in dozens of revisions that Linux tunes one by one; this
 //! driver uses only the settings they share and leaves the PHY as the
-//! firmware set it up.
+//! firmware set it up. The RTL8125 keeps the descriptors and most registers
+//! but moves the interrupt registers (32 bits wide, at 0x38 and 0x3C) and
+//! the transmit poll (0x90).
 
 #![no_std]
 #![no_main]
@@ -58,6 +61,11 @@ const RES: u32 = 1 << 21;
 /// link change, FIFO overflow.
 const INTERRUPTS: u16 = 0x007F;
 
+// RTL8125
+const INTR_MASK_8125: u16 = 0x38;
+const INTR_STATUS_8125: u16 = 0x3C;
+const TX_POLL_8125: u16 = 0x90;
+
 const RX_COUNT: usize = 64;
 const TX_COUNT: usize = 64;
 const BUF: usize = 2048;
@@ -77,9 +85,35 @@ struct Nic {
     rings: IrqLock<Rings>,
     iface: AtomicI32,
     has_irq: AtomicBool,
+    is_8125: bool,
 }
 
 impl Nic {
+    fn interrupt_status(&self) -> u32 {
+        if self.is_8125 {
+            self.regs.read32(INTR_STATUS_8125)
+        } else {
+            self.regs.read16(INTR_STATUS) as u32
+        }
+    }
+
+    /// Clears the given causes (write 1 to clear).
+    fn ack(&self, cause: u32) {
+        if self.is_8125 {
+            self.regs.write32(INTR_STATUS_8125, cause);
+        } else {
+            self.regs.write16(INTR_STATUS, cause as u16);
+        }
+    }
+
+    fn set_mask(&self, mask: u32) {
+        if self.is_8125 {
+            self.regs.write32(INTR_MASK_8125, mask);
+        } else {
+            self.regs.write16(INTR_MASK, mask as u16);
+        }
+    }
+
     /// Hands receive descriptor `i` back to the card.
     fn give_rx(&self, i: usize) {
         let at = i * 16;
@@ -141,7 +175,11 @@ impl Nic {
         self.tx_ring.write::<u32>(at, OWN | eor | FS | LS | len as u32);
         r.tx_next = (i + 1) % TX_COUNT;
         fence(Ordering::SeqCst);
-        self.regs.write8(TX_POLL, POLL_NORMAL);
+        if self.is_8125 {
+            self.regs.write16(TX_POLL_8125, 1);
+        } else {
+            self.regs.write8(TX_POLL, POLL_NORMAL);
+        }
         OK
     }
 
@@ -159,11 +197,11 @@ unsafe extern "C" fn send(ctx: *mut c_void, frame: *const u8, len: usize) -> Sta
 unsafe extern "C" fn irq(ctx: *mut c_void) {
     // SAFETY: the leaked Nic.
     let nic = unsafe { &*(ctx as *const Nic) };
-    let cause = nic.regs.read16(INTR_STATUS);
-    if cause == 0 || cause == 0xFFFF {
+    let cause = nic.interrupt_status();
+    if cause == 0 || cause == 0xFFFF || cause == u32::MAX {
         return; // not ours (shared line), or the card is gone
     }
-    nic.regs.write16(INTR_STATUS, cause); // write 1 to clear
+    nic.ack(cause);
     nic.receive();
 }
 
@@ -180,7 +218,12 @@ fn probe(dev: &DeviceInfo) -> Status {
     let Some(regs) = Regs::find(dev, true, 256) else {
         return E_NODEV;
     };
-    regs.write16(INTR_MASK, 0);
+    let is_8125 = matches!(dev.device, 0x8125 | 0x3000);
+    if is_8125 {
+        regs.write32(INTR_MASK_8125, 0);
+    } else {
+        regs.write16(INTR_MASK, 0);
+    }
     regs.write8(CHIP_CMD, CMD_RESET);
     if !arcdrv::wait_until(100, || regs.read8(CHIP_CMD) & CMD_RESET == 0) {
         arcdrv::warn!("the card does not come out of reset");
@@ -205,6 +248,7 @@ fn probe(dev: &DeviceInfo) -> Status {
         rings: IrqLock::new(Rings { rx_next: 0, tx_next: 0 }),
         iface: AtomicI32::new(-1),
         has_irq: AtomicBool::new(false),
+        is_8125,
     }));
     for i in 0..RX_COUNT {
         nic.give_rx(i);
@@ -216,7 +260,9 @@ fn probe(dev: &DeviceInfo) -> Status {
                                 // Checksums are left to the network stack; VLAN tags stay in the frame.
     let cplus = regs.read16(CPLUS_CMD) & !((1 << 5) | (1 << 6));
     regs.write16(CPLUS_CMD, cplus | (1 << 3)); // PCI multiple read/write
-    regs.write16(INTR_MITIGATE, 0);
+    if !is_8125 {
+        regs.write16(INTR_MITIGATE, 0);
+    }
     regs.write16(RX_MAX_SIZE, BUF as u16);
     regs.write8(MAX_TX_SIZE, 0x3B);
     regs.write32(TX_DESC, nic.tx_ring.phys() as u32);
@@ -226,6 +272,13 @@ fn probe(dev: &DeviceInfo) -> Status {
     // Older RTL8169s take the settings below only once both units run, the
     // others only before: write them on both sides.
     let configure = || {
+        if is_8125 {
+            // Default receive fetch, unlimited DMA bursts, own address,
+            // broadcast and multicast; automatic transmit FIFO.
+            regs.write32(RX_CONFIG, 8 << 27 | 7 << 8 | 0b1110);
+            regs.write32(TX_CONFIG, 3 << 24 | 7 << 8 | 1 << 7);
+            return;
+        }
         // Own address, broadcast, multicast; unlimited DMA bursts; bits
         // 13-15 are "no FIFO threshold" on the RTL8169 and "multiple and
         // 128-byte interrupt" on the RTL8168, both wanted. Revision bits
@@ -252,8 +305,8 @@ fn probe(dev: &DeviceInfo) -> Status {
     nic.iface.store(iface, Ordering::Relaxed);
     if arcdrv::irq_attach_any(dev, irq, ctx) {
         nic.has_irq.store(true, Ordering::Relaxed);
-        regs.write16(INTR_STATUS, 0xFFFF);
-        regs.write16(INTR_MASK, INTERRUPTS);
+        nic.ack(u32::MAX);
+        nic.set_mask(INTERRUPTS as u32);
     }
     // Interrupt routing can be wrong on some boards; poll as a safety net.
     arcdrv::spawn("rtl8169-rx", poller, ctx);
