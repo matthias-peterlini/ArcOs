@@ -20,6 +20,6 @@ Dettagli in [docs/gui.md](https://github.com/matthias-peterlini/ArcOs/blob/main/
 ## Provarlo
 
 - **QEMU**: `qemu-system-x86_64 -m 512M -cdrom arcos.iso`
-- **VirtualBox**: nuova macchina "Other/Unknown (64-bit)", 512 MiB di memoria, controller grafico VMSVGA, nessun disco, `arcos.iso` nel lettore CD.
+- **VirtualBox**: nuova macchina "Other/Unknown (64-bit)", 512 MiB di memoria, nessun disco, `arcos.iso` nel lettore CD.
 
 Al primo avvio arcOS chiede nome, tastiera e sfondo, poi apre la scrivania. Il Terminale (nel dock) ha la shell: `help` elenca i comandi. Documentazione nel [README](https://github.com/matthias-peterlini/ArcOs#readme).
