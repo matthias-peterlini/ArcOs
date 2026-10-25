@@ -15,7 +15,7 @@
 //! on the framebuffer so that moving it redraws nothing.
 
 pub mod gfx;
-pub mod qoi;
+pub use arcgfx::qoi;
 pub mod text;
 
 mod apps;
@@ -25,7 +25,9 @@ mod res;
 mod settings;
 mod setup;
 mod splash;
+mod textarea;
 mod ui;
+pub mod window;
 mod wm;
 
 use crate::console::FbInfo;
@@ -77,6 +79,9 @@ impl Display {
     pub fn set_mode(&mut self, mode: arcdk::DisplayMode) -> Result<(), &'static str> {
         let fb = crate::dev::display::set_mode(mode)?;
         self.fb = fb;
+        if let Some(p) = PANIC.lock().as_mut() {
+            p.0 = fb;
+        }
         self.scene = Canvas::new(fb.width as i32, fb.height as i32, 0xFF00_0000);
         Ok(())
     }
@@ -124,13 +129,100 @@ pub fn boot_start() {
     let Some(fb) = crate::console::framebuffer() else { return };
     let scene = Canvas::new(fb.width as i32, fb.height as i32, 0xFF00_0000);
     *DISPLAY.lock() = Some(Display { fb, scene });
+    *PANIC.lock() = Some((fb, Canvas::new(PANIC_W, PANIC_H, 0)));
     ACTIVE.store(true, core::sync::atomic::Ordering::Relaxed);
     splash::show(0);
+}
+
+/// The screen and a picture kept ready for a fatal error: when the kernel
+/// stops, the user sees a calm message, not a page of technical text (that
+/// goes to the serial port and the journal).
+static PANIC: IrqLock<Option<(FbInfo, Canvas)>> = IrqLock::new(None);
+const PANIC_W: i32 = 760;
+const PANIC_H: i32 = 260;
+
+/// Shows the fatal error screen; false if the screen is not graphical.
+/// Allocates nothing.
+pub fn panic_screen() -> bool {
+    if !active() {
+        return false;
+    }
+    // SAFETY: the machine is stopping; nobody else holds these locks.
+    unsafe {
+        PANIC.force_unlock();
+        text::force_unlock();
+    }
+    let mut guard = PANIC.lock();
+    let Some((fb, c)) = guard.as_mut() else { return false };
+    let (w, h) = (fb.width as i32, fb.height as i32);
+    let convert = |p: u32| {
+        let (r, g, b) = ((p >> 16) & 0xFF, (p >> 8) & 0xFF, p & 0xFF);
+        r << fb.shift.0 | g << fb.shift.1 | b << fb.shift.2
+    };
+    // The background: the splash's colours.
+    for y in 0..h {
+        let t = (y * 255 / h.max(1)) as u32;
+        let row = convert(gfx::mix(0xFF1A_1428, 0xFF2C_1F3F, t));
+        for x in 0..w {
+            let at = (fb.virt + y as u64 * fb.pitch as u64 + x as u64 * 4) as *mut u32;
+            // SAFETY: (x, y) is on the screen.
+            unsafe { at.write_volatile(row) };
+        }
+    }
+    // The message, drawn on the same gradient, in the middle.
+    let (ox, oy) = ((w - PANIC_W) / 2, (h - PANIC_H) / 2);
+    c.reset_clip();
+    for y in 0..PANIC_H {
+        let t = ((oy + y).clamp(0, h) * 255 / h.max(1)) as u32;
+        c.fill(Rect::new(0, y, PANIC_W, 1), gfx::mix(0xFF1A_1428, 0xFF2C_1F3F, t));
+    }
+    let cx = PANIC_W / 2;
+    splash::draw_logo(c, cx, 56, 30, 0xFFFF_FFFF);
+    text::draw_centered(c, text::Font::Title, cx, 104, "arcOS si è dovuto fermare", 0xFFF5_F2F8);
+    text::draw_centered(c, text::Font::Body, cx, 156, "Si è verificato un problema che il sistema non può risolvere da solo.", 0xB3F5_F2F8);
+    text::draw_centered(c, text::Font::Body, cx, 184, "Spegni e riaccendi il computer.", 0xB3F5_F2F8);
+    for y in 0..PANIC_H {
+        for x in 0..PANIC_W {
+            let (sx, sy) = (ox + x, oy + y);
+            if sx < 0 || sy < 0 || sx >= w || sy >= h {
+                continue;
+            }
+            let at = (fb.virt + sy as u64 * fb.pitch as u64 + sx as u64 * 4) as *mut u32;
+            // SAFETY: (sx, sy) is on the screen.
+            unsafe { at.write_volatile(convert(c.px[(y * PANIC_W + x) as usize])) };
+        }
+    }
+    crate::dev::display::flush(0, 0, w, h);
+    true
 }
 
 /// Moves the splash's bar (0..=100).
 pub fn boot_progress(percent: u32) {
     splash::show(percent);
+}
+
+/// Notifications waiting for the desktop: title, text, icon.
+static NOTIFICATIONS: IrqLock<alloc::vec::Vec<(alloc::string::String, alloc::string::String, alloc::string::String)>> =
+    IrqLock::new(alloc::vec::Vec::new());
+
+/// Shows a notification banner on the desktop (from any thread).
+pub fn notify(title: &str, body: &str, icon: &str) {
+    if !active() {
+        return;
+    }
+    let mut q = NOTIFICATIONS.lock();
+    if q.len() < 8 {
+        q.push((title.into(), body.into(), icon.into()));
+    }
+}
+
+fn take_notification() -> Option<(alloc::string::String, alloc::string::String, alloc::string::String)> {
+    let mut q = NOTIFICATIONS.lock();
+    if q.is_empty() {
+        None
+    } else {
+        Some(q.remove(0))
+    }
 }
 
 /// A resolution the user chose, applied by the interface thread.

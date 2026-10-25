@@ -150,6 +150,77 @@ File e cartelle aperti sono **handle** numerici, non descrittori Unix.
 | 20 | `RENAME` | rinomina o sposta |
 | 21 | `GET_CWD` | cartella corrente |
 | 22 | `SET_CWD` | cambia la cartella corrente |
+| 23 | `SET_TLS` | base di FS o GS del thread (memoria locale al thread) |
+| 24 | `MAP_AT` | memoria a un indirizzo fisso |
+| 25 | `UNMAP` | restituisce memoria |
+| 26 | `WIN_CREATE` | apre una finestra sulla scrivania |
+| 27 | `WIN_PRESENT` | mostra un fotogramma della finestra |
+| 28 | `WIN_EVENT` | il prossimo evento (mouse, tastiera, chiusura, nuova misura) |
+| 29 | `WIN_CLOSE` | chiude la finestra |
+| 30 | `WIN_TITLE` | cambia il titolo |
+
+## Programmi con una finestra
+
+Un programma può aprire una o più finestre sulla scrivania, che si comportano
+come quelle delle app di sistema: titolo, pulsanti, dock, Alt+Tab, animazioni.
+Il programma disegna il contenuto nella propria memoria, con la stessa
+libreria di disegno del sistema (`arcgfx`: forme, testo nei caratteri di
+sistema, immagini QOI), e lo consegna fotogramma per fotogramma; il kernel lo
+compone sopra il vetro smerigliato della finestra. Le parti lasciate
+trasparenti mostrano il vetro.
+
+La libreria `arcui` fa tutto questo:
+
+```rust
+#![no_std]
+#![no_main]
+
+extern crate alloc;
+
+use arcui::{ui, Event, Font, Key, Rect, Window};
+
+arcrt::main!(main);
+
+fn main(_args: &str) -> i32 {
+    let Ok(mut win) = Window::new("Contatore", 320, 200) else { return 1 };
+    let mut n = 0;
+    loop {
+        win.clear(); // trasparente: si vede il vetro
+        win.text_centered(Font::Display, 160, 40, &alloc::format!("{n}"), ui::TEXT);
+        let f = win.fonts;
+        ui::button(&mut win.canvas, f, Rect::new(110, 130, 100, 36), "+1", true, false);
+        win.present();
+        match win.wait() {
+            Event::Press { x, y, .. } if Rect::new(110, 130, 100, 36).contains(x, y) => n += 1,
+            Event::Key(k) if k.key == Key::Char(' ') => n += 1,
+            Event::Close => return 0,
+            _ => {}
+        }
+    }
+}
+```
+
+| `arcui` | |
+|---|---|
+| `Window::new`, `Window::resizable` | apre una finestra con l'area del contenuto di quella misura |
+| `win.canvas` | dove si disegna (`arcgfx::Canvas`: `fill`, `fill_round`, `line`, `arc`, `triangle`, `draw_image`, `blit`…) |
+| `win.text`, `win.text_centered`, `win.fonts` | testo nei caratteri di sistema |
+| `win.present()` | mostra il fotogramma |
+| `win.wait()`, `win.event(ms)` | il prossimo evento, con o senza limite di tempo |
+| `Event` | `Press`, `Menu` (tasto destro), `Release`, `Move`, `Leave`, `Key`, `Scroll`, `Resize`, `Close` |
+| `ui` | i colori e alcuni controlli delle app di sistema (`button`, `segmented`, `overlay`) |
+| `Rng`, `now_ms` | numeri casuali e tempo, per i giochi |
+
+Quando l'utente chiude la finestra arriva `Event::Close`: il programma
+dovrebbe finire; se dopo due secondi è ancora lì, il kernel lo ferma. Se il
+programma si ferma per un errore, la finestra si chiude e una notifica lo
+dice.
+
+Le app del Negozio (`system/store/`: 2048, Campo minato, Serpente, Sudoku,
+Tris, Disegno) sono programmi di questo tipo e un buon punto di partenza.
+Per metterne uno nel Negozio basta una cartella `system/store/<nome>` con il
+programma, un file `info` e un'icona `icon.qoi` di 128 pixel: il `Makefile`
+li copia in `sys:/store/<nome>`.
 
 ### Copiare un programma su un'immagine esistente
 

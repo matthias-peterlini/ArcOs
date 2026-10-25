@@ -299,6 +299,7 @@ pub(crate) fn terminate(code: i64) -> ! {
         paging::free_address_space(cr3);
     }
     crate::linux::forget(pid);
+    crate::gui::window::process_ended(pid);
     EXITED.notify_all();
     task::exit();
 }
@@ -500,7 +501,7 @@ pub(crate) fn set_tls(which: u64, base: u64) -> Result<(), Error> {
 // ----------------------------------------------------------------------------
 // System calls
 
-fn key_code(ev: crate::dev::input::KeyEvent) -> u64 {
+pub(crate) fn key_code(ev: crate::dev::input::KeyEvent) -> u64 {
     use crate::dev::input::Key;
     let code = match ev.key {
         Key::Char(c) => c as u32,
@@ -733,6 +734,36 @@ fn call(n: u64, a: [u64; 5]) -> Result<u64, Error> {
         }
         sys::SET_TLS => set_tls(a[0], a[1]).map(|_| 0),
         sys::MAP_AT => map_fixed(a[0], a[1]).map(|_| a[0]),
+        sys::WIN_CREATE => {
+            let title = user_str(a[0], a[1])?.to_string();
+            let (w, h) = ((a[2] >> 32) as i32, (a[2] & 0xFFFF_FFFF) as i32);
+            crate::gui::window::create(task::current_pid(), &title, w, h, a[3])
+        }
+        sys::WIN_PRESENT => {
+            let (w, h) = ((a[2] >> 32) as i64, (a[2] & 0xFFFF_FFFF) as i64);
+            if !(1..=crate::gui::window::MAX_W as i64).contains(&w) || !(1..=crate::gui::window::MAX_H as i64).contains(&h) {
+                return Err(Error::BadAddress);
+            }
+            let pixels = user_slice(a[1], (w * h * 4) as u64)?;
+            crate::gui::window::present(task::current_pid(), a[0], pixels, w as i32, h as i32).map(|_| 0)
+        }
+        sys::WIN_EVENT => {
+            let out = user_slice(a[1], 32)?;
+            match crate::gui::window::next_event(task::current_pid(), a[0], a[2])? {
+                Some(ev) => {
+                    for (i, w) in ev.iter().enumerate() {
+                        out[i * 8..i * 8 + 8].copy_from_slice(&w.to_le_bytes());
+                    }
+                    Ok(1)
+                }
+                None => Ok(0),
+            }
+        }
+        sys::WIN_CLOSE => crate::gui::window::close(task::current_pid(), a[0]).map(|_| 0),
+        sys::WIN_TITLE => {
+            let title = user_str(a[1], a[2])?.to_string();
+            crate::gui::window::set_title(task::current_pid(), a[0], &title).map(|_| 0)
+        }
         sys::UNMAP => unmap_range(a[0], a[1]).map(|_| 0),
         _ => Err(Error::Unknown),
     }
@@ -764,5 +795,25 @@ pub fn fault(frame: &mut TrapFrame, what: &str) {
     cpu::enable_irq();
     let extra = if frame.vector == 14 { alloc::format!(" (address {:#x})", cpu::read_cr2()) } else { String::new() };
     crate::println!("\x1b[91m{} stopped: {what} at {:#x}{extra}\x1b[0m", current_name(), frame.rip);
+    if let Some(title) = crate::gui::window::title_of(task::current_pid()) {
+        crate::gui::notify(&title, "L'app si è chiusa per un errore.", "window");
+    }
     terminate(-139);
+}
+
+/// A running program, for the activity monitor.
+pub struct ProcInfo {
+    pub pid: u32,
+    pub name: String,
+    /// Memory it asked for (heap), in bytes.
+    pub memory: u64,
+}
+
+pub fn processes() -> Vec<ProcInfo> {
+    PROCS
+        .lock()
+        .iter()
+        .filter(|(_, p)| p.state == State::Running)
+        .map(|(&pid, p)| ProcInfo { pid, name: p.name.clone(), memory: p.heap_next - sys::USER_HEAP_BASE })
+        .collect()
 }

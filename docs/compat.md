@@ -83,14 +83,16 @@ Com'è fatto: `system/apps/winrun/src/pe.rs` (il caricatore) e
 
 ## Installare programmi
 
-Il volume di sistema porta un piccolo "negozio" in `sys:/store`: programmi
-liberi già compilati (vedi `sys:/store/SOURCES.md` per sorgenti e licenze). Il
-comando `install` li copia in `sys:/apps`, da dove si avviano per nome:
+Il Negozio (`sys:/store`) ha, nella categoria *Sviluppatori*, due programmi
+Linux liberi già compilati (vedi `sys:/store/SOURCES.md` per sorgenti e
+licenze). Si installano dall'app Negozio o con il comando `install`, che li
+copia in `sys:/apps`, da dove si avviano per nome:
 
 ```
 install                    elenca i programmi disponibili
 install busybox            installa BusyBox (decine di comandi Unix)
 install lua                installa l'interprete Lua
+uninstall lua              lo toglie
 ```
 
 [BusyBox](https://busybox.net/) è un programma solo che, a seconda del nome con

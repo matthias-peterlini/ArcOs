@@ -1,22 +1,59 @@
-//! Info sistema: what this computer is and how arcOS is doing.
+//! Info sistema: what this computer is, its devices and drivers, and its
+//! volumes.
 
 use crate::gui::gfx::{Canvas, Rect};
+use crate::gui::res;
 use crate::gui::splash::draw_logo;
 use crate::gui::text::{self, Font};
-use crate::gui::ui::{TEXT, TEXT_DIM};
-use crate::gui::wm::App;
+use crate::gui::ui::{self, TEXT, TEXT_DIM, TEXT_FAINT};
+use crate::gui::wm::{Action, App};
 use crate::util::Size;
 use alloc::format;
 use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 
-pub struct About;
+const ROW: i32 = 46;
+
+pub struct About {
+    tab: usize,
+    scroll: i32,
+}
+
+impl About {
+    pub fn new() -> About {
+        About { tab: 0, scroll: 0 }
+    }
+
+    fn tabs(area: Rect) -> Rect {
+        Rect::new(area.x + area.w / 2 - 170, area.y + 14, 340, 32)
+    }
+
+    fn list(area: Rect) -> Rect {
+        Rect::new(area.x + 14, area.y + 62, area.w - 28, area.h - 72)
+    }
+}
+
+/// An icon for a kind of device.
+fn device_icon(d: &crate::dev::Device) -> &'static str {
+    let i = &d.info;
+    match (i.bus, i.class) {
+        (arcdk::BUS_USB, 0x08) | (arcdk::BUS_SD, _) => "usb",
+        (arcdk::BUS_USB, 0x03) => "keyboard",
+        (_, 0x01) => "archive",
+        (_, 0x02) => "wifi",
+        (_, 0x03) => "screenshot",
+        (_, 0x04) => "music",
+        (_, 0x0C) => "usb",
+        _ => "computer",
+    }
+}
 
 impl App for About {
     fn title(&self) -> String {
         String::from("Info sistema")
     }
 
-    fn icon(&self) -> &'static str {
+    fn icon(&self) -> &str {
         "info"
     }
 
@@ -25,39 +62,114 @@ impl App for About {
     }
 
     fn size(&self) -> (i32, i32) {
-        (440, 370)
+        (580, 470)
     }
 
     fn draw(&mut self, c: &mut Canvas, area: Rect, _blur: &Canvas, _focused: bool) {
-        let cx = area.x + area.w / 2;
-        draw_logo(c, cx, area.y + 44, 28, 0xFFFF_FFFF);
-        text::draw_centered(c, Font::Title, cx, area.y + 70, "arcOS", TEXT);
-        text::draw_centered(c, Font::Body, cx, area.y + 112, &format!("Versione {}", crate::VERSION), TEXT_DIM);
-        let mut brand = [0u8; 48];
-        let cpu = crate::arch::cpu::brand(&mut brand).trim().to_string();
-        let (free, total) = crate::mem::frame::stats();
-        let up = crate::time::uptime_ms() / 1000;
-        let (sw, sh) = crate::console::pixel_size().unwrap_or((0, 0));
-        let rows = [
-            ("Processore", cpu),
-            ("Memoria", format!("{} libera su {}", Size(free), Size(total))),
-            ("Schermo", format!("{sw} x {sh}")),
-            ("Acceso da", format!("{} h {} min {} s", up / 3600, up / 60 % 60, up % 60)),
-            ("Dispositivi", format!("{}", crate::dev::list().len())),
-            ("Programmi attivi", format!("{}", crate::user::count())),
-        ];
-        let mut y = area.y + 150;
-        for (k, v) in rows {
-            text::draw(c, Font::Body, area.x + 32, y, k, TEXT_DIM);
-            let v = text::fit(Font::Strong, &v, area.w - 200);
-            let w = text::width(Font::Strong, &v);
-            text::draw(c, Font::Strong, area.right() - 32 - w, y, &v, TEXT);
-            y += 30;
+        ui::segmented(c, Self::tabs(area), &["Panoramica", "Dispositivi", "Dischi"], self.tab);
+        match self.tab {
+            0 => {
+                let cx = area.x + 130;
+                c.fill_circle(cx, area.y + 170, 74, 0x1FFF_FFFF);
+                draw_logo(c, cx, area.y + 160, 40, 0xFFFF_FFFF);
+                let x = area.x + 250;
+                text::draw(c, Font::Title, x, area.y + 76, "arcOS", TEXT);
+                text::draw(c, Font::Body, x, area.y + 116, &format!("Versione {}", crate::VERSION), TEXT_DIM);
+                let mut brand = [0u8; 48];
+                let cpu = crate::arch::cpu::brand(&mut brand).trim().to_string();
+                let (free, total) = crate::mem::frame::stats();
+                let up = crate::time::uptime_ms() / 1000;
+                let (sw, sh) = crate::console::pixel_size().unwrap_or((0, 0));
+                let video = crate::dev::display::controller().unwrap_or_else(|| String::from("Framebuffer del firmware"));
+                let sound = crate::dev::audio::list().first().map(|o| o.name.clone()).unwrap_or_else(|| String::from("Nessuna"));
+                let rows = [
+                    ("Processore", cpu),
+                    ("Memoria", format!("{} ({} libera)", Size(total), Size(free))),
+                    ("Schermo", format!("{sw} × {sh}")),
+                    ("Grafica", video),
+                    ("Audio", sound),
+                    ("Acceso da", format!("{} h {} min {} s", up / 3600, up / 60 % 60, up % 60)),
+                ];
+                let mut y = area.y + 156;
+                for (k, v) in rows {
+                    text::draw(c, Font::Strong, x, y, k, TEXT);
+                    text::draw(c, Font::Body, x + 110, y, &text::fit(Font::Body, &v, area.right() - x - 130), TEXT_DIM);
+                    y += 28;
+                }
+                text::draw_centered(c, Font::Small, area.x + area.w / 2, area.bottom() - 30, "Scritto da zero, in Rust · © Matthias Peterlini", TEXT_FAINT);
+            }
+            1 => {
+                let l = Self::list(area);
+                let saved = c.clip();
+                c.set_clip(saved.intersect(&l));
+                let devs: Vec<crate::dev::Device> = crate::dev::list().into_iter().filter(|d| !d.gone && d.needs_driver()).collect();
+                for (i, d) in devs.iter().enumerate() {
+                    let r = Rect::new(l.x, l.y + i as i32 * ROW - self.scroll, l.w, ROW - 4);
+                    if r.bottom() < l.y || r.y > l.bottom() {
+                        continue;
+                    }
+                    c.fill_round(r, 10, ui::PANEL);
+                    res::draw_icon(c, device_icon(d), 28, r.x + 10, r.y + 7);
+                    text::draw(c, Font::Strong, r.x + 48, r.y + 4, &text::fit(Font::Strong, &d.description(), r.w - 200), TEXT);
+                    text::draw(c, Font::Small, r.x + 48, r.y + 24, &d.location(), TEXT_FAINT);
+                    let (label, color) = match (&d.driver, d.builtin, d.has_driver()) {
+                        (Some(drv), _, _) => (drv.clone(), ui::GREEN),
+                        (None, Some(b), _) => (String::from(b), ui::GREEN),
+                        (_, _, true) => (String::from("gestito"), ui::GREEN),
+                        _ => (String::from("senza driver"), ui::ORANGE),
+                    };
+                    c.fill_circle(r.right() - 130, r.y + r.h / 2, 4, color);
+                    text::draw(c, Font::Small, r.right() - 120, r.y + 13, &text::fit(Font::Small, &label, 110), TEXT_DIM);
+                }
+                c.set_clip(saved);
+            }
+            _ => {
+                let l = Self::list(area);
+                let mut y = l.y;
+                for v in crate::fs::volumes() {
+                    let (total, free) = v.space();
+                    let r = Rect::new(l.x, y, l.w, 74);
+                    c.fill_round(r, 12, ui::PANEL);
+                    res::draw_icon(c, if v.source == "memory" { "computer" } else { "archive" }, 40, r.x + 12, r.y + 16);
+                    let name = if v.label.is_empty() { format!("{}:", v.name) } else { format!("{} ({}:)", v.label, v.name) };
+                    text::draw(c, Font::Strong, r.x + 66, r.y + 10, &name, TEXT);
+                    let ro = if v.read_only() { " · sola lettura" } else { "" };
+                    text::draw_right(c, Font::Small, r.right() - 14, r.y + 12, &format!("{} liberi su {}{ro}", Size(free), Size(total)), TEXT_DIM);
+                    let bar = Rect::new(r.x + 66, r.y + 42, r.w - 82, 10);
+                    c.fill_round(bar, 5, 0x30FF_FFFF);
+                    let used = total.saturating_sub(free);
+                    let w = (bar.w as u64 * used / total.max(1)) as i32;
+                    c.fill_round(Rect::new(bar.x, bar.y, w.max(10), bar.h), 5, ui::ACCENT);
+                    text::draw(c, Font::Small, r.x + 66, r.y + 54, &v.source, TEXT_FAINT);
+                    y += 84;
+                }
+            }
         }
+    }
+
+    fn press(&mut self, x: i32, y: i32, _double: bool, area: Rect) -> Action {
+        for (i, s) in ui::segments(Self::tabs(area), 3).iter().enumerate() {
+            if s.contains(area.x + x, area.y + y) {
+                self.tab = i;
+                self.scroll = 0;
+                return Action::Redraw;
+            }
+        }
+        Action::None
+    }
+
+    fn scroll(&mut self, lines: i32) -> bool {
+        if self.tab != 1 {
+            return false;
+        }
+        let old = self.scroll;
+        let n = crate::dev::list().len() as i32;
+        self.scroll = (self.scroll + lines * ROW).clamp(0, (n * ROW - 300).max(0));
+        old != self.scroll
     }
 
     fn tick(&mut self) -> bool {
         // The uptime changes every second.
-        crate::time::uptime_ms() % 1000 < 100
+        self.tab == 0 && crate::time::uptime_ms() % 1000 < 100
     }
 }

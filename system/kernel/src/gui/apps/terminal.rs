@@ -32,7 +32,7 @@ impl App for Terminal {
         String::from("Terminale")
     }
 
-    fn icon(&self) -> &'static str {
+    fn icon(&self) -> &str {
         "terminal"
     }
 

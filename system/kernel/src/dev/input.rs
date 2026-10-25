@@ -61,6 +61,9 @@ struct State {
     gui_queue: VecDeque<KeyEvent>,
     pointer: Pointer,
     pointer_seen: bool,
+    /// Button presses and releases in order (button, down, x, y), so a quick
+    /// click is not lost between two looks at the pointer.
+    clicks: VecDeque<(u8, bool, i32, i32)>,
     serial: [u8; 8],
     serial_len: usize,
 }
@@ -79,6 +82,7 @@ static STATE: IrqLock<State> = IrqLock::new(State {
     gui_queue: VecDeque::new(),
     pointer: Pointer { x: 0, y: 0, buttons: 0, wheel: 0, absolute: false },
     pointer_seen: false,
+    clicks: VecDeque::new(),
     serial: [0; 8],
     serial_len: 0,
 });
@@ -183,6 +187,11 @@ pub fn driver_event(_device: u32, kind: u32, code: u32, value: i32) {
         INPUT_BUTTON if code < 8 => {
             let mut s = STATE.lock();
             s.pointer_seen = true;
+            if s.clicks.len() >= 32 {
+                s.clicks.pop_front();
+            }
+            let (x, y) = (s.pointer.x, s.pointer.y);
+            s.clicks.push_back((code as u8, value != 0, x, y));
             if value != 0 {
                 s.pointer.buttons |= 1 << code;
             } else {
@@ -279,6 +288,12 @@ pub fn inject(ev: KeyEvent) {
 }
 
 /// Where the pointing device has moved since boot, once it has reported.
+/// The button presses and releases since the last call: (button, down,
+/// x, y in the device's units, as [`Pointer`] gives them).
+pub fn take_clicks() -> alloc::vec::Vec<(u8, bool, i32, i32)> {
+    STATE.lock().clicks.drain(..).collect()
+}
+
 pub fn pointer() -> Option<Pointer> {
     let s = STATE.lock();
     s.pointer_seen.then_some(s.pointer)

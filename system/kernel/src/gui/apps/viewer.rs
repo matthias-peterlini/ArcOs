@@ -31,7 +31,7 @@ impl App for Viewer {
         self.name.clone()
     }
 
-    fn icon(&self) -> &'static str {
+    fn icon(&self) -> &str {
         "image-viewer"
     }
 

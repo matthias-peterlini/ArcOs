@@ -77,6 +77,7 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("restart", "", "restart the computer (also: reboot)"),
     ("shutdown", "", "turn the computer off (also: off)"),
     ("install", "[name]", "install a program from the store (also: pkg)"),
+    ("uninstall", "<name>", "remove a program installed from the store"),
     ("play", "<file.wav> | stop", "play a sound file"),
     ("tone", "[hz] [ms]", "play a tone (default 440 Hz, 500 ms)"),
     ("volume", "[0-100]", "show or set the sound volume"),
@@ -713,6 +714,8 @@ impl Shell {
                 crate::arch::cpu::halt_forever();
             }
             "install" | "pkg" => self.install(&rest),
+            "uninstall" => self.uninstall(rest.first().copied()),
+            "kpanic" => panic!("stopped on purpose (kpanic)"),
             "play" => {
                 if need(1, "<file.wav> | stop") {
                     if rest[0] == "stop" {
@@ -795,49 +798,41 @@ impl Shell {
     /// Installs a program from the store (`sys:/store`) into `sys:/apps`, so
     /// it can be run by name. With no argument, lists the store.
     fn install(&self, args: &[&str]) {
-        let index = match fs::abs("sys:/store/index").and_then(|p| fs::read_file(&p)) {
-            Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
-            Err(_) => {
-                println!("{DIM}no store on this system (sys:/store is empty){RESET}");
-                return;
-            }
-        };
-        // Each line: name <tab> file <tab> description.
-        let entries: Vec<(&str, &str, &str)> = index
-            .lines()
-            .filter_map(|l| {
-                let mut it = l.splitn(3, '\t');
-                Some((it.next()?.trim(), it.next()?.trim(), it.next().unwrap_or("").trim()))
-            })
-            .filter(|(n, f, _)| !n.is_empty() && !f.is_empty())
-            .collect();
+        let packages = crate::store::available();
+        if packages.is_empty() {
+            println!("{DIM}no store on this system (sys:/store is empty){RESET}");
+            return;
+        }
         let Some(&name) = args.first() else {
             println!("Programs you can install (install <name>):");
-            for (n, _, desc) in &entries {
-                let got = fs::abs(&alloc::format!("sys:/apps/{n}")).is_ok_and(|p| fs::exists(&p));
-                let mark = if got { " (installed)" } else { "" };
-                println!("  {BOLD}{n:<12}{RESET}{DIM}{desc}{mark}{RESET}");
+            for p in &packages {
+                let mark = if crate::store::installed(&p.id).is_some() { " (installed)" } else { "" };
+                println!("  {BOLD}{:<12}{RESET}{DIM}{}{mark}{RESET}", p.id, p.about);
             }
             return;
         };
-        let Some((n, file, _)) = entries.iter().find(|(n, _, _)| *n == name) else {
-            println!("{ERR}no package named {name}{RESET} {DIM}(type install){RESET}");
-            return;
-        };
-        let (from, to) = match (fs::abs(&alloc::format!("sys:/store/{file}")), fs::abs(&alloc::format!("sys:/apps/{n}"))) {
-            (Ok(f), Ok(t)) => (f, t),
-            _ => {
-                println!("{ERR}{name}: bad path{RESET}");
-                return;
-            }
-        };
-        match fs::copy_file(&from, &to) {
-            Ok(()) => {
-                println!("installed {BOLD}{n}{RESET} → sys:/apps/{n}");
-                if *n == "busybox" {
+        match crate::store::install(name) {
+            Ok(p) => {
+                println!("installed {BOLD}{}{RESET} → {}", p.name, crate::store::program_path(&p));
+                if p.id == "busybox" {
                     println!("{DIM}{} commands are now available (ls, cat, grep, …){RESET}", BUSYBOX_APPLETS.len());
+                } else if p.gui {
+                    println!("{DIM}it is in the launcher (Ctrl+Space){RESET}");
                 }
             }
+            Err(fs::Error::NotFound) => println!("{ERR}no package named {name}{RESET} {DIM}(type install){RESET}"),
+            Err(e) => println!("{ERR}{name}: {}{RESET}", e.as_str()),
+        }
+    }
+
+    fn uninstall(&self, name: Option<&str>) {
+        let Some(name) = name else {
+            println!("usage: uninstall <name>");
+            return;
+        };
+        match crate::store::remove(name) {
+            Ok(()) => println!("removed {BOLD}{name}{RESET}"),
+            Err(fs::Error::NotFound) => println!("{ERR}{name} is not installed{RESET}"),
             Err(e) => println!("{ERR}{name}: {}{RESET}", e.as_str()),
         }
     }

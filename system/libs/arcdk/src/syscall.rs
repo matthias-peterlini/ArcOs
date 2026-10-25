@@ -62,6 +62,40 @@ pub const MAP_AT: u64 = 24;
 /// (address, bytes): gives back memory from MAP or MAP_AT.
 pub const UNMAP: u64 = 25;
 
+/// (title, len, width << 32 | height, flags) -> window handle: a window on
+/// the desktop with a content area of that size.
+pub const WIN_CREATE: u64 = 26;
+/// (handle, pixels, width << 32 | height): shows a frame, `width * height`
+/// pixels of 0xAARRGGBB (little-endian words); transparent parts show the
+/// window's glass.
+pub const WIN_PRESENT: u64 = 27;
+/// (handle, ptr to [u64; 4], timeout_ms) -> 1 and the event, or 0 on timeout.
+pub const WIN_EVENT: u64 = 28;
+/// (handle)
+pub const WIN_CLOSE: u64 = 29;
+/// (handle, title, len)
+pub const WIN_TITLE: u64 = 30;
+
+/// `WIN_CREATE` flag: the user may resize the window (`WIN_EV_RESIZE`).
+pub const WIN_RESIZABLE: u64 = 1;
+
+// Window events: [kind, a, b, c].
+/// x, y, 1 for a double click (2: the right button)
+pub const WIN_EV_PRESS: u64 = 1;
+pub const WIN_EV_RELEASE: u64 = 2;
+/// x, y, 1 while the button is held
+pub const WIN_EV_MOVE: u64 = 3;
+/// key code (as READ_KEY)
+pub const WIN_EV_KEY: u64 = 4;
+/// lines (signed; positive: down)
+pub const WIN_EV_SCROLL: u64 = 5;
+/// The user closed the window: the program should end.
+pub const WIN_EV_CLOSE: u64 = 6;
+/// width, height: the content area changed size.
+pub const WIN_EV_RESIZE: u64 = 7;
+/// The pointer left the window.
+pub const WIN_EV_LEAVE: u64 = 8;
+
 pub const TLS_FS: u64 = 0;
 pub const TLS_GS: u64 = 1;
 

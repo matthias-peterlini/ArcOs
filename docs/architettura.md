@@ -119,14 +119,15 @@ La metà bassa appartiene al programma in esecuzione.
 | scheduler | `task.rs` | thread del kernel, round-robin preemptivo (10 ms), code di attesa, sleep |
 | sincronizzazione | `sync.rs` | `IrqLock` (spinlock con interruzioni spente), `Mutex` (cede il processore mentre aspetta) |
 | console | `console/` | terminale con sequenze ANSI su framebuffer, VGA testo e porta seriale; giornale di sistema; con la grafica attiva è una griglia mostrata dalla finestra Terminale |
-| grafica | `gui/` | splash d'avvio, configurazione guidata, scrivania, finestre e app ([gui.md](gui.md)) |
+| grafica | `gui/` | splash d'avvio, configurazione guidata, scrivania con animazioni, app di sistema, finestre dei programmi, schermata di errore ([gui.md](gui.md)); il disegno è nella libreria `arcgfx` |
 | Linux | `linux.rs` | caricatore ELF statico e chiamate di sistema Linux ([compat.md](compat.md)) |
 | dispositivi | `dev/` | registro dei dispositivi, PCI, piattaforma (8042), IRQ condivisi, dischi e partizioni (MBR, GPT), tastiera, interfacce di rete, uscite audio (conversione, volume, WAV), controller video (risoluzioni) |
 | driver | `driver/` | gestore dei driver, caricatore ELF dei moduli, tabella `KernelApi` |
 | file | `fs/` | volumi, percorsi `volume:/cartella/file`, montaggio automatico |
 | rete | `net.rs` | ARP, IPv4, ICMP, UDP, DHCP, DNS |
-| programmi | `user.rs` | processi, spazi di indirizzi, caricatore, chiamate di sistema |
-| ACPI | `acpi.rs` | tabelle, spegnimento (S5), riavvio |
+| programmi | `user.rs` | processi, spazi di indirizzi, caricatore, chiamate di sistema (anche le finestre, `WIN_*`) |
+| negozio | `store.rs` | i pacchetti di `sys:/store`: elenco, installazione, rimozione |
+| ACPI | `acpi.rs` | tabelle, spegnimento (S5), riavvio, pulsante di accensione |
 | shell | `shell.rs` | l'interfaccia a riga di comando |
 
 ### Dispositivi e driver

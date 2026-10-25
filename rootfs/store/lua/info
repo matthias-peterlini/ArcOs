@@ -1,0 +1,9 @@
+name=Lua
+category=Sviluppatori
+about=L'interprete del linguaggio di programmazione Lua 5.4, per il Terminale.
+details=Lua è un linguaggio leggero e veloce, diffuso nei videogiochi e nelle applicazioni. Si usa nel Terminale: scrivi lua per l'interprete interattivo o lua file.lua per eseguire un programma. Programma libero (licenza MIT), compilato per Linux.
+version=5.4
+developer=PUC-Rio
+type=linux
+gui=no
+command=lua

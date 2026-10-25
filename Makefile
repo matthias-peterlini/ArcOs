@@ -37,11 +37,13 @@ EFI_APP  := boot/uefi/target/x86_64-unknown-uefi/release/BOOTX64.efi
 DRIVERS  := $(notdir $(wildcard system/drivers/*))
 PACKAGES := $(DRIVERS:%=$(BUILD)/drivers/%.adp)
 APPS     := $(notdir $(wildcard system/apps/*))
+# Programs of the store (sys:/store), installed with the Negozio app.
+STORE    := $(notdir $(wildcard system/store/*))
 ROOT     := $(BUILD)/root
 IMAGE    := $(BUILD)/arcos.img
 ISO      := $(BUILD)/arcos.iso
 # Size of the live CD's system volume (it lives in memory).
-LIVE_SIZE ?= 16M
+LIVE_SIZE ?= 24M
 
 ifeq ($(PROFILE),release)
 CARGO_PROFILE := --release
@@ -78,6 +80,9 @@ root: system
 	mkdir -p $(ROOT)/apps
 	cp -r rootfs/. $(ROOT)/
 	for app in $(APPS); do cp $(TARGET)/$$app $(ROOT)/apps/$$app.app; done
+	for p in $(STORE); do mkdir -p $(ROOT)/store/$$p && cp $(TARGET)/$$p $(ROOT)/store/$$p/app \
+		&& cp system/store/$$p/info system/store/$$p/icon.qoi $(ROOT)/store/$$p/; done
+	cp system/kernel/assets/fonts.bin $(ROOT)/system/fonts.bin
 
 image: $(BUILD)/stage1.bin $(BUILD)/stage2.bin uefi system tools $(PACKAGES) root
 	$(ARCTOOL) image $(IMAGE) --size $(SIZE) \
@@ -143,11 +148,12 @@ shots: image
 assets:
 	tools/assets/gen_fonts.py system/kernel/assets/fonts.bin
 	tools/assets/gen_icons.py rootfs/system/gui
+	tools/assets/gen_icons.py --store system/store
 	tools/assets/gen_wallpapers.py rootfs/system/gui/wallpapers
-	tools/assets/gen_sounds.py rootfs/system/sounds
+	tools/assets/gen_sounds.py rootfs/system/sounds rootfs/home/Musica
 
 check:
-	cd system && $(CARGO) test --target x86_64-unknown-linux-gnu -p arcdk -p arcfs -p arcc-core -p arc-vm
+	cd system && $(CARGO) test --target x86_64-unknown-linux-gnu -p arcdk -p arcfs -p arcgfx -p arcc-core -p arc-vm
 	cd tools && $(CARGO) test --release
 
 clean:

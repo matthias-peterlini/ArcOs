@@ -22,9 +22,15 @@ di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
 - **Un avvio pulito**: niente righe di testo, solo il logo e una barra di
   caricamento. Al primo avvio una configurazione guidata (nome, tastiera,
   sfondo), poi direttamente la scrivania.
-- **Una scrivania moderna**: pannelli in vetro smerigliato, dock, widget,
-  lanciatore con ricerca, finestre; icone, sfondi e suoni disegnati per
-  arcOS.
+- **Una scrivania alla macOS**: pannelli in vetro smerigliato, dock che
+  ingrandisce le icone, Launchpad, centro di controllo, notifiche, finestre
+  animate (si aprono, si chiudono, volano nel dock); icone, sfondi, suoni e
+  musica creati per arcOS. Le righe di comando si vedono solo nel Terminale.
+- **Le app di ogni giorno**: File, Editor di testo, Note, Promemoria,
+  Calendario, Orologio, Calcolatrice, Foto, Musica, Monitor attività.
+- **Un Negozio con app vere**: giochi (2048, Campo minato, Serpente, Sudoku,
+  Tris) e Disegno, programmi separati che si installano con un clic e aprono
+  le loro finestre.
 - **I driver si installano da soli**: dischi SATA e NVMe, USB 1/2/3,
   schede di rete Intel e Realtek, lettori di schede SD, audio HD e AC'97,
   schede video delle macchine virtuali con cambio di risoluzione.
@@ -43,12 +49,20 @@ di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
 <td width="50%"><img src="docs/screenshots/benvenuto.jpg" alt="Primo avvio"><br><b>Primo avvio</b>: la configurazione guidata parte con INIZIA.</td>
 </tr>
 <tr>
-<td><img src="docs/screenshots/sfondo.jpg" alt="Scelta dello sfondo"><br><b>Configurazione</b>: nome, tastiera, sfondo, in un minuto.</td>
-<td><img src="docs/screenshots/finestre.jpg" alt="File e Terminale"><br><b>File e Terminale</b>: le cartelle e la shell, in finestre.</td>
+<td><img src="docs/screenshots/applicazioni.jpg" alt="Applicazioni"><br><b>Applicazioni</b>: tutte le app, con ricerca (Ctrl+Spazio).</td>
+<td><img src="docs/screenshots/finestre.jpg" alt="Musica, Note e File"><br><b>Finestre</b>: Musica, Note e File insieme.</td>
 </tr>
 <tr>
-<td><img src="docs/screenshots/impostazioni.jpg" alt="Impostazioni"><br><b>Impostazioni</b>: risoluzione, volume, tastiera, sfondo.</td>
-<td><img src="docs/screenshots/applicazioni.jpg" alt="Applicazioni"><br><b>Applicazioni</b>: tutte le app, con ricerca (Ctrl+Spazio).</td>
+<td><img src="docs/screenshots/negozio.jpg" alt="Negozio"><br><b>Negozio</b>: giochi e app, installati con un clic.</td>
+<td><img src="docs/screenshots/negozio-app.jpg" alt="Una app nel Negozio"><br><b>La pagina di un'app</b>: descrizione, versione, dimensioni.</td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/giochi.jpg" alt="2048 e Campo minato"><br><b>Giochi</b>: 2048 e Campo minato, programmi del Negozio.</td>
+<td><img src="docs/screenshots/foto.jpg" alt="Foto"><br><b>Foto</b>: un disegno fatto con l'app Disegno.</td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/calendario.jpg" alt="Calendario e Promemoria"><br><b>Calendario e Promemoria</b>: eventi, feste, cose da fare.</td>
+<td><img src="docs/screenshots/impostazioni.jpg" alt="Impostazioni"><br><b>Impostazioni e centro di controllo</b>: schermo, volume, sfondo.</td>
 </tr>
 </table>
 
@@ -79,9 +93,10 @@ memoria e `arcos.iso` nel lettore CD.
 | **Kernel** | 64 bit, memoria virtuale a 4 livelli, scheduler preemptivo, thread, code di attesa, MSI/MSI-X, ACPI per spegnere e riavviare | [architettura](docs/architettura.md#kernel) |
 | **Driver** | pacchetti `.adp` indipendenti dal kernel: il kernel confronta i manifesti con l'hardware e carica il driver giusto da solo, all'avvio e a sistema avviato | [driver](docs/driver.md) |
 | **ArcFS** | il file system nativo: blocchi da 4 KiB, extent, controllo di coerenza; volumi con nome (`sys:`, `ram:`, `chiavetta:`) | [architettura](docs/architettura.md#file-system-arcfs) |
-| **Interfaccia** | splash, configurazione guidata, scrivania, finestre e app: File, Terminale, Negozio, Impostazioni, Info sistema | [gui](docs/gui.md) |
-| **Programmi** | in modalità utente, ognuno nel suo spazio di indirizzi; `hello`, `info`, `calc`, `edit`, `snake` | [programmi](docs/programmi.md) |
-| **Compatibilità** | eseguibili ELF statici Linux e `.exe` Windows x64 da console; il Negozio installa BusyBox e Lua | [compatibilità](docs/compat.md) |
+| **Interfaccia** | splash, configurazione guidata, scrivania con dock, Launchpad, notifiche e animazioni; quindici app di sistema | [gui](docs/gui.md) |
+| **Programmi** | in modalità utente, ognuno nel suo spazio di indirizzi, a riga di comando o con finestre proprie (`arcui`) | [programmi](docs/programmi.md) |
+| **Negozio** | 2048, Campo minato, Serpente, Sudoku, Tris, Disegno; BusyBox e Lua per il Terminale | [gui](docs/gui.md#il-negozio-e-le-app-installabili) |
+| **Compatibilità** | eseguibili ELF statici Linux e `.exe` Windows x64 da console | [compatibilità](docs/compat.md) |
 | **ArcScript** | il linguaggio di arcOS: `arcc` compila ed esegue `.as` e pacchetti `.arc` | [ArcScript](docs/arcscript.md) |
 | **Rete** | ARP, IPv4, ICMP, UDP, DHCP, DNS | |
 | **Shell** | una quarantina di comandi, cronologia, completamento con Tab | [primi passi](#primi-passi-nel-terminale) |
@@ -124,7 +139,7 @@ make test-display   # cambio di risoluzione su ogni scheda video emulata
 make test-acpi      # il pulsante di accensione spegne arcOS
 make test-compat    # un programma Linux e uno Windows
 make test-arcscript # programmi ArcScript
-make shots          # usa l'interfaccia con mouse e tastiera e salva le schermate
+make shots          # usa l'interfaccia (ogni app, il Negozio) e salva le schermate
 make check          # test delle librerie e dello strumento host
 ```
 
@@ -157,7 +172,7 @@ display 1920x1080      cambia risoluzione (con un driver video)
 play sys:/system/sounds/avvio.wav
 volume 60
 net / ping 10.0.2.2    rete
-install busybox        un programma dal negozio
+install sudoku         un programma dal Negozio
 cd sys:/home/arcscript
 hello.as               un programma ArcScript
 shutdown / restart
@@ -171,9 +186,10 @@ shutdown / restart
 | `system/kernel/` | il kernel, con l'interfaccia grafica (`src/gui`) |
 | `system/drivers/` | i driver, uno per cartella, ognuno con il suo `driver.manifest` |
 | `system/apps/` | i programmi, tra cui `winrun` (programmi Windows) e `arcc` (ArcScript) |
-| `system/libs/` | le librerie: ABI dei driver (`arcdk`, `arcdrv`), programmi (`arcrt`), ArcFS, USB, virtio, ArcScript |
+| `system/store/` | le app del Negozio (giochi e Disegno), con icona e scheda |
+| `system/libs/` | le librerie: ABI dei driver (`arcdk`, `arcdrv`), programmi (`arcrt`), finestre (`arcui`), disegno (`arcgfx`), ArcFS, USB, virtio, ArcScript |
 | `tools/arctool/` | strumento host: crea pacchetti, immagini e CD, legge e scrive volumi ArcFS |
-| `tools/assets/` | i generatori di caratteri, icone, sfondi e suoni |
+| `tools/assets/` | i generatori di caratteri, icone, sfondi, suoni e musica |
 | `tools/qemu/` | modelli per QEMU di dispositivi che QEMU non ha (Realtek RTL8169, RTL8168, RTL8125) |
 | `rootfs/` | i file del volume di sistema |
 | `scripts/` | i test automatici in QEMU |

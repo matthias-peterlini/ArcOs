@@ -22,6 +22,7 @@ mod linux;
 mod mem;
 mod net;
 mod shell;
+mod store;
 mod sync;
 mod task;
 mod time;

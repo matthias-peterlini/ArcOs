@@ -50,7 +50,8 @@ pub struct KeyEvent {
     pub shift: bool,
 }
 
-fn decode(v: u64) -> Option<KeyEvent> {
+/// A key from its code (as `READ_KEY` and window events give it).
+pub fn decode(v: u64) -> Option<KeyEvent> {
     let code = v as u32;
     let key = match code {
         0 => return None,

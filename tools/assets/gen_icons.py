@@ -729,6 +729,192 @@ def g_cloud():
     return im
 
 
+def notes():
+    img = tile("#FFE68A", "#F7C948")
+    im, d = layer()
+    d.rectangle((0, 0, S, 150), fill=hexc("#F5B90F"))
+    clip_to_tile(im)
+    over(img, im)
+    im, d = layer()
+    for i in range(4):
+        y = 214 + i * 50
+        d.rounded_rectangle((120, y, 392 - (90 if i == 3 else 0), y + 14), 7, fill=hexc("#C99A18"))
+    for x in range(118, 400, 34):
+        d.ellipse((x, 138, x + 12, 150), fill=hexc("#FFF4C9"))
+    return over(img, im)
+
+
+def reminders():
+    img = tile("#FFFFFF", "#EEF0F4")
+    im, d = layer()
+    for i, col in enumerate(("#FF9F0A", "#0A84FF", "#FF453A")):
+        y = 150 + i * 92
+        d.ellipse((120, y, 172, y + 52), outline=hexc(col), width=12)
+        if i == 0:
+            d.ellipse((132, y + 12, 160, y + 40), fill=hexc(col))
+        d.rounded_rectangle((200, y + 16, 390, y + 36), 10, fill=hexc("#C9CDD5"))
+    return over(img, im)
+
+
+def game_2048():
+    img = tile("#F9C46B", "#EE9A3A")
+    im, d = layer()
+    cols = ["#FFF3DA", "#FFE3B0", "#F7B267", "#F4845F"]
+    for r in range(2):
+        for c in range(2):
+            x, y = 132 + c * 128, 132 + r * 128
+            d.rounded_rectangle((x, y, x + 116, y + 116), 22, fill=hexc(cols[r * 2 + c]))
+    f = ImageFont.truetype(BOLD, 64)
+    for (x, y, t) in ((190, 190, "2"), (318, 190, "4"), (190, 318, "8"), (318, 318, "16")):
+        w = d.textlength(t, font=f)
+        d.text((x - w / 2, y - 40), t, font=f, fill=hexc("#7A4A12") if t in "24" else WHITE)
+    return over(img, im)
+
+
+def minesweeper():
+    img = tile("#9AA7B8", "#5E6B7E")
+    im, d = layer()
+    for r in range(3):
+        for c in range(3):
+            x, y = 120 + c * 94, 120 + r * 94
+            d.rounded_rectangle((x, y, x + 84, y + 84), 14, fill=hexc("#D7DEE8" if (r + c) % 2 else "#C3CCD8"))
+    d.ellipse((206, 206, 306, 306), fill=hexc("#22252B"))
+    for a in range(0, 360, 45):
+        dx, dy = math.cos(math.radians(a)), math.sin(math.radians(a))
+        d.line([(256 + dx * 40, 256 + dy * 40), (256 + dx * 72, 256 + dy * 72)], fill=hexc("#22252B"), width=16)
+    d.ellipse((226, 226, 252, 252), fill=WHITE)
+    f = ImageFont.truetype(BOLD, 60)
+    d.text((140, 128), "1", font=f, fill=hexc("#2F7BEF"))
+    d.text((330, 318), "2", font=f, fill=hexc("#2FA84F"))
+    return over(img, im)
+
+
+def snake_icon():
+    img = tile("#5BE38A", "#1FA855")
+    im, d = layer()
+    pts = [(140, 360), (140, 250), (256, 250), (256, 150), (372, 150)]
+    d.line(pts, fill=hexc("#FFFFFF"), width=58, joint="curve")
+    for p in (pts[0],):
+        d.ellipse((p[0] - 29, p[1] - 29, p[0] + 29, p[1] + 29), fill=WHITE)
+    d.ellipse((343, 121, 401, 179), fill=WHITE)
+    d.ellipse((364, 136, 378, 150), fill=hexc("#1C7A3F"))
+    d.ellipse((352, 330, 400, 378), fill=hexc("#FF4D5E"))
+    return over(img, im)
+
+
+def paint():
+    img = tile("#FFFFFF", "#ECEEF3")
+    im, d = layer()
+    d.ellipse((96, 110, 416, 400), fill=hexc("#F2D2A9"))
+    d.ellipse((300, 280, 360, 340), fill=hexc("#FFFFFF"))
+    for (x, y, col) in ((170, 190, "#FF453A"), (240, 160, "#FFD60A"), (320, 180, "#30D158"), (170, 280, "#0A84FF"), (230, 330, "#BF5AF2")):
+        d.ellipse((x - 30, y - 30, x + 30, y + 30), fill=hexc(col))
+    return over(img, im)
+
+
+def sudoku():
+    img = tile("#7FB2FF", "#3A6FE0")
+    im, d = layer()
+    d.rounded_rectangle((110, 110, 402, 402), 26, fill=hexc("#F4F7FF"))
+    for k in (1, 2):
+        x = 110 + k * 97
+        d.line([(x, 120), (x, 392)], fill=hexc("#3A6FE0"), width=8)
+        d.line([(120, x), (392, x)], fill=hexc("#3A6FE0"), width=8)
+    f = ImageFont.truetype(BOLD, 62)
+    for (cx, cy, t) in ((158, 158, "5"), (352, 158, "3"), (255, 255, "7"), (158, 352, "1"), (352, 352, "9")):
+        w = d.textlength(t, font=f)
+        d.text((cx - w / 2, cy - 38), t, font=f, fill=hexc("#1F3F8F"))
+    return over(img, im)
+
+
+def tictactoe():
+    img = tile("#C17BFF", "#7B3FE4")
+    im, d = layer()
+    for k in (1, 2):
+        x = 120 + k * 91
+        d.line([(x, 130), (x, 382)], fill=(255, 255, 255, 170), width=14)
+        d.line([(130, x), (382, x)], fill=(255, 255, 255, 170), width=14)
+    d.line([(150, 150), (190, 190)], fill=WHITE, width=18)
+    d.line([(150, 190), (190, 150)], fill=WHITE, width=18)
+    d.ellipse((232, 232, 280, 280), outline=hexc("#FFD60A"), width=16)
+    d.line([(322, 322), (362, 362)], fill=WHITE, width=18)
+    d.line([(322, 362), (362, 322)], fill=WHITE, width=18)
+    d.ellipse((322, 140, 370, 188), outline=hexc("#FFD60A"), width=16)
+    return over(img, im)
+
+
+def g_mute():
+    im, d = layer()
+    d.polygon([(110, 200), (180, 200), (270, 120), (270, 392), (180, 312), (110, 312)], fill=WHITE)
+    d.line([(320, 200), (420, 312)], fill=WHITE, width=34)
+    d.line([(320, 312), (420, 200)], fill=WHITE, width=34)
+    return im
+
+
+def g_plus():
+    im, d = layer()
+    d.line([(256, 130), (256, 382)], fill=WHITE, width=56)
+    d.line([(130, 256), (382, 256)], fill=WHITE, width=56)
+    return im
+
+
+def g_trash():
+    im, d = layer()
+    d.rounded_rectangle((200, 96, 312, 128), 14, fill=WHITE)
+    d.rounded_rectangle((110, 130, 402, 172), 18, fill=WHITE)
+    d.polygon([(146, 190), (366, 190), (344, 416), (168, 416)], fill=WHITE)
+    return im
+
+
+def g_forward():
+    im, d = layer()
+    d.line([(202, 130), (332, 256), (202, 382)], fill=WHITE, width=60, joint="curve")
+    return im
+
+
+def g_grid():
+    im, d = layer()
+    for r in range(2):
+        for c in range(2):
+            x, y = 120 + c * 150, 120 + r * 150
+            d.rounded_rectangle((x, y, x + 122, y + 122), 24, fill=WHITE)
+    return im
+
+
+def g_note():
+    im, d = layer()
+    em_music(d, WHITE, 262, 256)
+    big = im.resize((S * 2, S * 2), Image.LANCZOS).crop((S // 2 - 8, S // 2 - 12, S // 2 * 3 - 8, S // 2 * 3 - 12))
+    return big
+
+
+def g_play(color=WHITE):
+    im, d = layer()
+    d.polygon([(180, 120), (400, 256), (180, 392)], fill=color)
+    return im
+
+
+def g_pause(color=WHITE):
+    im, d = layer()
+    d.rounded_rectangle((150, 120, 230, 392), 20, fill=color)
+    d.rounded_rectangle((282, 120, 362, 392), 20, fill=color)
+    return im
+
+
+def g_prev():
+    im, d = layer()
+    d.polygon([(270, 140), (100, 256), (270, 372)], fill=WHITE)
+    d.polygon([(430, 140), (260, 256), (430, 372)], fill=WHITE)
+    return im
+
+
+def g_next():
+    im, d = layer()
+    d.polygon([(242, 140), (412, 256), (242, 372)], fill=WHITE)
+    d.polygon([(82, 140), (252, 256), (82, 372)], fill=WHITE)
+    return im
+
+
 ICONS = [
     ("folder", lambda: folder()),
     ("folder-documents", lambda: folder(em_doc)),
@@ -792,10 +978,44 @@ ICONS = [
     ("g-folder", g_folder),
     ("g-back", g_back),
     ("g-cloud", g_cloud),
+    ("notes", notes),
+    ("reminders", reminders),
+    ("g-mute", g_mute),
+    ("g-plus", g_plus),
+    ("g-trash", g_trash),
+    ("g-forward", g_forward),
+    ("g-grid", g_grid),
+    ("g-note", g_note),
+    ("g-play", g_play),
+    ("g-pause", g_pause),
+    ("g-play-dark", lambda: g_play(hexc("#1C1C1E"))),
+    ("g-pause-dark", lambda: g_pause(hexc("#1C1C1E"))),
+    ("g-prev", g_prev),
+    ("g-next", g_next),
+]
+
+# Icons of the programs in the store: one picture each, shipped with the
+# program (tools/assets/gen_icons.py --store <folder>).
+STORE_ICONS = [
+    ("gioco2048", game_2048),
+    ("campominato", minesweeper),
+    ("serpente", snake_icon),
+    ("disegno", paint),
+    ("sudoku", sudoku),
+    ("tris", tictactoe),
 ]
 
 
 def main():
+    if len(sys.argv) > 2 and sys.argv[1] == "--store":
+        for name, draw in STORE_ICONS:
+            icon = draw().resize((OUT, OUT), Image.LANCZOS)
+            path = os.path.join(sys.argv[2], name, "icon.qoi")
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb") as f:
+                f.write(qoi.encode(OUT, OUT, icon.tobytes()))
+            print(path)
+        return
     out = sys.argv[1] if len(sys.argv) > 1 else "rootfs/system/gui"
     os.makedirs(out, exist_ok=True)
     rows = (len(ICONS) + COLS - 1) // COLS

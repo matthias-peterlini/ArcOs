@@ -27,6 +27,8 @@ pub struct Prefs {
     note: &'static str,
     /// Resolutions the display driver offers (empty without one).
     modes: Vec<DisplayMode>,
+    /// The volume slider is being dragged.
+    sliding: bool,
 }
 
 impl Prefs {
@@ -35,27 +37,23 @@ impl Prefs {
         let offered = crate::dev::display::modes();
         let modes =
             COMMON_MODES.iter().map(|&(width, height)| DisplayMode { width, height }).filter(|m| offered.contains(m)).take(9).collect();
-        Prefs { name: settings::get().name, editing: false, thumbs, note: "", modes }
+        Prefs { name: settings::get().name, editing: false, thumbs, note: "", modes, sliding: false }
     }
 
     fn mode_btn(area: Rect, i: usize) -> Rect {
         Rect::new(area.x + RIGHT + (i as i32 % 3) * 124, area.y + 72 + (i as i32 / 3) * 46, 116, 38)
     }
 
-    fn volume_btns(area: Rect) -> [Rect; 2] {
-        [Rect::new(area.x + RIGHT, area.y + 280, 44, 38), Rect::new(area.x + RIGHT + 320, area.y + 280, 44, 38)]
-    }
-
     fn volume_bar(area: Rect) -> Rect {
-        Rect::new(area.x + RIGHT + 58, area.y + 296, 248, 6)
+        Rect::new(area.x + RIGHT + 34, area.y + 268, 236, 24)
     }
 
-    fn chime_btn(area: Rect) -> Rect {
-        Rect::new(area.x + RIGHT, area.y + 334, 174, 38)
+    fn chime_switch(area: Rect) -> Rect {
+        Rect::new(area.x + RIGHT + 312, area.y + 314, 52, 30)
     }
 
     fn test_btn(area: Rect) -> Rect {
-        Rect::new(area.x + RIGHT + 186, area.y + 334, 178, 38)
+        Rect::new(area.x + RIGHT + 282, area.y + 264, 82, 32)
     }
 
     fn set_volume(v: i32) {
@@ -95,7 +93,7 @@ impl App for Prefs {
         String::from("Impostazioni")
     }
 
-    fn icon(&self) -> &'static str {
+    fn icon(&self) -> &str {
         "settings"
     }
 
@@ -156,17 +154,13 @@ impl App for Prefs {
         // Sound
         text::draw(c, Font::Strong, x, area.y + 236, "Suono", TEXT);
         if crate::dev::audio::available() {
-            let v = crate::dev::audio::volume() as i32;
-            let [minus, plus] = Self::volume_btns(area);
-            ui::button(c, minus, "–", false, false);
-            ui::button(c, plus, "+", false, false);
+            let v = crate::dev::audio::volume();
             let bar = Self::volume_bar(area);
-            c.fill_round(bar, 3, 0x40FF_FFFF);
-            c.fill_round(Rect::new(bar.x, bar.y, bar.w * v / 100, bar.h), 3, 0xFFFF_FFFF);
-            text::draw_centered(c, Font::Small, bar.x + bar.w / 2, bar.y - 22, &format!("Volume {v}%"), TEXT_DIM);
-            let chime = if s.startup_sound { "Suono all'avvio: sì" } else { "Suono all'avvio: no" };
-            ui::button(c, Self::chime_btn(area), chime, s.startup_sound, false);
+            res::draw_icon(c, if v == 0 { "g-mute" } else { "g-volume" }, 18, x, bar.y + 3);
+            ui::slider(c, bar, v * 10);
             ui::button(c, Self::test_btn(area), "Prova", false, false);
+            text::draw(c, Font::Body, x, area.y + 319, "Suono all'avvio", TEXT);
+            ui::toggle(c, Self::chime_switch(area), s.startup_sound);
         } else {
             text::draw(c, Font::Small, x, area.y + 264, "Nessuna scheda audio trovata.", TEXT_FAINT);
         }
@@ -207,23 +201,12 @@ impl App for Prefs {
             }
         }
         if crate::dev::audio::available() {
-            let [minus, plus] = Self::volume_btns(area);
-            let v = crate::dev::audio::volume() as i32;
-            if minus.contains(ax, ay) {
-                Self::set_volume(v - 10);
+            if Self::volume_bar(area).grow(8).contains(ax, ay) {
+                self.sliding = true;
+                Self::set_volume((ui::slider_value(Self::volume_bar(area), ax) / 10) as i32);
                 return Action::Redraw;
             }
-            if plus.contains(ax, ay) {
-                Self::set_volume(v + 10);
-                return Action::Redraw;
-            }
-            let bar = Self::volume_bar(area).grow(12);
-            if bar.contains(ax, ay) {
-                let b = Self::volume_bar(area);
-                Self::set_volume(((ax - b.x) * 100 / b.w + 2) / 5 * 5);
-                return Action::Redraw;
-            }
-            if Self::chime_btn(area).contains(ax, ay) {
+            if Self::chime_switch(area).contains(ax, ay) {
                 settings::update(|s| s.startup_sound = !s.startup_sound);
                 return Action::Redraw;
             }
@@ -238,6 +221,18 @@ impl App for Prefs {
             return Action::Redraw;
         }
         Action::Redraw
+    }
+
+    fn drag(&mut self, x: i32, _y: i32, area: Rect) -> bool {
+        if self.sliding {
+            Self::set_volume((ui::slider_value(Self::volume_bar(area), area.x + x) / 10) as i32);
+        }
+        self.sliding
+    }
+
+    fn release(&mut self, _area: Rect) -> Action {
+        self.sliding = false;
+        Action::None
     }
 
     fn key(&mut self, ev: KeyEvent) -> Action {

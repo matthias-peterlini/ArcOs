@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["kernel", "libs/*", "drivers/*", "apps/*"]
+members = ["kernel", "libs/*", "drivers/*", "apps/*", "store/*"]
 
 [workspace.package]
 version = "0.4.0"
@@ -13,6 +13,8 @@ arcc-core = { path = "libs/arcc-core" }
 arc-vm = { path = "libs/arc-vm" }
 arcdk = { path = "libs/arcdk" }
 arcfs = { path = "libs/arcfs" }
+arcgfx = { path = "libs/arcgfx" }
+arcui = { path = "libs/arcui" }
 arcdrv = { path = "libs/arcdrv" }
 arcrt = { path = "libs/arcrt" }
 arcusb = { path = "libs/arcusb" }

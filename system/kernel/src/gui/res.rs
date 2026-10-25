@@ -18,6 +18,8 @@ struct Icons {
     atlas: Canvas,
     names: Vec<String>,
     cache: BTreeMap<(usize, i32), Canvas>,
+    /// Icons of installed programs ("@sys:/apps/x.qoi"), by name and size.
+    files: BTreeMap<(String, i32), Option<Canvas>>,
 }
 
 static ICONS: IrqLock<Option<Icons>> = IrqLock::new(None);
@@ -35,7 +37,7 @@ pub fn load(progress: impl Fn(u32)) {
         .map(|b| String::from_utf8_lossy(&b).lines().map(String::from).collect())
         .unwrap_or_default();
     match atlas {
-        Some(atlas) => *ICONS.lock() = Some(Icons { atlas, names, cache: BTreeMap::new() }),
+        Some(atlas) => *ICONS.lock() = Some(Icons { atlas, names, cache: BTreeMap::new(), files: BTreeMap::new() }),
         None => crate::warn!("gui", "no icons in {DIR}"),
     }
     // The common sizes now, so the first frames are quick.
@@ -47,6 +49,17 @@ pub fn load(progress: impl Fn(u32)) {
 
 /// Runs `f` with icon `name` at `size` pixels (if there is such an icon).
 pub fn with_icon<T>(name: &str, size: i32, f: impl FnOnce(&Canvas) -> T) -> Option<T> {
+    if let Some(path) = name.strip_prefix('@') {
+        let key = (String::from(path), size);
+        let known = ICONS.lock().as_ref()?.files.contains_key(&key);
+        if !known {
+            // Read outside the lock: the file system may sleep.
+            let img = read(path).and_then(|d| qoi::decode(&d)).map(|img| if img.w == size { img } else { img.scaled(size, size) });
+            ICONS.lock().as_mut()?.files.insert(key.clone(), img);
+        }
+        let guard = ICONS.lock();
+        return guard.as_ref()?.files.get(&key)?.as_ref().map(f);
+    }
     let mut guard = ICONS.lock();
     let icons = guard.as_mut()?;
     let id = icons.names.iter().position(|n| n == name)?;

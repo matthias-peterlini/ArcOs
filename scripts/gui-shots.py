@@ -75,7 +75,7 @@ class Qmp:
         self.cmd("send-key", keys=[{"type": "qcode", "data": k} for k in keys])
 
 
-CHARS = {" ": "spc", ".": "dot", ",": "comma", "-": "minus", "/": "slash", ":": "shift-semicolon", "!": "shift-1"}
+CHARS = {" ": "spc", ".": "dot", ",": "comma", "-": "minus", "/": "slash", ":": "shift-semicolon", "!": "shift-1", "+": "kp_add", "*": "kp_multiply", "=": "equal"}
 
 
 def main():

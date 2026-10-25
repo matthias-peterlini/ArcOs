@@ -118,7 +118,7 @@ for c in $CASES; do
     case $CMDS in
         net) EXPECT="3 of 3 replies" ;;
         sd) EXPECT="sdhci 1.0.0 installed|$EXPECT_SD|written on the card|card: no problems found" ;;
-        usb) EXPECT="usbhid 1.0.0 installed|usbstorage 1.0.0 installed|Welcome|stick: no problems found" ;;
+        usb) EXPECT="usbhid 1.0.0 installed|usbstorage 1.0.0 installed|Benvenuto in arcOS|stick: no problems found" ;;
     esac
     [ "$c" = multi-nic ] && EXPECT="$EXPECT|^net2 "
     QEMU=$RUN_QEMU DISK=$DISK "$HERE/test.sh" "$IMAGE" "$WORK/$CMDS.txt" $ARGS > "$WORK/out.txt" 2>&1

@@ -1,19 +1,16 @@
-Welcome to arcOS.
+Benvenuto in arcOS!
 
-On a graphical screen arcOS starts its desktop: this terminal is the
-Terminale window (also in the dock).
+Per cominciare:
 
-This volume (sys:) holds the system and your files:
+  - Il dock in basso apre le app: File, Editor di testo, Note, Calendario,
+    Foto, Musica, Calcolatrice, il Negozio e le Impostazioni.
+  - Ctrl+Spazio (o l'icona Applicazioni) mostra tutte le app, con la ricerca.
+  - Nel Negozio trovi giochi e app da installare con un clic.
+  - Il volume e la rete sono nel centro di controllo, in alto a destra.
+  - Alt+Tab passa da una finestra all'altra, Ctrl+Q chiude quella davanti.
 
-  sys:/system/drivers   the driver store: every driver this computer can use
-  sys:/inbox            drop a driver package (.adp) here and it installs itself
-  sys:/home             your files
-  sys:/home/arcscript   programs in ArcScript, the arcOS language
-  sys:/store            programs you can install (install busybox, install lua)
+Le tue cose stanno nella home: Documenti, Immagini, Musica, Note...
+La cartella Musica ha già tre brani da ascoltare.
 
-arcOS also runs Linux and Windows x86-64 programs: see docs/compat.md.
-
-Try: help, dev, drv, vol, ls sys:/system/drivers,
-or: cd sys:/home/arcscript, then hello.as
-or: install busybox, then seq 1 5
-or: display (screen resolutions), play sys:/system/sounds/avvio.wav
+Per chi programma: il Terminale (tra le applicazioni) ha la shell di arcOS;
+in sys:/home/arcscript ci sono esempi nel linguaggio ArcScript.

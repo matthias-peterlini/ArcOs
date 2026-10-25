@@ -104,6 +104,15 @@ impl Cursor {
         (self.x, self.y) != (old_x, old_y)
     }
 
+    /// Where a click reported at device position (`x`, `y`) happened on
+    /// the screen.
+    pub fn click_at(&self, x: i32, y: i32, w: i32, h: i32) -> (i32, i32) {
+        match input::pointer() {
+            Some(p) if p.absolute => (x.clamp(0, w - 1), y.clamp(0, h - 1)),
+            _ => (self.x, self.y),
+        }
+    }
+
     /// Puts the screen under the pointer back as the back buffer has it.
     pub fn hide(&mut self, d: &Display) {
         if let Some(r) = self.drawn.take() {

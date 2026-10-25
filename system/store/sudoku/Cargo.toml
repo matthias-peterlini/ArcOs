@@ -1,0 +1,20 @@
+[package]
+name = "sudoku"
+description = "arcOS store program: sudoku"
+version = "1.0.0"
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "sudoku"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+arcrt.workspace = true
+arcui.workspace = true
+
+[lints]
+workspace = true

@@ -511,3 +511,8 @@ pub fn arp_table() -> Vec<(Ip, Mac, u64)> {
 pub fn online() -> bool {
     STACK.lock().ifaces.values().any(|i| i.dhcp == Dhcp::Bound)
 }
+
+/// The address of the first interface that has one (for the interface).
+pub fn address() -> Option<Ip> {
+    STACK.lock().ifaces.values().find(|i| i.dhcp == Dhcp::Bound).map(|i| i.config.ip)
+}

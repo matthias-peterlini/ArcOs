@@ -1,0 +1,20 @@
+[package]
+name = "disegno"
+description = "arcOS store program: disegno"
+version = "1.0.0"
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "disegno"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+arcrt.workspace = true
+arcui.workspace = true
+
+[lints]
+workspace = true

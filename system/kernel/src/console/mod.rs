@@ -634,6 +634,23 @@ impl Write for PanicOut {
 /// works even when the heap is the problem.
 pub fn panic_screen(args: fmt::Arguments<'_>) -> ! {
     crate::arch::cpu::disable_irq();
+    // With the graphical interface, the details go to the serial port only
+    // and the screen shows a plain message.
+    if crate::gui::active() {
+        struct Serial;
+        impl Write for Serial {
+            fn write_str(&mut self, s: &str) -> fmt::Result {
+                serial::write(s.as_bytes());
+                Ok(())
+            }
+        }
+        let _ = Serial.write_str("\narcOS stopped: ");
+        let _ = Serial.write_fmt(args);
+        let _ = Serial.write_str("\n");
+        if crate::gui::panic_screen() {
+            crate::arch::cpu::halt_forever();
+        }
+    }
     // SAFETY: the machine is stopping; nobody else holds these locks.
     unsafe {
         PANIC_FB.force_unlock();

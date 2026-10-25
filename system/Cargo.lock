@@ -22,6 +22,7 @@ version = "0.4.0"
 dependencies = [
  "arcdk",
  "arcfs",
+ "arcgfx",
 ]
 
 [[package]]
@@ -60,10 +61,23 @@ name = "arcfs"
 version = "0.4.0"
 
 [[package]]
+name = "arcgfx"
+version = "0.4.0"
+
+[[package]]
 name = "arcrt"
 version = "0.4.0"
 dependencies = [
  "arcdk",
+]
+
+[[package]]
+name = "arcui"
+version = "0.4.0"
+dependencies = [
+ "arcdk",
+ "arcgfx",
+ "arcrt",
 ]
 
 [[package]]
@@ -102,6 +116,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "campominato"
+version = "1.0.0"
+dependencies = [
+ "arcrt",
+ "arcui",
+]
+
+[[package]]
+name = "disegno"
+version = "1.0.0"
+dependencies = [
+ "arcrt",
+ "arcui",
+]
+
+[[package]]
 name = "e1000"
 version = "1.0.0"
 dependencies = [
@@ -121,6 +151,14 @@ version = "1.0.0"
 dependencies = [
  "arcdrv",
  "arcusb",
+]
+
+[[package]]
+name = "gioco2048"
+version = "1.0.0"
+dependencies = [
+ "arcrt",
+ "arcui",
 ]
 
 [[package]]
@@ -209,10 +247,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "serpente"
+version = "1.0.0"
+dependencies = [
+ "arcrt",
+ "arcui",
+]
+
+[[package]]
 name = "snake"
 version = "1.0.0"
 dependencies = [
  "arcrt",
+]
+
+[[package]]
+name = "sudoku"
+version = "1.0.0"
+dependencies = [
+ "arcrt",
+ "arcui",
+]
+
+[[package]]
+name = "tris"
+version = "1.0.0"
+dependencies = [
+ "arcrt",
+ "arcui",
 ]
 
 [[package]]

@@ -6,6 +6,10 @@ use alloc::vec::Vec;
 use arcdk::{DeviceInfo, Resource, BUS_PCI, IRQ_NONE, RES_64BIT, RES_IO, RES_MEMORY, RES_PREFETCH};
 
 static CONFIG: IrqLock<()> = IrqLock::new(());
+/// BARs already sized, by location and vendor/device id. Sizing turns the
+/// function's decoding off for a moment, which must not happen again while
+/// its driver uses it (the device list is scanned again every few seconds).
+static SIZED: IrqLock<Vec<(u32, u32, [Resource; 6])>> = IrqLock::new(Vec::new());
 
 fn address(loc: u32, off: u16) -> u32 {
     0x8000_0000 | loc << 8 | (off as u32 & 0xFC)
@@ -132,7 +136,17 @@ fn function_info(loc: u32) -> Option<DeviceInfo> {
         let sub = read32(loc, 0x2C);
         info.subsystem_vendor = sub as u16;
         info.subsystem = (sub >> 16) as u16;
-        info.resources = read_bars(loc);
+        let known = SIZED.lock().iter().find(|(l, i, _)| *l == loc && *i == id).map(|(_, _, r)| *r);
+        info.resources = match known {
+            Some(r) => r,
+            None => {
+                let r = read_bars(loc);
+                let mut sized = SIZED.lock();
+                sized.retain(|(l, _, _)| *l != loc);
+                sized.push((loc, id, r));
+                r
+            }
+        };
         let line = read(loc, 0x3C, 1) as u8;
         let pin = read(loc, 0x3D, 1);
         info.irq = if pin != 0 && line < 16 { line } else { IRQ_NONE };

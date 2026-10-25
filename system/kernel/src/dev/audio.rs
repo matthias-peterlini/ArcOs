@@ -10,7 +10,7 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use arcdk::{AudioDesc, Status, E_INVAL};
-use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 pub struct Output {
     pub device: u32,
@@ -29,6 +29,12 @@ static PLAYER: Mutex<()> = Mutex::new(());
 /// Asks the sound being played to stop.
 static STOP: AtomicBool = AtomicBool::new(false);
 static VOLUME: AtomicU32 = AtomicU32::new(80);
+/// The sound being played: a number given to each new one, how many of its
+/// frames have been queued, how many it has, and whether it is still going.
+static TRACK: AtomicU64 = AtomicU64::new(0);
+static POSITION: AtomicU64 = AtomicU64::new(0);
+static LENGTH: AtomicU64 = AtomicU64::new(0);
+static PLAYING: AtomicBool = AtomicBool::new(false);
 
 pub fn register(device: u32, desc: *const AudioDesc) -> Status {
     // SAFETY: the driver keeps the descriptor alive.
@@ -212,17 +218,24 @@ pub fn play_now(s: &Sound) -> Result<(), &'static str> {
     STOP.store(true, Ordering::Release);
     let _player = PLAYER.lock();
     STOP.store(false, Ordering::Release);
-    queue(s)
+    queue(s, 0, 0)
 }
 
-fn queue(s: &Sound) -> Result<(), &'static str> {
+fn queue(s: &Sound, from: usize, track: u64) -> Result<(), &'static str> {
     let Some((desc, rate, channels)) = first_output() else { return Err("no sound output") };
     let frames_in = s.samples.len() / s.channels as usize;
     let frames_out = (frames_in as u64 * rate as u64 / s.rate as u64) as usize;
     // About 40 ms at a time, so stopping and volume changes are quick.
     let step = (rate as usize / 25).max(256);
-    let mut at = 0;
+    let mut at = (from as u64 * rate as u64 / s.rate as u64) as usize;
+    if track != 0 {
+        LENGTH.store(frames_in as u64, Ordering::Relaxed);
+        PLAYING.store(true, Ordering::Release);
+    }
     while at < frames_out && !STOP.load(Ordering::Acquire) {
+        if track != 0 {
+            POSITION.store(at as u64 * s.rate as u64 / rate as u64, Ordering::Relaxed);
+        }
         let n = step.min(frames_out - at);
         let chunk = convert(s, rate, channels, at, n);
         let frames = chunk.len() / channels as usize;
@@ -236,7 +249,40 @@ fn queue(s: &Sound) -> Result<(), &'static str> {
     }
     // SAFETY: as above.
     unsafe { ((*desc).drain)((*desc).ctx) };
+    if track != 0 && TRACK.load(Ordering::Acquire) == track {
+        if !STOP.load(Ordering::Acquire) {
+            POSITION.store(frames_in as u64, Ordering::Relaxed);
+        }
+        PLAYING.store(false, Ordering::Release);
+    }
     Ok(())
+}
+
+/// Plays a sound in the background from frame `from`, keeping track of
+/// where it is ([`progress`]). Returns the number it is known by.
+pub fn play_track(s: Arc<Sound>, from: usize) -> Result<u64, &'static str> {
+    if !available() {
+        return Err("no sound output");
+    }
+    STOP.store(true, Ordering::Release);
+    let track = TRACK.fetch_add(1, Ordering::AcqRel) + 1;
+    POSITION.store(from as u64, Ordering::Relaxed);
+    PLAYING.store(true, Ordering::Release);
+    crate::task::spawn("audio", move || {
+        let _player = PLAYER.lock();
+        if TRACK.load(Ordering::Acquire) != track {
+            return; // a newer sound came meanwhile
+        }
+        STOP.store(false, Ordering::Release);
+        let _ = queue(&s, from, track);
+    });
+    Ok(track)
+}
+
+/// The sound started by [`play_track`]: its number, the frame being played,
+/// its length in frames and whether it is still playing.
+pub fn progress() -> (u64, u64, u64, bool) {
+    (TRACK.load(Ordering::Acquire), POSITION.load(Ordering::Relaxed), LENGTH.load(Ordering::Relaxed), PLAYING.load(Ordering::Acquire))
 }
 
 /// Plays a sound in the background.
@@ -255,4 +301,27 @@ pub fn play(s: Sound) -> Result<(), &'static str> {
 /// Stops the sound being played.
 pub fn stop() {
     STOP.store(true, Ordering::Release);
+    PLAYING.store(false, Ordering::Release);
+}
+
+/// Reads only the header of a WAV file: (rate, channels, frames).
+pub fn wav_info(b: &[u8]) -> Option<(u32, u32, u64)> {
+    if b.len() < 12 || &b[0..4] != b"RIFF" || &b[8..12] != b"WAVE" {
+        return None;
+    }
+    let mut at = 12;
+    let mut fmt = None;
+    while at + 8 <= b.len() {
+        let id = &b[at..at + 4];
+        let len = le32(b, at + 4) as usize;
+        if id == b"fmt " && at + 8 + 16 <= b.len() {
+            fmt = Some((le32(b, at + 12), le16(b, at + 10) as u32, le16(b, at + 22) as u32));
+        } else if id == b"data" {
+            let (rate, ch, bits) = fmt?;
+            let frame = (ch * bits / 8).max(1) as u64;
+            return Some((rate, ch, len as u64 / frame));
+        }
+        at += 8 + len + (len & 1);
+    }
+    None
 }
