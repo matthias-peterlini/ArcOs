@@ -536,7 +536,16 @@ extern "win64" fn MultiByteToWideChar(_cp: u32, _flags: u32, src: *const u8, src
     }
     n as i32
 }
-extern "win64" fn WideCharToMultiByte(_cp: u32, _flags: u32, src: *const u16, src_len: i32, dst: *mut u8, dst_len: i32, _d: u64, _u: u64) -> i32 {
+extern "win64" fn WideCharToMultiByte(
+    _cp: u32,
+    _flags: u32,
+    src: *const u16,
+    src_len: i32,
+    dst: *mut u8,
+    dst_len: i32,
+    _d: u64,
+    _u: u64,
+) -> i32 {
     let len = if src_len < 0 {
         let mut n = 0;
         // SAFETY: NUL-terminated wide string.

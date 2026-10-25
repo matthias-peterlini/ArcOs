@@ -276,6 +276,82 @@ pub struct NetDesc {
 }
 
 // ----------------------------------------------------------------------------
+// Sound
+
+/// Queues `frames` frames of interleaved signed 16-bit samples (`channels`
+/// per frame, at `rate`). Blocks while the device's buffer is full; returns
+/// [`OK`] once everything is queued.
+pub type AudioWrite = unsafe extern "C" fn(ctx: *mut c_void, samples: *const i16, frames: usize) -> Status;
+/// Plays what is queued to the end, then stops the device.
+pub type AudioDrain = unsafe extern "C" fn(ctx: *mut c_void) -> Status;
+
+/// A sound output a driver hands to the kernel. The kernel converts every
+/// sound to the output's format and applies the volume itself; the driver
+/// leaves its own gain at a fixed, sensible level. Calls are serialised.
+#[repr(C)]
+pub struct AudioDesc {
+    pub ctx: *mut c_void,
+    /// Frames per second.
+    pub rate: u32,
+    /// Samples per frame (2: left, right).
+    pub channels: u32,
+    pub write: AudioWrite,
+    pub drain: AudioDrain,
+    /// Name of the output ("Intel HD Audio, line out"), NUL-padded.
+    pub name: [u8; 40],
+}
+
+// ----------------------------------------------------------------------------
+// Displays
+
+/// A screen resolution.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DisplayMode {
+    pub width: u32,
+    pub height: u32,
+}
+
+/// The linear framebuffer of a mode: 32 bits per pixel.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Framebuffer {
+    /// Physical address.
+    pub phys: u64,
+    /// Where the driver already maps it (memory it allocated), or 0 for the
+    /// kernel to map device memory at `phys`.
+    pub virt: u64,
+    pub width: u32,
+    pub height: u32,
+    /// Bytes per row.
+    pub pitch: u32,
+    /// Bit positions of red, green and blue.
+    pub red: u8,
+    pub green: u8,
+    pub blue: u8,
+    pub _pad: u8,
+}
+
+pub type DisplayModes = unsafe extern "C" fn(ctx: *mut c_void, out: *mut DisplayMode, max: usize) -> usize;
+pub type DisplaySetMode = unsafe extern "C" fn(ctx: *mut c_void, mode: DisplayMode, fb: *mut Framebuffer) -> Status;
+/// Shows a changed rectangle (for devices that do not scan the framebuffer
+/// out by themselves).
+pub type DisplayFlush = unsafe extern "C" fn(ctx: *mut c_void, x: u32, y: u32, w: u32, h: u32);
+
+/// A display controller that can change the screen's resolution.
+#[repr(C)]
+pub struct DisplayDesc {
+    pub ctx: *mut c_void,
+    /// Fills `out` with up to `max` modes; returns how many it has.
+    pub modes: DisplayModes,
+    /// Switches to a mode and describes its framebuffer.
+    pub set_mode: DisplaySetMode,
+    pub flush: Option<DisplayFlush>,
+    /// Name of the controller, NUL-padded.
+    pub name: [u8; 40],
+}
+
+// ----------------------------------------------------------------------------
 // Logging
 
 pub const LOG_ERROR: u32 = 1;
@@ -359,6 +435,14 @@ pub struct KernelApi {
     /// [`E_BUSY`] if a driver could not let go (keep the memory alive).
     /// Never call it from `probe`.
     pub device_remove: unsafe extern "C" fn(device: u32) -> Status,
+
+    // Sound and displays
+    /// Registers a sound output; returns its number.
+    pub audio_register: unsafe extern "C" fn(device: u32, desc: *const AudioDesc) -> Status,
+    /// Registers a display controller; returns its number.
+    pub display_register: unsafe extern "C" fn(device: u32, desc: *const DisplayDesc) -> Status,
+    /// Maps device memory write-combined (a framebuffer).
+    pub map_framebuffer: unsafe extern "C" fn(phys: u64, size: usize) -> *mut u8,
 }
 
 /// What a module tells the kernel about itself.

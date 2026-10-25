@@ -205,6 +205,24 @@ unsafe extern "C" fn api_device_remove(device: u32) -> Status {
     super::device_removed(device)
 }
 
+unsafe extern "C" fn api_audio_register(device: u32, desc: *const AudioDesc) -> Status {
+    if desc.is_null() {
+        return E_INVAL;
+    }
+    dev::audio::register(device, desc)
+}
+
+unsafe extern "C" fn api_display_register(device: u32, desc: *const DisplayDesc) -> Status {
+    if desc.is_null() {
+        return E_INVAL;
+    }
+    dev::display::register(device, desc)
+}
+
+unsafe extern "C" fn api_map_framebuffer(phys: u64, size: usize) -> *mut u8 {
+    region::map_device(phys, size as u64, paging::WRITE_COMBINE).map(|v| v as *mut u8).unwrap_or(core::ptr::null_mut())
+}
+
 pub static KERNEL_API: KernelApi = KernelApi {
     abi_version: ABI_VERSION,
     size: core::mem::size_of::<KernelApi>() as u32,
@@ -234,4 +252,7 @@ pub static KERNEL_API: KernelApi = KernelApi {
     event_wait: api_event_wait,
     device_add: api_device_add,
     device_remove: api_device_remove,
+    audio_register: api_audio_register,
+    display_register: api_display_register,
+    map_framebuffer: api_map_framebuffer,
 };

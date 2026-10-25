@@ -124,6 +124,14 @@ impl Setup {
 }
 
 impl View for Setup {
+    fn resized(&mut self, w: i32, h: i32) {
+        self.w = w;
+        self.h = h;
+        let (sharp, blur) = res::wallpaper(res::WALLPAPERS[self.wall].0, w, h);
+        self.sharp = sharp;
+        self.blur = blur;
+    }
+
     fn event(&mut self, l: &mut Looper, ev: Event) -> bool {
         let lay = self.layout();
         let before = (self.step, self.name.clone(), self.layout, self.wall);

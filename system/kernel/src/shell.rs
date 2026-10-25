@@ -77,6 +77,10 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("restart", "", "restart the computer (also: reboot)"),
     ("shutdown", "", "turn the computer off (also: off)"),
     ("install", "[name]", "install a program from the store (also: pkg)"),
+    ("play", "<file.wav> | stop", "play a sound file"),
+    ("tone", "[hz] [ms]", "play a tone (default 440 Hz, 500 ms)"),
+    ("volume", "[0-100]", "show or set the sound volume"),
+    ("display", "[WxH]", "screen resolutions, or switch to one"),
 ];
 
 /// The BusyBox applets arcOS exposes as commands once `busybox` is installed.
@@ -709,6 +713,50 @@ impl Shell {
                 crate::arch::cpu::halt_forever();
             }
             "install" | "pkg" => self.install(&rest),
+            "play" => {
+                if need(1, "<file.wav> | stop") {
+                    if rest[0] == "stop" {
+                        crate::dev::audio::stop();
+                        return;
+                    }
+                    let Some(p) = self.path(rest[0]) else { return };
+                    let sound = fs::read_file(&p).map_err(|e| alloc::format!("{e}"));
+                    match sound.and_then(|b| crate::dev::audio::parse_wav(&b).map_err(String::from)) {
+                        Ok(s) => {
+                            let (rate, ch, len) = (s.rate, s.channels, s.seconds_x10());
+                            match crate::dev::audio::play(s) {
+                                Ok(()) => println!(
+                                    "playing {}: {rate} Hz, {ch} channel{}, {}.{} s",
+                                    rest[0],
+                                    if ch == 1 { "" } else { "s" },
+                                    len / 10,
+                                    len % 10
+                                ),
+                                Err(e) => println!("{ERR}{e}{RESET}"),
+                            }
+                        }
+                        Err(e) => println!("{ERR}{}: {e}{RESET}", rest[0]),
+                    }
+                }
+            }
+            "tone" => {
+                let hz = rest.first().and_then(|v| v.parse().ok()).unwrap_or(440);
+                let ms = rest.get(1).and_then(|v| v.parse().ok()).unwrap_or(500u32).min(10_000);
+                if let Err(e) = crate::dev::audio::play(crate::dev::audio::tone(hz, ms)) {
+                    println!("{ERR}{e}{RESET}");
+                }
+            }
+            "volume" => match rest.first() {
+                None => println!("volume {}", crate::dev::audio::volume()),
+                Some(v) => match v.parse::<u32>() {
+                    Ok(v) if v <= 100 => {
+                        crate::gui::change_volume(v);
+                        println!("volume {v}");
+                    }
+                    _ => println!("{ERR}usage: volume [0-100]{RESET}"),
+                },
+            },
+            "display" => self.display(rest.first().copied()),
             _ => {
                 let prog_args = line.trim_start()[args[0].len()..].trim();
                 if crate::user::find_program(&args[0], &self.cwd).is_some() {
@@ -791,6 +839,37 @@ impl Shell {
                 }
             }
             Err(e) => println!("{ERR}{name}: {}{RESET}", e.as_str()),
+        }
+    }
+
+    fn display(&self, arg: Option<&str>) {
+        let Some(arg) = arg else {
+            match crate::console::pixel_size() {
+                Some((w, h)) => println!("screen {w}x{h}"),
+                None => println!("text screen"),
+            }
+            match crate::dev::display::controller() {
+                Some(name) => {
+                    println!("controller: {name}");
+                    let modes = crate::dev::display::modes();
+                    let list: Vec<String> = modes.iter().map(|m| alloc::format!("{}x{}", m.width, m.height)).collect();
+                    println!("resolutions: {}", list.join(" "));
+                }
+                None => println!("no display driver: the screen stays in the mode the firmware chose"),
+            }
+            for o in crate::dev::audio::list() {
+                println!("sound: audio{} {} ({} Hz, {} channels)", o.index, o.name, o.rate, o.channels);
+            }
+            return;
+        };
+        let mode = arg.split_once('x').and_then(|(w, h)| Some(arcdk::DisplayMode { width: w.parse().ok()?, height: h.parse().ok()? }));
+        let Some(mode) = mode else {
+            println!("{ERR}usage: display [WxH]{RESET}");
+            return;
+        };
+        match crate::gui::change_resolution(mode) {
+            Ok(()) => println!("screen {}x{}", mode.width, mode.height),
+            Err(e) => println!("{ERR}{e}{RESET}"),
         }
     }
 

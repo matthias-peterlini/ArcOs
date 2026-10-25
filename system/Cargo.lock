@@ -3,6 +3,13 @@
 version = 4
 
 [[package]]
+name = "ac97"
+version = "1.0.0"
+dependencies = [
+ "arcdrv",
+]
+
+[[package]]
 name = "ahci"
 version = "1.0.0"
 dependencies = [
@@ -81,6 +88,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "bochsvga"
+version = "1.0.0"
+dependencies = [
+ "arcdrv",
+]
+
+[[package]]
 name = "calc"
 version = "1.0.0"
 dependencies = [
@@ -107,6 +121,13 @@ version = "1.0.0"
 dependencies = [
  "arcdrv",
  "arcusb",
+]
+
+[[package]]
+name = "hda"
+version = "1.0.0"
+dependencies = [
+ "arcdrv",
 ]
 
 [[package]]
@@ -218,11 +239,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "virtiogpu"
+version = "1.0.0"
+dependencies = [
+ "arcdrv",
+ "arcvirtio",
+]
+
+[[package]]
 name = "virtionet"
 version = "1.0.0"
 dependencies = [
  "arcdrv",
  "arcvirtio",
+]
+
+[[package]]
+name = "vmsvga"
+version = "1.0.0"
+dependencies = [
+ "arcdrv",
 ]
 
 [[package]]

@@ -9,7 +9,9 @@
 //! Device ids are never reused: an unplugged device keeps its slot, marked
 //! gone, so a stale id can never reach a newer device.
 
+pub mod audio;
 pub mod block;
+pub mod display;
 pub mod input;
 pub mod irq;
 pub mod keymap;

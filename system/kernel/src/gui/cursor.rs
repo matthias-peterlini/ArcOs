@@ -122,6 +122,7 @@ impl Cursor {
                 }
             }
         }
+        crate::dev::display::flush(r.x, r.y, r.w, r.h);
         self.drawn = Some(r);
     }
 

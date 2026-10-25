@@ -1,0 +1,8 @@
+# VMware SVGA II: the display of VMware and of VirtualBox (VMSVGA, the
+# default for Linux guests), also emulated by QEMU (-vga vmware).
+name        = vmsvga
+version     = 1.0.0
+class       = display
+description = VMware SVGA II display
+author      = arcOS
+match       = pci 15ad:0405

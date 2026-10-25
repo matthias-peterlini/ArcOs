@@ -1,0 +1,9 @@
+# The display of QEMU (standard VGA and bochs-display), Bochs and
+# VirtualBox (VBoxVGA): any resolution the video memory holds.
+name        = bochsvga
+version     = 1.0.0
+class       = display
+description = QEMU, Bochs and VirtualBox display
+author      = arcOS
+match       = pci 1234:1111     # QEMU standard VGA, bochs-display
+match       = pci 80ee:beef     # VirtualBox VBoxVGA

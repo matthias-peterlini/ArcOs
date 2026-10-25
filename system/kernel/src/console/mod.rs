@@ -523,6 +523,20 @@ pub fn init_screen(boot: &BootInfo) {
     t.flush();
 }
 
+/// A display driver changed the screen mode: the interface and the screen
+/// for fatal errors use the new framebuffer.
+pub fn set_framebuffer(fb: FbInfo) {
+    // SAFETY: the driver maps pitch * height bytes at fb.virt.
+    let surface = unsafe { fb::FbSurface::new(fb.virt as *mut u8, fb.width, fb.height, fb.pitch, fb.shift, &font::FONT) };
+    let cells = surface.cols() * surface.rows();
+    *PANIC_FB.lock() = Some(surface);
+    *FB_INFO.lock() = Some(fb);
+    // Room for the fatal-error grid, reserved now (see init_screen).
+    let mut t = TERM.lock();
+    let need = cells.saturating_sub(t.cells.len());
+    t.cells.reserve(need);
+}
+
 /// The framebuffer, if the graphical interface is to use it.
 pub fn framebuffer() -> Option<FbInfo> {
     *FB_INFO.lock()

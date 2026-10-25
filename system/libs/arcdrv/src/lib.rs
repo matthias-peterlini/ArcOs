@@ -807,10 +807,167 @@ pub fn device_remove(device: u32) -> Status {
     unsafe { (api().device_remove)(device) }
 }
 
+pub fn audio_register(device: u32, desc: &'static AudioDesc) -> Status {
+    // SAFETY: kernel call with a valid descriptor.
+    unsafe { (api().audio_register)(device, desc) }
+}
+
+pub fn display_register(device: u32, desc: &'static DisplayDesc) -> Status {
+    // SAFETY: kernel call with a valid descriptor.
+    unsafe { (api().display_register)(device, desc) }
+}
+
+/// Maps a framebuffer (write-combined device memory).
+pub fn map_framebuffer(phys: u64, size: usize) -> Option<*mut u8> {
+    // SAFETY: kernel call.
+    let p = unsafe { (api().map_framebuffer)(phys, size) };
+    (!p.is_null()).then_some(p)
+}
+
 /// Copies an ASCII model name into the fixed field of [`BlockDesc`].
 pub fn model_name(name: &str) -> [u8; 40] {
     let mut out = [0u8; 40];
     let n = name.len().min(39);
     out[..n].copy_from_slice(&name.as_bytes()[..n]);
     out
+}
+
+// ----------------------------------------------------------------------------
+// Sound
+
+/// The ring buffer most sound devices play from: the device reads it in a
+/// loop while the driver writes ahead of it. [`PcmRing`] keeps track of both
+/// positions; the driver only says where the device is.
+pub mod pcm {
+    use super::{Dma, Event, Mutex};
+
+    /// What a sound device's driver provides to a [`PcmRing`].
+    pub trait Hardware: Sync {
+        /// Byte offset in the ring the device is playing.
+        fn position(&self) -> usize;
+        /// Starts playing the ring from its beginning.
+        fn start(&self);
+        fn stop(&self);
+    }
+
+    struct State {
+        running: bool,
+        /// Bytes written since the start (not wrapped).
+        written: u64,
+        /// Bytes of whole laps the device played.
+        laps: u64,
+        last: usize,
+    }
+
+    pub struct PcmRing<H: Hardware> {
+        pub hw: H,
+        buf: Dma,
+        size: usize,
+        state: Mutex<State>,
+        /// Signalled by the driver's interrupt at every period, so writers
+        /// waiting for room wake up early; without it they poll.
+        pub progress: Event,
+    }
+
+    impl<H: Hardware> PcmRing<H> {
+        /// A ring of `buf.len()` bytes (a multiple of the frame size).
+        pub fn new(hw: H, buf: Dma) -> PcmRing<H> {
+            let size = buf.len();
+            PcmRing { hw, buf, size, state: Mutex::new(State { running: false, written: 0, laps: 0, last: 0 }), progress: Event::new() }
+        }
+
+        pub fn phys(&self) -> u64 {
+            self.buf.phys()
+        }
+
+        pub fn size(&self) -> usize {
+            self.size
+        }
+
+        /// Bytes the device has played since the start.
+        fn played(&self, st: &mut State) -> u64 {
+            let pos = self.hw.position().min(self.size - 1);
+            if pos < st.last {
+                st.laps += self.size as u64;
+            }
+            st.last = pos;
+            st.laps + pos as u64
+        }
+
+        fn copy_in(&self, at: u64, data: &[u8]) {
+            let ring = self.buf.as_mut_slice();
+            let start = (at % self.size as u64) as usize;
+            let first = data.len().min(self.size - start);
+            ring[start..start + first].copy_from_slice(&data[..first]);
+            ring[..data.len() - first].copy_from_slice(&data[first..]);
+        }
+
+        fn zero(&self, at: u64, len: usize) {
+            let ring = self.buf.as_mut_slice();
+            let start = (at % self.size as u64) as usize;
+            let first = len.min(self.size - start);
+            ring[start..start + first].fill(0);
+            ring[..len - first].fill(0);
+        }
+
+        /// Queues sound (bytes in the device's format), waiting for room.
+        pub fn write(&self, mut data: &[u8]) {
+            let mut st = self.state.lock();
+            while !data.is_empty() {
+                if !st.running {
+                    // Fill the ring from the start, then let it play.
+                    self.buf.as_mut_slice().fill(0);
+                    let n = data.len().min(self.size);
+                    self.copy_in(0, &data[..n]);
+                    data = &data[n..];
+                    *st = State { running: true, written: n as u64, laps: 0, last: 0 };
+                    self.hw.start();
+                    continue;
+                }
+                let played = self.played(&mut st);
+                if st.written < played {
+                    // The device caught up (the writer was late): go on a
+                    // little ahead of it.
+                    st.written = played + (self.size / 8) as u64 / 4 * 4;
+                }
+                let room = self.size - (st.written - played) as usize;
+                if room < 256 {
+                    drop(st);
+                    self.progress.wait(5);
+                    st = self.state.lock();
+                    continue;
+                }
+                let n = data.len().min(room) & !3;
+                self.copy_in(st.written, &data[..n]);
+                st.written += n as u64;
+                data = &data[n..];
+            }
+        }
+
+        /// Plays what is queued to its end, then stops the device.
+        pub fn drain(&self) {
+            let mut st = self.state.lock();
+            if !st.running {
+                return;
+            }
+            let played = self.played(&mut st);
+            if st.written > played {
+                // Silence after the end, so nothing old plays again.
+                let room = self.size - (st.written - played) as usize;
+                self.zero(st.written, room);
+            }
+            let start = super::time_ms();
+            loop {
+                let played = self.played(&mut st);
+                if played >= st.written || super::time_ms() - start > 10_000 {
+                    break;
+                }
+                drop(st);
+                self.progress.wait(5);
+                st = self.state.lock();
+            }
+            self.hw.stop();
+            st.running = false;
+        }
+    }
 }

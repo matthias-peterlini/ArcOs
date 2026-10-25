@@ -108,6 +108,8 @@ pub trait View {
     fn event(&mut self, l: &mut Looper, ev: Event) -> bool;
     /// Draws everything inside `r` (the canvas is clipped to it).
     fn draw(&mut self, c: &mut Canvas, r: Rect);
+    /// The screen changed size.
+    fn resized(&mut self, _w: i32, _h: i32) {}
 }
 
 /// Mouse, keyboard and screen updates for one interactive screen.
@@ -140,6 +142,16 @@ impl Looper {
     /// returns true.
     pub fn run(&mut self, d: &mut Display, view: &mut dyn View) {
         loop {
+            if let Some(mode) = super::take_mode_request() {
+                self.cursor.hide(d);
+                match d.set_mode(mode) {
+                    Ok(()) => {
+                        view.resized(d.width(), d.height());
+                        self.damage_all(d);
+                    }
+                    Err(e) => crate::warn!("gui", "{}x{}: {e}", mode.width, mode.height),
+                }
+            }
             let mut events: alloc::vec::Vec<Event> = alloc::vec::Vec::new();
             let (w, h) = (d.width(), d.height());
             let moved = self.cursor.poll(w, h);

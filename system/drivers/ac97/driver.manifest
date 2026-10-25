@@ -1,0 +1,22 @@
+# AC'97 audio: PCs from 1997 to about 2006 and the default sound card of
+# VirtualBox and of many virtual machines.
+name        = ac97
+version     = 1.0.0
+class       = audio
+description = AC'97 sound
+author      = arcOS
+match       = pci 8086:2415     # 82801AA (QEMU, VirtualBox)
+match       = pci 8086:2425     # 82801AB
+match       = pci 8086:2445     # 82801BA
+match       = pci 8086:2485     # 82801CA
+match       = pci 8086:24c5     # 82801DB
+match       = pci 8086:24d5     # 82801EB/ER
+match       = pci 8086:266e     # 82801FB
+match       = pci 8086:27de     # 82801GB
+match       = pci 8086:7195     # 440MX
+match       = pci 1039:7012     # SiS 7012
+match       = pci 10de:01b1     # nForce
+match       = pci 10de:006a     # nForce2
+match       = pci 10de:00da     # nForce3
+match       = pci 1022:746d     # AMD 8111
+match       = pci 1022:7445     # AMD 768

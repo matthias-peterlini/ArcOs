@@ -10,6 +10,7 @@ use super::ui::{self, Event, Looper, View, TEXT, TEXT_DIM, TEXT_FAINT};
 use super::wm::{Action, Hit, Window, TITLE_H};
 use super::Display;
 use crate::dev::input::{self, Key, KeyEvent};
+use crate::fs;
 use crate::time::{self, DateTime};
 use crate::util::Size;
 use alloc::boxed::Box;
@@ -585,6 +586,26 @@ fn capitalize(s: &str) -> String {
 }
 
 impl View for Desktop {
+    fn resized(&mut self, w: i32, h: i32) {
+        self.w = w;
+        self.h = h;
+        let (sharp, blur) = res::wallpaper(&settings::get().wallpaper, w, h);
+        self.sharp = sharp;
+        self.blur = blur;
+        self.menu = None;
+        let area = self.work_area();
+        for win in self.windows.iter_mut() {
+            if win.restore.is_some() {
+                win.rect = area; // maximised: fill the new screen
+            } else {
+                win.rect.w = win.rect.w.min(area.w);
+                win.rect.h = win.rect.h.min(area.h);
+                win.rect.x = win.rect.x.clamp(area.x, (area.right() - win.rect.w).max(area.x));
+                win.rect.y = win.rect.y.clamp(area.y, (area.bottom() - win.rect.h).max(area.y));
+            }
+        }
+    }
+
     fn event(&mut self, l: &mut Looper, ev: Event) -> bool {
         match ev {
             Event::Press { x, y, double } => self.press(l, x, y, double),
@@ -725,5 +746,22 @@ pub fn run(d: &mut Display) {
     };
     let mut l = Looper::new(d);
     l.damage_all(d);
+    startup_sound();
     l.run(d, &mut desk);
+}
+
+/// The chime when the desktop appears, if there is a sound card and the
+/// user wants it.
+fn startup_sound() {
+    if !settings::get().startup_sound || !crate::dev::audio::available() {
+        return;
+    }
+    let file = fs::abs("sys:/system/sounds/avvio.wav").and_then(|p| fs::read_file(&p));
+    match file.map(|b| crate::dev::audio::parse_wav(&b)) {
+        Ok(Ok(sound)) => {
+            let _ = crate::dev::audio::play(sound);
+        }
+        Ok(Err(e)) => crate::warn!("gui", "startup sound: {e}"),
+        Err(e) => crate::warn!("gui", "startup sound: {e}"),
+    }
 }
