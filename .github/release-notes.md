@@ -2,11 +2,12 @@ arcOS: un sistema operativo per PC x86-64 scritto da zero, con il linguaggio Arc
 
 ## Novità
 
-- **Programmi Linux**: gli eseguibili ELF x86-64 statici (musl) girano senza modifiche.
-- **Programmi Windows**: i `.exe` x64 da console (MinGW-w64) girano con `winrun`, che fornisce un `kernel32`/`msvcrt` scritti da zero.
-- **`install`**: installa programmi liberi dal negozio `sys:/store` — `install busybox` (decine di comandi Unix) e `install lua`.
+- **Interfaccia grafica**: avvio pulito con solo logo e barra di caricamento, configurazione guidata al primo avvio (pulsante **INIZIA**, nome, tastiera, sfondo), poi la scrivania: barra in alto, widget (orologio, calendario, sistema), dock, lanciatore con ricerca (Ctrl+Spazio) e finestre.
+- **App**: File, Terminale (la shell), Negozio (installa BusyBox e Lua con un clic), Impostazioni, Info sistema.
+- Icone, sfondi e caratteri disegnati per arcOS.
+- Restano i programmi **Linux** (ELF statici) e **Windows** (`.exe` x64 da console).
 
-Dettagli in [docs/compat.md](https://github.com/matthias-peterlini/ArcOs/blob/main/docs/compat.md).
+Dettagli in [docs/gui.md](https://github.com/matthias-peterlini/ArcOs/blob/main/docs/gui.md) e [docs/compat.md](https://github.com/matthias-peterlini/ArcOs/blob/main/docs/compat.md).
 
 ## File
 
@@ -19,6 +20,6 @@ Dettagli in [docs/compat.md](https://github.com/matthias-peterlini/ArcOs/blob/ma
 ## Provarlo
 
 - **QEMU**: `qemu-system-x86_64 -m 512M -cdrom arcos.iso`
-- **VirtualBox**: nuova macchina "Other/Unknown (64-bit)", 512 MiB di memoria, nessun disco, `arcos.iso` nel lettore CD.
+- **VirtualBox**: nuova macchina "Other/Unknown (64-bit)", 512 MiB di memoria, controller grafico VMSVGA, nessun disco, `arcos.iso` nel lettore CD.
 
-Al prompt `help` elenca i comandi; `cd sys:/home/arcscript` e poi `hello.as` avvia un programma ArcScript; `install busybox` e poi `seq 1 5` prova un programma Linux. Documentazione nel [README](https://github.com/matthias-peterlini/ArcOs#readme).
+Al primo avvio arcOS chiede nome, tastiera e sfondo, poi apre la scrivania. Il Terminale (nel dock) ha la shell: `help` elenca i comandi. Documentazione nel [README](https://github.com/matthias-peterlini/ArcOs#readme).
