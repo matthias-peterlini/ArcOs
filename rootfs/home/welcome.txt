@@ -1,5 +1,8 @@
 Welcome to arcOS.
 
+On a graphical screen arcOS starts its desktop: this terminal is the
+Terminale window (also in the dock).
+
 This volume (sys:) holds the system and your files:
 
   sys:/system/drivers   the driver store: every driver this computer can use

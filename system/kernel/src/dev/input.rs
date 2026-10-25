@@ -41,6 +41,8 @@ pub struct Pointer {
     pub y: i32,
     pub buttons: u8,
     pub wheel: i32,
+    /// The position is absolute (a tablet), not a sum of movements.
+    pub absolute: bool,
 }
 
 struct State {
@@ -53,6 +55,10 @@ struct State {
     altgr: bool,
     caps: bool,
     queue: VecDeque<KeyEvent>,
+    /// While the graphical interface runs, keyboard keys go here; it passes
+    /// them on (with [`inject`]) to the focused terminal.
+    capture: bool,
+    gui_queue: VecDeque<KeyEvent>,
     pointer: Pointer,
     pointer_seen: bool,
     serial: [u8; 8],
@@ -69,7 +75,9 @@ static STATE: IrqLock<State> = IrqLock::new(State {
     altgr: false,
     caps: false,
     queue: VecDeque::new(),
-    pointer: Pointer { x: 0, y: 0, buttons: 0, wheel: 0 },
+    capture: false,
+    gui_queue: VecDeque::new(),
+    pointer: Pointer { x: 0, y: 0, buttons: 0, wheel: 0, absolute: false },
     pointer_seen: false,
     serial: [0; 8],
     serial_len: 0,
@@ -124,6 +132,15 @@ fn key(usage: u32, value: i32) {
             0x52 => Some(Key::Up),
             _ => keymap::translate(s.layout, usage, shift, s.altgr, s.caps).map(Key::Char),
         };
+        if s.capture {
+            if let Some(key) = key {
+                let ev = KeyEvent { key, ctrl, alt: s.alt, shift };
+                if s.gui_queue.len() < QUEUE_MAX {
+                    s.gui_queue.push_back(ev);
+                }
+            }
+            return;
+        }
         if key == Some(Key::Char('c')) && ctrl && crate::user::interrupt_foreground() {
             return; // Ctrl+C stops the running program
         }
@@ -156,6 +173,7 @@ pub fn driver_event(_device: u32, kind: u32, code: u32, value: i32) {
             let v = value.clamp(0, arcdk::ABS_MAX) as i64;
             let mut s = STATE.lock();
             s.pointer_seen = true;
+            s.pointer.absolute = true;
             match code {
                 arcdk::AXIS_X => s.pointer.x = (v * w / full) as i32,
                 arcdk::AXIS_Y => s.pointer.y = (v * h / full) as i32,
@@ -239,6 +257,25 @@ pub fn layout() -> Layout {
 
 pub fn set_layout(layout: Layout) {
     STATE.lock().layout = layout;
+}
+
+/// Sends keyboard keys to the graphical interface instead of the terminal.
+pub fn set_capture(on: bool) {
+    STATE.lock().capture = on;
+}
+
+/// The next key for the graphical interface.
+pub fn gui_key() -> Option<KeyEvent> {
+    STATE.lock().gui_queue.pop_front()
+}
+
+/// Gives a key to the terminal (and the program in it), as if typed there.
+pub fn inject(ev: KeyEvent) {
+    if ev.key == Key::Char('c') && ev.ctrl && crate::user::interrupt_foreground() {
+        return;
+    }
+    push(&mut STATE.lock(), ev);
+    WAITERS.notify_all();
 }
 
 /// Where the pointing device has moved since boot, once it has reported.

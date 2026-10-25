@@ -62,6 +62,12 @@ Hello from user mode!
   pacchetti `.arc`, che la shell avvia come qualsiasi programma (`hello.as`,
   `notes add …`). Le interfacce (`view`) per ora sono mostrate come testo.
   Vedi [docs/arcscript.md](docs/arcscript.md).
+- **Interfaccia grafica**: avvio con solo logo e barra di caricamento,
+  configurazione guidata al primo avvio (pulsante INIZIA, nome, tastiera,
+  sfondo), poi una scrivania con barra in alto, widget, dock, lanciatore con
+  ricerca e finestre: File, Terminale, Negozio, Impostazioni, Info sistema.
+  Icone, sfondi e caratteri antialiasati disegnati per arcOS. Vedi
+  [docs/gui.md](docs/gui.md).
 - **Programmi Linux e Windows** per x86-64, eseguiti senza modificarli: un
   eseguibile ELF statico (musl) è un programma Linux, servito da un livello di
   compatibilità nel kernel; un `.exe` è un programma Windows, caricato da
@@ -111,6 +117,8 @@ make test-arcscript  # programmi ArcScript eseguiti su arcOS, con l'uscita
                 # controllata
 make test-compat  # un programma Linux e uno Windows eseguiti su arcOS,
                 # con l'uscita controllata
+make shots      # avvia arcOS, usa l'interfaccia con mouse e tastiera e
+                # salva le schermate in build/shots
 scripts/build-qemu.sh  # un QEMU con i modelli di tools/qemu (RTL8169 e
                 # RTL8168), usato da make test-drivers per provarne i driver
 make check      # test delle librerie condivise e dello strumento host

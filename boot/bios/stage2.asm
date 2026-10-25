@@ -87,8 +87,12 @@ stage2:
     cld
     mov [boot_drive], dl
 
-    mov si, msg_stage2
-    call print
+    ; A blank screen without a cursor until the kernel draws its splash.
+    mov ax, 0x0003
+    int 0x10
+    mov ah, 0x01
+    mov cx, 0x2000
+    int 0x10
 
     ; Clear the BootInfo page.
     mov di, BOOTINFO
@@ -107,8 +111,6 @@ stage2:
     call enter_unreal
 
     ; --- Kernel ----------------------------------------------------------
-    mov si, msg_kernel
-    call print
     mov eax, [BT_KERNEL_LBA]
     mov [load_lba], eax
     mov eax, [BT_KERNEL_SECTORS]
@@ -131,8 +133,6 @@ stage2:
     mov eax, [BT_PACK_SECTORS]
     test eax, eax
     jz .no_pack
-    mov si, msg_pack
-    call print
     mov [load_left], eax
     shl eax, 9
     mov [BOOTINFO + BI_PACK_SIZE], eax
@@ -145,8 +145,6 @@ stage2:
     mov eax, [BT_SYSTEM_SECTORS]
     test eax, eax
     jz .no_system
-    mov si, msg_system
-    call print
     mov [load_left], eax
     shl eax, 9
     mov [BOOTINFO + BI_SYSTEM_SIZE], eax
@@ -164,9 +162,6 @@ stage2:
     call read_memory_map
     call read_font
     call find_rsdp
-
-    mov si, msg_ok
-    call print
 
     call setup_video                ; last: the screen may stop showing text
 
@@ -318,14 +313,8 @@ load_image:
     movzx eax, word [dap_count]
     add [load_lba], eax
     sub [load_left], eax
-    mov al, '.'
-    mov ah, 0x0E
-    mov bx, 7
-    int 0x10
     jmp .loop
 .done:
-    mov si, msg_crlf
-    call print
     ret
 
 read_memory_map:
@@ -661,12 +650,6 @@ cur_mode        dw 0
 best_mode       dw 0
 best_area       dd 0
 
-msg_stage2       db "stage 2", 13, 10, 0
-msg_kernel       db "kernel ", 0
-msg_pack         db "boot pack ", 0
-msg_system       db "system volume ", 0
-msg_ok           db "starting arcOS", 13, 10, 0
-msg_crlf         db 13, 10, 0
 msg_err_disk     db "disk read error", 0
 msg_err_nokernel db "no kernel in the boot table", 0
 msg_err_cpu      db "this CPU is not 64-bit", 0

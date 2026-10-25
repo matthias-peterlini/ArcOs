@@ -1,8 +1,9 @@
 //! The arcOS kernel.
 //!
-//! Boot order: serial console → CPU tables → memory → screen → clock and
-//! scheduler → interrupts on → ACPI → boot pack and RAM volume → device scan
-//! → boot drivers (the system disk mounts) → every other driver → shell.
+//! Boot order: serial console → CPU tables → memory → screen (and the boot
+//! splash) → clock and scheduler → interrupts on → ACPI → boot pack and RAM
+//! volume → device scan → boot drivers (the system disk mounts) → every
+//! other driver → graphical interface and shell.
 
 #![no_std]
 #![no_main]
@@ -16,6 +17,7 @@ mod console;
 mod dev;
 mod driver;
 mod fs;
+mod gui;
 mod linux;
 mod mem;
 mod net;
@@ -88,8 +90,10 @@ extern "C" fn kmain(boot_phys: u64) -> ! {
     pit::init();
     mem::init(&boot);
     console::init_screen(&boot);
+    gui::boot_start();
     time::init();
     task::init();
+    gui::boot_progress(8);
     shell::banner(&boot);
 
     dev::irq::attach_kernel(4, console::serial::irq_handler);
@@ -100,16 +104,20 @@ extern "C" fn kmain(boot_phys: u64) -> ! {
     let (free, usable) = mem::frame::stats();
     info!("kernel", "{} of memory, {} free", util::Size(usable), util::Size(free));
     acpi::init(boot.rsdp);
+    gui::boot_progress(18);
 
     fs::mount_boot_pack(boot.pack_phys, boot.pack_size);
     if boot.system_size != 0 {
         fs::mount_live_system(boot.system_phys, boot.system_size);
     }
     fs::mount_ram(4 << 20);
+    gui::boot_progress(28);
 
     let found = dev::scan().len();
     debug!("kernel", "{found} devices found");
+    gui::boot_progress(38);
     driver::init();
+    gui::boot_progress(60);
     if fs::volume("sys").is_none()
         && dev::list().iter().any(|d| d.driver.is_some() && d.info.bus == arcdk::BUS_PCI && d.info.class == 0x0C && d.info.subclass == 0x03)
     {
@@ -122,10 +130,13 @@ extern "C" fn kmain(boot_phys: u64) -> ! {
         warn!("kernel", "no system volume found: only boot: and ram: are available");
     }
     driver::configure_all();
+    gui::boot_progress(75);
     driver::process_inbox();
     driver::start_monitor();
     net::start();
+    gui::boot_progress(82);
 
+    gui::start();
     shell::run();
 }
 

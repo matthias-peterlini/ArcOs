@@ -513,7 +513,13 @@ fn build_page_tables(top: u64, kernel_phys: u64, kernel_size: u64) -> u64 {
 #[no_mangle]
 extern "efiapi" fn efi_main(image: Handle, st: *mut SystemTable) -> Status {
     SYSTEM.store(st, Ordering::Relaxed);
-    print!("ArcBoot (UEFI)\n");
+    // A clean black screen until the kernel draws its splash.
+    let out = system().con_out;
+    // SAFETY: firmware calls on the console protocol from the system table.
+    unsafe {
+        ((*out).clear_screen)(out);
+        ((*out).enable_cursor)(out, false);
+    }
     // SAFETY: plain firmware call; the loader does not want a 5-minute limit.
     unsafe { (boot_services().set_watchdog_timer)(0, 0, 0, core::ptr::null()) };
 
@@ -537,10 +543,6 @@ extern "efiapi" fn efi_main(image: Handle, st: *mut SystemTable) -> Status {
     info.loader = LOADER_UEFI;
     info.system_phys = system_phys;
     info.system_size = system_size;
-    print!("kernel {} KiB at {:#x}, boot pack {} KiB\n", kernel_size >> 10, kernel_phys, pack_size >> 10);
-    if system_size != 0 {
-        print!("live system volume {} KiB\n", system_size >> 10);
-    }
 
     // The screen is set last: after the mode change the firmware console
     // may not show text any more.

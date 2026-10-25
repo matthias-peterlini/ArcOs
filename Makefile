@@ -14,6 +14,8 @@
 #                   controller and check that its driver works
 #   make test-arcscript  run ArcScript programs on arcOS and check them
 #   make test-compat   run a Linux and a Windows program on arcOS and check them
+#   make shots      boot headless, drive the GUI and save screenshots (build/shots)
+#   make assets     regenerate fonts, icons and wallpapers (Python, Pillow, numpy)
 #   make check      unit tests of the shared libraries and the host tool
 
 PROFILE  ?= release
@@ -42,7 +44,7 @@ ifeq ($(PROFILE),release)
 CARGO_PROFILE := --release
 endif
 
-.PHONY: all uefi system tools root image iso run-iso test-iso run run-q35 run-nvme run-uefi test test-uefi test-drivers test-arcscript test-compat check clean $(PACKAGES)
+.PHONY: all uefi system tools root image iso run-iso test-iso run run-q35 run-nvme run-uefi test test-uefi test-drivers test-arcscript test-compat shots assets check clean $(PACKAGES)
 
 all: image
 
@@ -122,6 +124,14 @@ test-arcscript: image
 
 test-compat: image
 	scripts/test-compat.sh $(IMAGE)
+
+shots: image
+	scripts/gui-shots.py $(IMAGE) scripts/gui/tour.txt $(BUILD)/shots
+
+assets:
+	tools/assets/gen_fonts.py system/kernel/assets/fonts.bin
+	tools/assets/gen_icons.py rootfs/system/gui
+	tools/assets/gen_wallpapers.py rootfs/system/gui/wallpapers
 
 check:
 	cd system && $(CARGO) test --target x86_64-unknown-linux-gnu -p arcdk -p arcfs -p arcc-core -p arc-vm

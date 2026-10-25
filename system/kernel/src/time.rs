@@ -70,7 +70,7 @@ fn is_leap(y: u64) -> bool {
     (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400)
 }
 
-fn days_in_month(y: u64, m: u64) -> u64 {
+pub fn days_in_month(y: u64, m: u64) -> u64 {
     match m {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
         4 | 6 | 9 | 11 => 30,

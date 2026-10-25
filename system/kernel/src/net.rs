@@ -506,3 +506,8 @@ pub fn arp_table() -> Vec<(Ip, Mac, u64)> {
     let now = time::uptime_ms();
     STACK.lock().arp.iter().map(|(ip, (mac, t))| (*ip, *mac, (now - t) / 1000)).collect()
 }
+
+/// Does any interface have an address?
+pub fn online() -> bool {
+    STACK.lock().ifaces.values().any(|i| i.dhcp == Dhcp::Bound)
+}

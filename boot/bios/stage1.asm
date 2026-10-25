@@ -27,9 +27,6 @@ start:
     cld
     mov [boot_drive], dl
 
-    mov si, msg_boot
-    call print
-
     cmp dword [boot_magic], 0x42435241   ; "ARCB"
     jne fail_table
 
@@ -90,7 +87,6 @@ print:
 .done:
     ret
 
-msg_boot    db "ArcBoot", 13, 10, 0
 msg_disk    db "disk error", 0
 msg_table   db "no boot table", 0
 

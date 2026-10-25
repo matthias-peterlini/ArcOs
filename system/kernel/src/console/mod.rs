@@ -53,6 +53,9 @@ enum Esc {
 enum Screen {
     Fb(fb::FbSurface),
     Vga(vga::VgaSurface),
+    /// The graphical interface owns the screen: the terminal keeps its cells
+    /// and the GUI's terminal window draws them.
+    Headless(Headless),
 }
 
 impl Screen {
@@ -60,8 +63,52 @@ impl Screen {
         match self {
             Screen::Fb(s) => s,
             Screen::Vga(s) => s,
+            Screen::Headless(s) => s,
         }
     }
+}
+
+struct Headless {
+    cols: usize,
+    rows: usize,
+}
+
+impl Surface for Headless {
+    fn cols(&self) -> usize {
+        self.cols
+    }
+    fn rows(&self) -> usize {
+        self.rows
+    }
+    fn draw(&mut self, _: usize, _: usize, _: Cell, _: bool) {}
+    fn scroll_up(&mut self, _: u8) {}
+    fn clear(&mut self, _: u8) {}
+    fn flush(&mut self) {}
+}
+
+/// The terminal size while the GUI owns the screen.
+pub const HEADLESS_COLS: usize = 80;
+pub const HEADLESS_ROWS: usize = 25;
+
+/// The linear framebuffer, for the graphical interface.
+#[derive(Clone, Copy, Debug)]
+pub struct FbInfo {
+    pub virt: u64,
+    pub width: usize,
+    pub height: usize,
+    pub pitch: usize,
+    /// Bit positions of red, green and blue in a pixel.
+    pub shift: (u8, u8, u8),
+}
+
+static FB_INFO: IrqLock<Option<FbInfo>> = IrqLock::new(None);
+/// The text surface kept aside while the GUI runs, to show a fatal error.
+static PANIC_FB: IrqLock<Option<fb::FbSurface>> = IrqLock::new(None);
+/// Bumped whenever the terminal's cells or cursor change.
+static GENERATION: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+fn touched() {
+    GENERATION.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
 }
 
 struct Terminal {
@@ -257,6 +304,7 @@ impl Terminal {
         }
         self.show_cursor();
         self.flush();
+        touched();
     }
 
     fn flush(&mut self) {
@@ -370,7 +418,10 @@ pub fn log(level: u32, source: &str, args: fmt::Arguments<'_>) {
     let ms = crate::time::uptime_ms();
     let line =
         alloc::format!("\x1b[90m[{:>5}.{:03}]\x1b[0m {}{}\x1b[0m \x1b[90m{}:\x1b[0m {}\n", ms / 1000, ms % 1000, color, tag, source, args);
-    let show = level <= LEVEL_INFO || verbose();
+    // With the graphical interface the terminal is a window for the shell:
+    // log lines go to the journal (`log`) and the serial port only.
+    let headless = matches!(TERM.lock().surface, Some(Screen::Headless(_)));
+    let show = (level <= LEVEL_INFO || verbose()) && !headless;
     if show {
         emit(&line, true);
     } else {
@@ -439,17 +490,78 @@ pub fn init_screen(boot: &BootInfo) {
         _ => None,
     };
     let Some(mut screen) = screen else { return };
+    let (cols, rows) = (screen.get().cols(), screen.get().rows());
+    let graphical = matches!(screen, Screen::Fb(_)) && boot.fb_width >= 800 && boot.fb_height >= 600;
     let mut t = TERM.lock();
-    t.cols = screen.get().cols();
-    t.rows = screen.get().rows();
+    if graphical {
+        // The GUI draws the screen; the terminal lives in its window. Room
+        // for a full-screen grid is reserved now so that a fatal error can
+        // take the screen back without allocating.
+        if let Screen::Fb(fbs) = screen {
+            *FB_INFO.lock() = Some(FbInfo {
+                virt: fbs.base() as u64,
+                width: boot.fb_width as usize,
+                height: boot.fb_height as usize,
+                pitch: boot.fb_pitch as usize,
+                shift: (boot.red_pos, boot.green_pos, boot.blue_pos),
+            });
+            *PANIC_FB.lock() = Some(fbs);
+        }
+        t.cols = HEADLESS_COLS;
+        t.rows = HEADLESS_ROWS;
+        t.cells = Vec::with_capacity((cols * rows).max(HEADLESS_COLS * HEADLESS_ROWS));
+        t.cells.resize(HEADLESS_COLS * HEADLESS_ROWS, BLANK);
+        t.surface = Some(Screen::Headless(Headless { cols: HEADLESS_COLS, rows: HEADLESS_ROWS }));
+        t.cursor = true;
+        return;
+    }
+    t.cols = cols;
+    t.rows = rows;
     t.cells = vec![BLANK; t.cols * t.rows];
     t.surface = Some(screen);
     t.clear();
     t.flush();
 }
 
+/// The framebuffer, if the graphical interface is to use it.
+pub fn framebuffer() -> Option<FbInfo> {
+    *FB_INFO.lock()
+}
+
+/// Copies the terminal's cells into `out`; returns columns, rows, the cursor
+/// position and whether the cursor is shown.
+pub fn snapshot(out: &mut Vec<Cell>) -> (usize, usize, usize, usize, bool) {
+    let t = TERM.lock();
+    out.clear();
+    out.extend_from_slice(&t.cells);
+    (t.cols, t.rows, t.col, t.row, t.cursor)
+}
+
+/// Changes whenever the terminal does.
+pub fn generation() -> u64 {
+    GENERATION.load(core::sync::atomic::Ordering::Relaxed)
+}
+
+/// The character a cell shows.
+pub fn cell_char(glyph: u8) -> char {
+    cp437::to_char(glyph)
+}
+
+/// The 8x16 BIOS-font bitmap of a cell's glyph (one byte per row).
+pub fn bios_glyph(glyph: u8) -> &'static [u8] {
+    &font::FONT[glyph as usize * 16..glyph as usize * 16 + 16]
+}
+
+/// The colour of a palette entry.
+pub fn palette(i: u8) -> u32 {
+    PALETTE[(i as usize).min(PALETTE.len() - 1)]
+}
+
 /// Framebuffer size in pixels, if the screen is a framebuffer.
 pub fn pixel_size() -> Option<(usize, usize)> {
+    if let Some(fb) = *FB_INFO.lock() {
+        return Some((fb.width, fb.height));
+    }
     match TERM.lock().surface.as_ref() {
         Some(Screen::Fb(fb)) => Some(fb.size()),
         _ => None,
@@ -468,6 +580,8 @@ pub fn clear() {
     t.clear();
     t.show_cursor();
     t.flush();
+    drop(t);
+    touched();
 }
 
 pub fn set_cursor_visible(on: bool) {
@@ -478,6 +592,8 @@ pub fn set_cursor_visible(on: bool) {
     t.cursor = on;
     t.show_cursor();
     t.flush();
+    drop(t);
+    touched();
 }
 
 /// Draws a filled rectangle on a framebuffer screen (no-op in text mode).
@@ -504,6 +620,24 @@ impl Write for PanicOut {
 /// works even when the heap is the problem.
 pub fn panic_screen(args: fmt::Arguments<'_>) -> ! {
     crate::arch::cpu::disable_irq();
+    // SAFETY: the machine is stopping; nobody else holds these locks.
+    unsafe {
+        PANIC_FB.force_unlock();
+        TERM.force_unlock();
+    }
+    if let Some(mut fbs) = PANIC_FB.lock().take() {
+        let mut t = TERM.lock();
+        let (cols, rows) = (fbs.cols(), fbs.rows());
+        fbs.clear(DEFAULT_BG);
+        t.surface = Some(Screen::Fb(fbs));
+        t.cols = cols;
+        t.rows = rows;
+        // Within the capacity reserved at start-up: no allocation.
+        t.cells.resize(cols * rows, BLANK);
+        t.col = 0;
+        t.row = 0;
+        t.clear();
+    }
     let _ = PanicOut.write_str("\n\x1b[41;97m arcOS stopped \x1b[0m\n\x1b[91m");
     let _ = PanicOut.write_fmt(args);
     let _ = PanicOut.write_str("\x1b[0m\n\nThe system has been halted. Restart the computer.\n");

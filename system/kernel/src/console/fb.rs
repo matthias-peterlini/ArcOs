@@ -66,6 +66,11 @@ impl FbSurface {
         (self.width, self.height)
     }
 
+    /// The mapped framebuffer.
+    pub fn base(&self) -> *mut u8 {
+        self.fb
+    }
+
     /// Fills a rectangle in pixels (for the boot splash and progress bars).
     pub fn fill_rect(&mut self, x: usize, y: usize, w: usize, h: usize, color: u32) {
         let c = self.rgb(color);

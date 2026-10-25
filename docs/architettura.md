@@ -118,7 +118,9 @@ La metà bassa appartiene al programma in esecuzione.
 | CPU | `arch/` | GDT con TSS, IDT, PIC 8259 rimappato a 32–47, PIT a 1 kHz |
 | scheduler | `task.rs` | thread del kernel, round-robin preemptivo (10 ms), code di attesa, sleep |
 | sincronizzazione | `sync.rs` | `IrqLock` (spinlock con interruzioni spente), `Mutex` (cede il processore mentre aspetta) |
-| console | `console/` | terminale con sequenze ANSI su framebuffer, VGA testo e porta seriale; giornale di sistema |
+| console | `console/` | terminale con sequenze ANSI su framebuffer, VGA testo e porta seriale; giornale di sistema; con la grafica attiva è una griglia mostrata dalla finestra Terminale |
+| grafica | `gui/` | splash d'avvio, configurazione guidata, scrivania, finestre e app ([gui.md](gui.md)) |
+| Linux | `linux.rs` | caricatore ELF statico e chiamate di sistema Linux ([compat.md](compat.md)) |
 | dispositivi | `dev/` | registro dei dispositivi, PCI, piattaforma (8042), IRQ condivisi, dischi e partizioni (MBR, GPT), tastiera, interfacce di rete |
 | driver | `driver/` | gestore dei driver, caricatore ELF dei moduli, tabella `KernelApi` |
 | file | `fs/` | volumi, percorsi `volume:/cartella/file`, montaggio automatico |

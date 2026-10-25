@@ -56,6 +56,13 @@ pub struct ConfigurationTable {
 pub struct TextOutput {
     pub reset: unsafe extern "efiapi" fn(*mut TextOutput, bool) -> Status,
     pub output_string: unsafe extern "efiapi" fn(*mut TextOutput, *const u16) -> Status,
+    pub test_string: usize,
+    pub query_mode: usize,
+    pub set_mode: usize,
+    pub set_attribute: usize,
+    pub clear_screen: unsafe extern "efiapi" fn(*mut TextOutput) -> Status,
+    pub set_cursor_position: usize,
+    pub enable_cursor: unsafe extern "efiapi" fn(*mut TextOutput, bool) -> Status,
 }
 
 // Memory allocation (AllocatePages type, memory types).

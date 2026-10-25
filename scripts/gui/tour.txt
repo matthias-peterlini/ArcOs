@@ -1,0 +1,33 @@
+# A tour of the interface for scripts/gui-shots.py (make shots), on a fresh
+# image at 1024x768: the setup, then the desktop and its apps.
+wait 2
+shot 01-splash
+wait 8
+shot 02-benvenuto
+click 512 543
+wait 1
+type Arc
+shot 03-nome
+key ret
+wait 1
+shot 04-tastiera
+key ret
+wait 1
+shot 05-sfondo
+key ret
+wait 1.5
+shot 06-pronto
+key ret
+wait 4
+shot 07-scrivania
+click 279 712
+wait 3
+shot 08-file
+click 681 712
+wait 3
+shot 09-applicazioni
+key esc
+wait 1
+click 343 712
+wait 3
+shot 10-terminale

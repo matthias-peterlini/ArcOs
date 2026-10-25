@@ -44,3 +44,25 @@ pub fn glyph(c: char) -> u8 {
         _ => HIGH.iter().position(|&h| h == c).map(|i| 0x80 + i as u8).unwrap_or(b'?'),
     }
 }
+
+/// The character glyph `b` of the BIOS font shows (the inverse of [`glyph`]).
+pub fn to_char(b: u8) -> char {
+    match b {
+        0x20..=0x7E => b as char,
+        0x80..=0xFF => HIGH[(b - 0x80) as usize],
+        0x15 => '§',
+        0x14 => '¶',
+        0x07 => '•',
+        0x10 => '►',
+        0x11 => '◄',
+        0x18 => '↑',
+        0x19 => '↓',
+        0x1A => '→',
+        0x1B => '←',
+        0x1E => '▲',
+        0x1F => '▼',
+        0x03 => '♥',
+        0x04 => '♦',
+        _ => ' ',
+    }
+}

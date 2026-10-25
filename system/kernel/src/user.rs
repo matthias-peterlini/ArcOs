@@ -448,7 +448,6 @@ pub(crate) fn set_cwd(path: Path) {
     }
 }
 
-
 /// Is `[addr, addr + len)` a page-aligned range of the user half?
 fn user_range(addr: u64, len: u64) -> Result<u64, Error> {
     let pages = mem::align_up(len.max(1), PAGE_SIZE) / PAGE_SIZE;
