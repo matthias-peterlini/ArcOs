@@ -4,6 +4,10 @@
 //! its own address space (the kernel half is shared), one thread, a table of
 //! handles and a current folder. System calls arrive through `int 0x80`; see
 //! `arcdk::syscall` for the interface.
+//!
+//! Two other kinds of program run here too: Linux programs (any other ELF
+//! file), which talk to [`crate::linux`] through `syscall`, and Windows
+//! programs (`.exe`), which `winrun.app` loads and runs.
 
 use crate::arch::{cpu, gdt, idt::TrapFrame};
 use crate::fs::{self, Path};
@@ -24,6 +28,13 @@ const MAX_HANDLES: usize = 64;
 #[derive(Clone)]
 enum Handle {
     File { path: Path, pos: u64, write: bool },
+}
+
+/// Which system call interface a process uses.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Kind {
+    Native,
+    Linux,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -48,7 +59,7 @@ static NEXT_PID: IrqLock<u32> = IrqLock::new(1);
 static FOREGROUND: IrqLock<Option<u32>> = IrqLock::new(None);
 static EXITED: WaitQueue = WaitQueue::new();
 
-fn fs_error(e: fs::Error) -> Error {
+pub(crate) fn fs_error(e: fs::Error) -> Error {
     match e {
         fs::Error::NotFound => Error::NotFound,
         fs::Error::Exists => Error::Exists,
@@ -63,16 +74,17 @@ fn fs_error(e: fs::Error) -> Error {
 }
 
 /// Where a program name points: `edit` -> `sys:/apps/edit.app`, else
-/// `edit.arc` or `edit.as` there (ArcScript programs); paths are taken as
-/// they are.
+/// `edit.arc` or `edit.as` there (ArcScript programs), `edit.exe` (Windows)
+/// or `edit` (Linux); paths are taken as they are.
 pub fn find_program(name: &str, cwd: &Path) -> Option<Path> {
-    if name.contains(':') || name.contains('/') || name.ends_with(".app") || is_script(name) {
+    let lower = name.to_ascii_lowercase();
+    if name.contains(':') || name.contains('/') || lower.ends_with(".app") || lower.ends_with(".exe") || is_script(name) {
         let p = Path::parse(name, cwd).ok()?;
         return fs::stat(&p).ok().filter(|s| s.kind == arcfs::Kind::File).map(|_| p);
     }
-    ["app", "arc", "as"].iter().find_map(|ext| {
-        let p = fs::abs(&alloc::format!("sys:/apps/{}.{ext}", name.to_ascii_lowercase())).ok()?;
-        fs::exists(&p).then_some(p)
+    [".app", ".arc", ".as", ".exe", ""].iter().find_map(|ext| {
+        let p = fs::abs(&alloc::format!("sys:/apps/{lower}{ext}")).ok()?;
+        fs::stat(&p).ok().filter(|s| s.kind == arcfs::Kind::File).map(|_| p)
     })
 }
 
@@ -83,10 +95,22 @@ fn is_script(name: &str) -> bool {
 }
 
 const SCRIPT_RUNNER: &str = "sys:/apps/arcc.app";
+const WINDOWS_RUNNER: &str = "sys:/apps/winrun.app";
 
 struct Start {
     image: Vec<u8>,
     args: String,
+    kind: Kind,
+}
+
+/// A path as one argument, quoted if it has spaces.
+fn quoted(path: &Path) -> String {
+    let file = alloc::format!("{path}");
+    if file.contains(char::is_whitespace) {
+        alloc::format!("\"{file}\"")
+    } else {
+        file
+    }
 }
 
 /// Starts a program. Returns its process id.
@@ -97,15 +121,24 @@ pub fn spawn(path: &Path, args: &str, cwd: Path) -> Result<u32, Error> {
         let runner = fs::abs(SCRIPT_RUNNER).map_err(fs_error)?;
         let image = fs::read_file(&runner).map_err(fs_error)?;
         let shown = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
-        let file = alloc::format!("{path}");
-        let file = if file.contains(char::is_whitespace) { alloc::format!("\"{file}\"") } else { file };
-        return start(image, String::from(shown), &alloc::format!("run {file} {args}"), cwd);
+        return start(image, String::from(shown), &alloc::format!("run {} {args}", quoted(path)), cwd, Kind::Native);
+    }
+    let mut magic = [0u8; 4];
+    fs::read_at(path, 0, &mut magic).map_err(fs_error)?;
+    if magic[..2] == *b"MZ" {
+        // `winrun <file> <args>`, under the program's own name.
+        let runner = fs::abs(WINDOWS_RUNNER).map_err(fs_error)?;
+        let image = fs::read_file(&runner).map_err(fs_error)?;
+        let shown = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
+        return start(image, String::from(shown), &alloc::format!("{} {args}", quoted(path)), cwd, Kind::Native);
     }
     let image = fs::read_file(path).map_err(fs_error)?;
-    start(image, String::from(name.trim_end_matches(".app")), args, cwd)
+    let kind = if name.to_ascii_lowercase().ends_with(".app") { Kind::Native } else { Kind::Linux };
+    let shown = if kind == Kind::Native { &name[..name.len() - 4] } else { name };
+    start(image, String::from(shown), args, cwd, kind)
 }
 
-fn start(image: Vec<u8>, name: String, args: &str, cwd: Path) -> Result<u32, Error> {
+fn start(image: Vec<u8>, name: String, args: &str, cwd: Path, kind: Kind) -> Result<u32, Error> {
     if image.len() < 64 || &image[..4] != b"\x7fELF" {
         return Err(Error::BadProgram);
     }
@@ -129,7 +162,7 @@ fn start(image: Vec<u8>, name: String, args: &str, cwd: Path) -> Result<u32, Err
             kill: false,
         },
     );
-    let start = Box::into_raw(Box::new(Start { image, args: String::from(args) }));
+    let start = Box::into_raw(Box::new(Start { image, args: String::from(args), kind }));
     match task::spawn_in(&name, user_start, start as *mut c_void, cr3, pid) {
         Some(tid) => {
             if let Some(p) = PROCS.lock().get_mut(&pid) {
@@ -148,7 +181,7 @@ fn start(image: Vec<u8>, name: String, args: &str, cwd: Path) -> Result<u32, Err
 }
 
 /// Maps `pages` fresh user pages at `virt` in the running address space.
-fn map_user(virt: u64, pages: u64) -> Option<()> {
+pub(crate) fn map_user(virt: u64, pages: u64) -> Option<()> {
     let cr3 = cpu::read_cr3();
     for i in 0..pages {
         let phys = frame::alloc()?;
@@ -161,6 +194,24 @@ fn map_user(virt: u64, pages: u64) -> Option<()> {
 unsafe extern "C" fn user_start(arg: *mut c_void) {
     // SAFETY: the Box leaked by spawn, used once.
     let start = unsafe { Box::from_raw(arg as *mut Start) };
+    let (entry, rsp, rdi, rsi) = match start.kind {
+        Kind::Native => native_image(&start),
+        Kind::Linux => match crate::linux::load(&start.image, &current_name(), &start.args) {
+            Ok((entry, rsp)) => (entry, rsp, 0, 0),
+            Err(e) => {
+                crate::println!("\x1b[91m{}: {}\x1b[0m", current_name(), e.as_str());
+                terminate(-(e as i64));
+            }
+        },
+    };
+    drop(start);
+    // SAFETY: the entry point and stack were just set up in this address space.
+    unsafe { enter_user(entry, rsp, rdi, rsi) }
+}
+
+/// Loads an arcOS program; returns its entry, stack and the two arguments
+/// of its entry function (the argument text and its length).
+fn native_image(start: &Start) -> (u64, u64, u64, u64) {
     let loaded = crate::driver::elf::load_with(&start.image, |pages| map_user(sys::USER_BASE, pages).map(|_| sys::USER_BASE), |_| {});
     let image = match loaded {
         Ok(i) => i,
@@ -179,11 +230,20 @@ unsafe extern "C" fn user_start(arg: *mut c_void) {
     // SAFETY: the stack pages were just mapped in this address space.
     unsafe { core::ptr::copy_nonoverlapping(args.as_ptr(), args_at as *mut u8, args.len()) };
     let rsp = args_at - 8; // as if called: rsp % 16 == 8 at entry
-    let (entry, len) = (image.entry, args.len() as u64);
-    drop(start);
-    // SAFETY: jumps to ring 3 at the program's entry with a valid stack.
+    (image.entry, rsp, args_at, args.len() as u64)
+}
+
+/// Jumps to ring 3, with every other register cleared.
+///
+/// # Safety
+/// `entry` and `rsp` must be mapped user memory of the running address space.
+pub(crate) unsafe fn enter_user(entry: u64, rsp: u64, rdi: u64, rsi: u64) -> ! {
+    // SAFETY: guaranteed by the caller. `swapgs` makes the thread's user GS
+    // base active, as the return path of a trap would.
     unsafe {
         core::arch::asm!(
+            "cli",
+            "swapgs",
             "push {ss}",
             "push {rsp}",
             "push 0x202",
@@ -207,20 +267,20 @@ unsafe extern "C" fn user_start(arg: *mut c_void) {
             rsp = in(reg) rsp,
             cs = in(reg) gdt::USER_CODE as u64,
             rip = in(reg) entry,
-            in("rdi") args_at,
-            in("rsi") len,
+            in("rdi") rdi,
+            in("rsi") rsi,
             options(noreturn)
         );
     }
 }
 
-fn current_name() -> String {
+pub(crate) fn current_name() -> String {
     let pid = task::current_pid();
     PROCS.lock().get(&pid).map(|p| p.name.clone()).unwrap_or_default()
 }
 
 /// Ends the calling process.
-fn terminate(code: i64) -> ! {
+pub(crate) fn terminate(code: i64) -> ! {
     let pid = task::current_pid();
     cpu::disable_irq();
     let cr3 = {
@@ -238,6 +298,7 @@ fn terminate(code: i64) -> ! {
         task::leave_address_space();
         paging::free_address_space(cr3);
     }
+    crate::linux::forget(pid);
     EXITED.notify_all();
     task::exit();
 }
@@ -267,6 +328,18 @@ pub fn run_foreground(path: &Path, args: &str, cwd: Path) -> Result<i64, Error> 
     Ok(code.unwrap_or(-1))
 }
 
+/// Runs a Linux program in the foreground under a chosen `argv0`. Multi-call
+/// programs such as BusyBox pick which tool to be from `argv[0]`, so this is
+/// how the shell runs `ls` out of a single `busybox` image.
+pub fn run_applet_foreground(path: &Path, argv0: &str, args: &str, cwd: Path) -> Result<i64, Error> {
+    let image = fs::read_file(path).map_err(fs_error)?;
+    let pid = start(image, String::from(argv0), args, cwd, Kind::Linux)?;
+    *FOREGROUND.lock() = Some(pid);
+    let code = wait(pid);
+    *FOREGROUND.lock() = None;
+    Ok(code.unwrap_or(-1))
+}
+
 /// Ctrl+C: asks the foreground program to stop. Returns whether there was one.
 pub fn interrupt_foreground() -> bool {
     let Some(pid) = *FOREGROUND.lock() else { return false };
@@ -283,7 +356,7 @@ pub fn kill(pid: u32) -> bool {
     }
 }
 
-fn kill_requested() -> bool {
+pub(crate) fn kill_requested() -> bool {
     let pid = task::current_pid();
     PROCS.lock().get(&pid).is_some_and(|p| p.kill)
 }
@@ -305,7 +378,7 @@ pub fn count() -> usize {
 
 /// Checks that `len` bytes at `ptr` are mapped user memory of the running
 /// process and returns them.
-fn user_slice<'a>(ptr: u64, len: u64) -> Result<&'a mut [u8], Error> {
+pub(crate) fn user_slice<'a>(ptr: u64, len: u64) -> Result<&'a mut [u8], Error> {
     if len == 0 {
         return Ok(&mut []);
     }
@@ -326,7 +399,31 @@ fn user_slice<'a>(ptr: u64, len: u64) -> Result<&'a mut [u8], Error> {
     Ok(unsafe { core::slice::from_raw_parts_mut(ptr as *mut u8, len as usize) })
 }
 
-fn user_str<'a>(ptr: u64, len: u64) -> Result<&'a str, Error> {
+/// Reads a NUL-terminated string (as C and Linux pass them), up to `max`
+/// bytes. Only the bytes before the NUL need to be mapped and valid UTF-8.
+pub(crate) fn user_cstr(ptr: u64, max: u64) -> Result<String, Error> {
+    if ptr == 0 {
+        return Err(Error::BadAddress);
+    }
+    let cr3 = cpu::read_cr3();
+    let mut out = Vec::new();
+    let mut at = ptr;
+    while (out.len() as u64) < max {
+        if at >= USER_TOP || !paging::user_accessible(cr3, mem::align_down(at, PAGE_SIZE)) {
+            return Err(Error::BadAddress);
+        }
+        // SAFETY: the page holding `at` is mapped for user access.
+        let b = unsafe { *(at as *const u8) };
+        if b == 0 {
+            return String::from_utf8(out).map_err(|_| Error::InvalidName);
+        }
+        out.push(b);
+        at += 1;
+    }
+    Err(Error::InvalidName)
+}
+
+pub(crate) fn user_str<'a>(ptr: u64, len: u64) -> Result<&'a str, Error> {
     if len > 4096 {
         return Err(Error::InvalidName);
     }
@@ -335,9 +432,70 @@ fn user_str<'a>(ptr: u64, len: u64) -> Result<&'a str, Error> {
 
 fn user_path(ptr: u64, len: u64) -> Result<Path, Error> {
     let text = user_str(ptr, len)?;
+    Path::parse(text, &cwd()?).map_err(fs_error)
+}
+
+/// The current folder of the calling process.
+pub(crate) fn cwd() -> Result<Path, Error> {
     let pid = task::current_pid();
-    let cwd = PROCS.lock().get(&pid).map(|p| p.cwd.clone()).ok_or(Error::Unknown)?;
-    Path::parse(text, &cwd).map_err(fs_error)
+    PROCS.lock().get(&pid).map(|p| p.cwd.clone()).ok_or(Error::Unknown)
+}
+
+pub(crate) fn set_cwd(path: Path) {
+    let pid = task::current_pid();
+    if let Some(p) = PROCS.lock().get_mut(&pid) {
+        p.cwd = path;
+    }
+}
+
+
+/// Is `[addr, addr + len)` a page-aligned range of the user half?
+fn user_range(addr: u64, len: u64) -> Result<u64, Error> {
+    let pages = mem::align_up(len.max(1), PAGE_SIZE) / PAGE_SIZE;
+    let end = pages.checked_mul(PAGE_SIZE).and_then(|b| addr.checked_add(b)).ok_or(Error::BadAddress)?;
+    if addr == 0 || !addr.is_multiple_of(PAGE_SIZE) || end > USER_TOP {
+        return Err(Error::BadAddress);
+    }
+    Ok(pages)
+}
+
+/// Maps fresh pages at a fixed address, if none of them is in use.
+pub(crate) fn map_fixed(addr: u64, len: u64) -> Result<(), Error> {
+    let pages = user_range(addr, len)?;
+    let cr3 = cpu::read_cr3();
+    if (0..pages).any(|i| paging::translate_in(cr3, addr + i * PAGE_SIZE).is_some()) {
+        return Err(Error::Exists);
+    }
+    map_user(addr, pages).ok_or(Error::NoMemory)
+}
+
+/// Unmaps and frees the user pages of a range (gaps are skipped).
+pub(crate) fn unmap_range(addr: u64, len: u64) -> Result<(), Error> {
+    let pages = user_range(addr, len)?;
+    let cr3 = cpu::read_cr3();
+    for i in 0..pages {
+        let virt = addr + i * PAGE_SIZE;
+        if paging::user_accessible(cr3, virt) {
+            if let Some(phys) = paging::unmap_in(cr3, virt) {
+                frame::free(phys);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Sets the FS or GS base of the calling thread.
+pub(crate) fn set_tls(which: u64, base: u64) -> Result<(), Error> {
+    if base >= USER_TOP {
+        return Err(Error::BadAddress);
+    }
+    let (fs, gs) = crate::arch::syscall::user_bases();
+    match which {
+        sys::TLS_FS => crate::arch::syscall::set_user_bases(base, gs),
+        sys::TLS_GS => crate::arch::syscall::set_user_bases(fs, base),
+        _ => return Err(Error::Unknown),
+    }
+    Ok(())
 }
 
 // ----------------------------------------------------------------------------
@@ -514,8 +672,7 @@ fn call(n: u64, a: [u64; 5]) -> Result<u64, Error> {
         sys::SPAWN => {
             let name = user_str(a[0], a[1])?.to_string();
             let args = user_str(a[2], a[3])?.to_string();
-            let pid = task::current_pid();
-            let cwd = PROCS.lock().get(&pid).map(|p| p.cwd.clone()).ok_or(Error::Unknown)?;
+            let cwd = cwd()?;
             let path = find_program(&name, &cwd).ok_or(Error::NotFound)?;
             spawn(&path, &args, cwd).map(|p| p as u64)
         }
@@ -572,12 +729,12 @@ fn call(n: u64, a: [u64; 5]) -> Result<u64, Error> {
             if !fs::is_dir(&path) {
                 return Err(Error::NotDir);
             }
-            let pid = task::current_pid();
-            if let Some(p) = PROCS.lock().get_mut(&pid) {
-                p.cwd = path;
-            }
+            set_cwd(path);
             Ok(0)
         }
+        sys::SET_TLS => set_tls(a[0], a[1]).map(|_| 0),
+        sys::MAP_AT => map_fixed(a[0], a[1]).map(|_| a[0]),
+        sys::UNMAP => unmap_range(a[0], a[1]).map(|_| 0),
         _ => Err(Error::Unknown),
     }
 }

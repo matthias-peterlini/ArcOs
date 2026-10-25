@@ -6,6 +6,10 @@ This volume (sys:) holds the system and your files:
   sys:/inbox            drop a driver package (.adp) here and it installs itself
   sys:/home             your files
   sys:/home/arcscript   programs in ArcScript, the arcOS language
+  sys:/store            programs you can install (install busybox, install lua)
+
+arcOS also runs Linux and Windows x86-64 programs: see docs/compat.md.
 
 Try: help, dev, drv, vol, ls sys:/system/drivers,
 or: cd sys:/home/arcscript, then hello.as
+or: install busybox, then seq 1 5

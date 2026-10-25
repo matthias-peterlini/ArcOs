@@ -5,7 +5,7 @@
 //! [`WaitQueue`], and end with [`exit`] (or by returning). A thread's stack
 //! is freed by the next thread that runs, never by the thread itself.
 
-use crate::arch::{cpu, gdt};
+use crate::arch::{cpu, gdt, syscall};
 use crate::mem::{self, region};
 use crate::sync::IrqLock;
 use alloc::boxed::Box;
@@ -41,6 +41,35 @@ impl State {
     }
 }
 
+/// 512-byte FXSAVE area for a thread's x87/SSE state, 16-byte aligned.
+#[repr(C, align(16))]
+struct FpuArea([u8; 512]);
+
+impl FpuArea {
+    fn new() -> Box<FpuArea> {
+        // A clean initial state: FCW = 0x037F, MXCSR = 0x1F80.
+        let mut a = Box::new(FpuArea([0; 512]));
+        a.0[0..2].copy_from_slice(&0x037Fu16.to_le_bytes());
+        a.0[24..28].copy_from_slice(&0x1F80u32.to_le_bytes());
+        a
+    }
+}
+
+/// # Safety
+/// `area` must point at a 16-byte aligned 512-byte buffer.
+unsafe fn fxsave(area: *mut FpuArea) {
+    // SAFETY: guaranteed by the caller.
+    unsafe { core::arch::asm!("fxsave [{}]", in(reg) area, options(nostack, preserves_flags)) };
+}
+
+/// # Safety
+/// `area` must point at a buffer previously written by `fxsave` (or a valid
+/// initial state).
+unsafe fn fxrstor(area: *const FpuArea) {
+    // SAFETY: guaranteed by the caller.
+    unsafe { core::arch::asm!("fxrstor [{}]", in(reg) area, options(nostack, preserves_flags)) };
+}
+
 struct Thread {
     tid: Tid,
     name: String,
@@ -54,6 +83,11 @@ struct Thread {
     cr3: u64,
     /// The process this thread belongs to (0 = kernel).
     pid: u32,
+    /// User FS and GS bases, while the thread is not running.
+    fs_base: u64,
+    gs_base: u64,
+    /// x87/SSE registers, while the thread is not running.
+    fpu: Box<FpuArea>,
 }
 
 impl Thread {
@@ -150,6 +184,9 @@ pub fn init() {
             cpu_ticks: 0,
             cr3: 0,
             pid: 0,
+            fs_base: 0,
+            gs_base: 0,
+            fpu: FpuArea::new(),
         }),
     );
     s.current = tid;
@@ -184,7 +221,20 @@ pub(crate) fn spawn_in(name: &str, entry: Entry, arg: *mut c_void, cr3: u64, pid
     s.next_tid += 1;
     s.threads.insert(
         tid,
-        Box::new(Thread { tid, name: String::from(name), state: State::Ready, rsp, stack, wake_at: 0, cpu_ticks: 0, cr3, pid }),
+        Box::new(Thread {
+            tid,
+            name: String::from(name),
+            state: State::Ready,
+            rsp,
+            stack,
+            wake_at: 0,
+            cpu_ticks: 0,
+            cr3,
+            pid,
+            fs_base: 0,
+            gs_base: 0,
+            fpu: FpuArea::new(),
+        }),
     );
     s.ready.push_back(tid);
     Some(tid)
@@ -246,8 +296,19 @@ fn schedule() {
             if next == cur {
                 None
             } else {
-                let (new_rsp, top, cr3) = (n.rsp, n.stack_top(), n.cr3);
-                if n.stack != 0 {
+                let (new_rsp, top, cr3, fs, gs, has_stack) = (n.rsp, n.stack_top(), n.cr3, n.fs_base, n.gs_base, n.stack != 0);
+                let new_fpu: *const FpuArea = &*n.fpu;
+                if let Some(c) = s.threads.get_mut(&cur) {
+                    (c.fs_base, c.gs_base) = syscall::user_bases();
+                    // SAFETY: the area is this thread's own aligned buffer.
+                    unsafe { fxsave(&mut *c.fpu) };
+                }
+                // SAFETY: new_fpu is the next thread's aligned buffer; the
+                // kernel is soft-float, so nothing touches SSE before the
+                // switch completes and the new thread resumes.
+                unsafe { fxrstor(new_fpu) };
+                syscall::set_user_bases(fs, gs);
+                if has_stack {
                     gdt::set_kernel_stack(top);
                 }
                 let target = if cr3 != 0 { cr3 } else { mem::paging::kernel_pml4() };

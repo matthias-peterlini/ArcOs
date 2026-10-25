@@ -60,6 +60,7 @@ isr_stubs:
     .set vec, vec + 1
     .endr
 
+    .global isr_common
 isr_common:
     testb $3, 24(%rsp)
     jz 1f
@@ -222,6 +223,7 @@ extern "C" fn trap_dispatch(frame: &mut TrapFrame) {
             }
         }
         VEC_SYSCALL => crate::task::syscall(frame),
+        v if v as u64 == super::syscall::VEC_LINUX => crate::linux::syscall(frame),
         crate::dev::irq::MSI_FIRST..=crate::dev::irq::MSI_LAST => {
             crate::dev::irq::dispatch_msi(vector);
             super::apic::eoi();

@@ -28,6 +28,12 @@ sorgenti `.as` e i pacchetti `.arc` attraverso `arcc`, e cerca anche
 questi in `sys:/apps` (`notes` è `sys:/apps/notes.as`). Vedi
 [arcscript.md](arcscript.md).
 
+Oltre ai programmi nativi, arcOS avvia anche **programmi Linux e Windows**
+per x86-64: un eseguibile ELF collegato staticamente è un programma Linux, un
+`.exe` è un programma Windows (avviato da `winrun`). Il comando `install` copia
+programmi liberi già pronti dal negozio `sys:/store` (per esempio BusyBox e
+Lua). Tutto questo è descritto in [compat.md](compat.md).
+
 ## Scriverne uno
 
 Ogni cartella in `system/apps/` è un programma. Il `Makefile` la compila e

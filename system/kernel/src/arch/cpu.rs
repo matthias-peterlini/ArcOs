@@ -172,3 +172,23 @@ pub fn brand(out: &mut [u8; 48]) -> &str {
     let len = out.iter().position(|&b| b == 0).unwrap_or(48);
     core::str::from_utf8(&out[..len]).unwrap_or("unknown CPU").trim()
 }
+
+/// Enables the SSE unit so SSE/SSE2 instructions work. Programs built for a
+/// standard x86-64 target (every Linux or Windows program, and much C code)
+/// use them from the first instructions; without this they fault with an
+/// invalid opcode. The kernel itself is built soft-float and needs nothing,
+/// but turning SSE on is harmless for it.
+pub fn enable_sse() {
+    let (mut cr0, mut cr4): (u64, u64);
+    // SAFETY: ring 0. Clears CR0.EM (no x87 emulation), sets CR0.MP, and sets
+    // CR4.OSFXSR | CR4.OSXMMEXCPT so the CPU saves SSE state and reports SSE
+    // exceptions as #XF.
+    unsafe {
+        asm!("mov {}, cr0", out(reg) cr0, options(nomem, nostack, preserves_flags));
+        cr0 = (cr0 & !(1 << 2)) | (1 << 1);
+        asm!("mov cr0, {}", in(reg) cr0, options(nomem, nostack, preserves_flags));
+        asm!("mov {}, cr4", out(reg) cr4, options(nomem, nostack, preserves_flags));
+        cr4 |= (1 << 9) | (1 << 10);
+        asm!("mov cr4, {}", in(reg) cr4, options(nomem, nostack, preserves_flags));
+    }
+}

@@ -103,4 +103,5 @@ pub fn init() {
 pub fn set_kernel_stack(top: u64) {
     // SAFETY: called with interrupts disabled; a plain store.
     unsafe { (*TABLES.0.get()).tss.rsp[0] = top };
+    super::syscall::set_kernel_stack(top);
 }

@@ -1,0 +1,19 @@
+[package]
+name = "winrun"
+description = "arcOS program: run a Windows x64 program"
+version = "1.0.0"
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "winrun"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+arcrt.workspace = true
+
+[lints]
+workspace = true

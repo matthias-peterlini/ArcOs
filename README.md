@@ -62,6 +62,12 @@ Hello from user mode!
   pacchetti `.arc`, che la shell avvia come qualsiasi programma (`hello.as`,
   `notes add …`). Le interfacce (`view`) per ora sono mostrate come testo.
   Vedi [docs/arcscript.md](docs/arcscript.md).
+- **Programmi Linux e Windows** per x86-64, eseguiti senza modificarli: un
+  eseguibile ELF statico (musl) è un programma Linux, servito da un livello di
+  compatibilità nel kernel; un `.exe` è un programma Windows, caricato da
+  `winrun` con un `kernel32`/`msvcrt` minimi. `install` copia programmi liberi
+  già pronti dal negozio `sys:/store` (BusyBox, Lua). Vedi
+  [docs/compat.md](docs/compat.md).
 - **Rete**: ARP, IPv4, ICMP (ping), UDP, client DHCP e DNS.
 - **Shell** con cronologia, completamento con Tab e una quarantina di comandi
   (`help` li elenca).
@@ -103,6 +109,8 @@ make test-drivers  # un avvio per ogni disco, scheda di rete e controller
                 # USB emulato da QEMU, controllando che il driver funzioni
 make test-arcscript  # programmi ArcScript eseguiti su arcOS, con l'uscita
                 # controllata
+make test-compat  # un programma Linux e uno Windows eseguiti su arcOS,
+                # con l'uscita controllata
 scripts/build-qemu.sh  # un QEMU con i modelli di tools/qemu (RTL8169 e
                 # RTL8168), usato da make test-drivers per provarne i driver
 make check      # test delle librerie condivise e dello strumento host

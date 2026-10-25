@@ -13,6 +13,7 @@
 #   make test-drivers  boot once per emulated disk, network card and USB
 #                   controller and check that its driver works
 #   make test-arcscript  run ArcScript programs on arcOS and check them
+#   make test-compat   run a Linux and a Windows program on arcOS and check them
 #   make check      unit tests of the shared libraries and the host tool
 
 PROFILE  ?= release
@@ -41,7 +42,7 @@ ifeq ($(PROFILE),release)
 CARGO_PROFILE := --release
 endif
 
-.PHONY: all uefi system tools root image iso run-iso test-iso run run-q35 run-nvme run-uefi test test-uefi test-drivers test-arcscript check clean $(PACKAGES)
+.PHONY: all uefi system tools root image iso run-iso test-iso run run-q35 run-nvme run-uefi test test-uefi test-drivers test-arcscript test-compat check clean $(PACKAGES)
 
 all: image
 
@@ -118,6 +119,9 @@ test-iso: iso
 
 test-arcscript: image
 	scripts/test-arcscript.sh $(IMAGE)
+
+test-compat: image
+	scripts/test-compat.sh $(IMAGE)
 
 check:
 	cd system && $(CARGO) test --target x86_64-unknown-linux-gnu -p arcdk -p arcfs -p arcc-core -p arc-vm

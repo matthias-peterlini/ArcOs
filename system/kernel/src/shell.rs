@@ -76,7 +76,25 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("clear", "", "clear the screen (also: cls)"),
     ("restart", "", "restart the computer (also: reboot)"),
     ("shutdown", "", "turn the computer off (also: off)"),
+    ("install", "[name]", "install a program from the store (also: pkg)"),
 ];
+
+/// The BusyBox applets arcOS exposes as commands once `busybox` is installed.
+/// Running one loads `sys:/apps/busybox` with that name as `argv[0]`.
+const BUSYBOX_APPLETS: &[&str] = &[
+    "ash", "cat", "cp", "cut", "date", "dirname", "basename", "du", "env", "expr", "factor", "find", "grep", "head", "hexdump",
+    "md5sum", "mkdir", "mv", "od", "printf", "pwd", "rev", "rm", "rmdir", "seq", "sha256sum", "sleep", "sort", "tail", "tee",
+    "test", "touch", "tr", "true", "false", "uname", "uniq", "wc", "which", "whoami", "xargs", "yes",
+];
+
+/// If `name` is a BusyBox applet and `busybox` is installed, the path to it.
+fn busybox_applet(name: &str) -> Option<Path> {
+    if !BUSYBOX_APPLETS.contains(&name) {
+        return None;
+    }
+    let p = fs::abs("sys:/apps/busybox").ok()?;
+    fs::exists(&p).then_some(p)
+}
 
 pub fn run() -> ! {
     let mut sh = Shell { cwd: Path::root(if fs::volume("sys").is_some() { "sys" } else { "ram" }), history: Vec::new() };
@@ -651,10 +669,13 @@ impl Shell {
                 println!("{WARN}this computer cannot be turned off by software; it is safe to switch it off now{RESET}");
                 crate::arch::cpu::halt_forever();
             }
+            "install" | "pkg" => self.install(&rest),
             _ => {
                 let prog_args = line.trim_start()[args[0].len()..].trim();
                 if crate::user::find_program(&args[0], &self.cwd).is_some() {
                     self.run_program(&args[0], prog_args);
+                } else if let Some(busybox) = busybox_applet(&args[0]) {
+                    self.run_applet(busybox, &args[0], prog_args);
                 } else {
                     println!("{ERR}{cmd}: unknown command{RESET} {DIM}(type help){RESET}");
                 }
@@ -667,10 +688,69 @@ impl Shell {
             println!("{ERR}{name}: no such program{RESET}");
             return;
         };
-        match crate::user::run_foreground(&path, args, self.cwd.clone()) {
+        self.report(name, crate::user::run_foreground(&path, args, self.cwd.clone()));
+    }
+
+    /// Runs a BusyBox applet (`ls`, `cat`, …) out of the installed `busybox`.
+    fn run_applet(&self, busybox: Path, applet: &str, args: &str) {
+        self.report(applet, crate::user::run_applet_foreground(&busybox, applet, args, self.cwd.clone()));
+    }
+
+    fn report(&self, name: &str, result: Result<i64, arcdk::syscall::Error>) {
+        match result {
             Ok(0) => {}
             Ok(-130) => println!("{DIM}^C{RESET}"),
             Ok(code) => println!("{DIM}{name} ended with code {code}{RESET}"),
+            Err(e) => println!("{ERR}{name}: {}{RESET}", e.as_str()),
+        }
+    }
+
+    /// Installs a program from the store (`sys:/store`) into `sys:/apps`, so
+    /// it can be run by name. With no argument, lists the store.
+    fn install(&self, args: &[&str]) {
+        let index = match fs::abs("sys:/store/index").and_then(|p| fs::read_file(&p)) {
+            Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+            Err(_) => {
+                println!("{DIM}no store on this system (sys:/store is empty){RESET}");
+                return;
+            }
+        };
+        // Each line: name <tab> file <tab> description.
+        let entries: Vec<(&str, &str, &str)> = index
+            .lines()
+            .filter_map(|l| {
+                let mut it = l.splitn(3, '\t');
+                Some((it.next()?.trim(), it.next()?.trim(), it.next().unwrap_or("").trim()))
+            })
+            .filter(|(n, f, _)| !n.is_empty() && !f.is_empty())
+            .collect();
+        let Some(&name) = args.first() else {
+            println!("Programs you can install (install <name>):");
+            for (n, _, desc) in &entries {
+                let got = fs::abs(&alloc::format!("sys:/apps/{n}")).is_ok_and(|p| fs::exists(&p));
+                let mark = if got { " (installed)" } else { "" };
+                println!("  {BOLD}{n:<12}{RESET}{DIM}{desc}{mark}{RESET}");
+            }
+            return;
+        };
+        let Some((n, file, _)) = entries.iter().find(|(n, _, _)| *n == name) else {
+            println!("{ERR}no package named {name}{RESET} {DIM}(type install){RESET}");
+            return;
+        };
+        let (from, to) = match (fs::abs(&alloc::format!("sys:/store/{file}")), fs::abs(&alloc::format!("sys:/apps/{n}"))) {
+            (Ok(f), Ok(t)) => (f, t),
+            _ => {
+                println!("{ERR}{name}: bad path{RESET}");
+                return;
+            }
+        };
+        match fs::copy_file(&from, &to) {
+            Ok(()) => {
+                println!("installed {BOLD}{n}{RESET} → sys:/apps/{n}");
+                if *n == "busybox" {
+                    println!("{DIM}{} commands are now available (ls, cat, grep, …){RESET}", BUSYBOX_APPLETS.len());
+                }
+            }
             Err(e) => println!("{ERR}{name}: {}{RESET}", e.as_str()),
         }
     }

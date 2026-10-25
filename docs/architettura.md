@@ -182,3 +182,22 @@ kernel con `int 0x80`. Il kernel controlla ogni puntatore che riceve. Un
 errore del programma (page fault, istruzione non valida...) termina solo
 quel processo e ne libera la memoria. L'elenco delle chiamate è in
 [programmi.md](programmi.md).
+
+Ogni thread porta con sé, oltre ai registri, le basi dei segmenti FS e GS e
+lo stato dell'unità SSE (salvato e ripristinato a ogni cambio di contesto con
+`fxsave`/`fxrstor`); FS e GS servono alla memoria locale del thread, che i
+programmi C e C++ usano di continuo. Il kernel abilita SSE all'avvio
+(`arch::cpu::enable_sse`), così le istruzioni SSE dei programmi comuni non
+sollevano un'eccezione.
+
+### Programmi Linux e Windows
+
+Oltre ai programmi nativi, il kernel riconosce altri due tipi di eseguibile
+dal loro contenuto. Un ELF che non è un `.app` è un **programma Linux**:
+`linux.rs` lo carica (ET_EXEC o PIE statico, con stack iniziale e vettore
+ausiliario) e serve le chiamate di sistema Linux che arrivano sull'istruzione
+`syscall` (`arch/syscall.rs`), traducendole nelle operazioni di arcOS. Un file
+che inizia con `MZ` è un **programma Windows**: il kernel avvia `winrun`, un
+normale programma di arcOS che carica il `.exe`, risolve le importazioni verso
+un `kernel32`/`msvcrt` scritti da zero e salta al punto d'ingresso. I
+dettagli, e cosa è gestito, sono in [compat.md](compat.md).

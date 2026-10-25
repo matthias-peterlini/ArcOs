@@ -16,6 +16,7 @@ mod console;
 mod dev;
 mod driver;
 mod fs;
+mod linux;
 mod mem;
 mod net;
 mod shell;
@@ -79,8 +80,10 @@ extern "C" fn kmain(boot_phys: u64) -> ! {
         cpu::halt_forever();
     }
 
+    cpu::enable_sse();
     gdt::init();
     idt::init();
+    arch::syscall::init();
     pic::init();
     pit::init();
     mem::init(&boot);

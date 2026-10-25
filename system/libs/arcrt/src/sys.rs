@@ -21,3 +21,23 @@ pub fn check(ret: i64) -> crate::Result<u64> {
         Ok(ret as u64)
     }
 }
+
+/// Reserves `bytes` of zeroed memory at a fixed address (`MAP_AT`).
+pub fn map_at(addr: u64, bytes: u64) -> crate::Result<()> {
+    check(call(MAP_AT, addr, bytes, 0, 0, 0)).map(|_| ())
+}
+
+/// Reserves `bytes` of zeroed memory at an address the kernel chooses (`MAP`).
+pub fn map(bytes: u64) -> crate::Result<u64> {
+    check(call(MAP, bytes, 0, 0, 0, 0))
+}
+
+/// Gives memory from [`map`]/[`map_at`] back to the kernel.
+pub fn unmap(addr: u64, bytes: u64) -> crate::Result<()> {
+    check(call(UNMAP, addr, bytes, 0, 0, 0)).map(|_| ())
+}
+
+/// Sets the base of the thread's FS or GS segment (`TLS_FS` / `TLS_GS`).
+pub fn set_tls(which: u64, base: u64) -> crate::Result<()> {
+    check(call(SET_TLS, which, base, 0, 0, 0)).map(|_| ())
+}

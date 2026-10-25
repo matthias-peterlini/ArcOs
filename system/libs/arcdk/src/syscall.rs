@@ -52,6 +52,18 @@ pub const RENAME: u64 = 20;
 pub const GET_CWD: u64 = 21;
 /// (path, len)
 pub const SET_CWD: u64 = 22;
+/// (TLS_FS or TLS_GS, base): sets the base of the FS or GS segment of the
+/// calling thread (thread-local storage; the Windows layer keeps its thread
+/// block at GS).
+pub const SET_TLS: u64 = 23;
+/// (address, bytes) -> address: fresh zeroed memory at a fixed, page-aligned
+/// address; `Exists` if part of the range is already in use.
+pub const MAP_AT: u64 = 24;
+/// (address, bytes): gives back memory from MAP or MAP_AT.
+pub const UNMAP: u64 = 25;
+
+pub const TLS_FS: u64 = 0;
+pub const TLS_GS: u64 = 1;
 
 pub const MODE_READ: u64 = 0;
 /// Create or truncate.
