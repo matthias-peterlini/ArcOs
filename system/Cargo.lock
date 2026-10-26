@@ -18,7 +18,7 @@ dependencies = [
 
 [[package]]
 name = "arc-kernel"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "arcdk",
  "arcfs",
@@ -47,33 +47,33 @@ version = "0.5.0"
 
 [[package]]
 name = "arcdk"
-version = "0.4.0"
+version = "0.5.0"
 
 [[package]]
 name = "arcdrv"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "arcdk",
 ]
 
 [[package]]
 name = "arcfs"
-version = "0.4.0"
+version = "0.5.0"
 
 [[package]]
 name = "arcgfx"
-version = "0.4.0"
+version = "0.5.0"
 
 [[package]]
 name = "arcrt"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "arcdk",
 ]
 
 [[package]]
 name = "arcui"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "arcdk",
  "arcgfx",
@@ -82,14 +82,14 @@ dependencies = [
 
 [[package]]
 name = "arcusb"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "arcdrv",
 ]
 
 [[package]]
 name = "arcvirtio"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "arcdrv",
 ]

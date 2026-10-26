@@ -2,15 +2,17 @@ arcOS: un sistema operativo per PC x86-64 scritto da zero, con il linguaggio Arc
 
 ![La scrivania di arcOS](https://raw.githubusercontent.com/matthias-peterlini/ArcOs/main/docs/screenshots/scrivania.jpg)
 
-## Novità della 0.4
+## Novità della 0.5
 
-- **Audio**: driver per Intel HD Audio (quasi ogni PC dal 2005) e AC'97. Una breve melodia all'avvio della scrivania (si può spegnere), volume nelle Impostazioni, `play file.wav`, `tone` e `volume` nel Terminale.
-- **Risoluzione dello schermo**: driver per le schede video di QEMU, Bochs, VirtualBox (VBoxVGA e VMSVGA), VMware e virtio-gpu. *Impostazioni → Schermo* cambia la risoluzione al volo (fino a 2560×1600) e arcOS la ricorda; nel Terminale `display 1920x1080`.
-- **Lettori di schede SD**: schede SD, SDHC, SDXC e MMC nei lettori standard dei portatili, inserite ed estratte a sistema avviato.
-- **Corretto**: il puntatore del mouse si muoveva al contrario in verticale.
-- Il controllo dei volumi (`check`) è molto più veloce sui dischi grandi.
+- **Una scrivania alla macOS**: il dock ingrandisce le icone sotto il puntatore e fa rimbalzare quella dell'app che parte; finestre animate (si aprono, si chiudono, volano nel dock, si ingrandiscono); Launchpad con sfocatura e zoom; centro di controllo con il volume; notifiche; Alt+Tab e Ctrl+Q; finestre ridimensionabili.
+- **Niente righe di comando fuori dal Terminale**: ogni icona apre un'app grafica, e un errore grave mostra una schermata semplice.
+- **Nuove app**: Editor di testo, Note, Promemoria, Calendario (con le feste italiane), Orologio (città, cronometro, timer), Calcolatrice, Foto, Musica (con tre brani di esempio), Monitor attività; File con il menu del tasto destro (rinomina, Cestino, nuova cartella).
+- **Il Negozio installa app vere**: 2048, Campo minato, Serpente, Sudoku, Tris e Disegno, programmi separati con le loro finestre; categorie, pagina di ogni app, installa, apri, rimuovi. I programmi possono aprire finestre con la nuova libreria `arcui`.
+- **Corretto**: il mouse USB poteva smettere di funzionare dopo qualche secondo; i clic rapidi durante un'animazione potevano andare persi.
 
-Ancora senza driver: Wi-Fi, schede video vere (Intel, AMD, nVidia: si usa il framebuffer del firmware), schede di rete a 2,5 Gbit, batteria dei portatili. Lo stato di ogni driver è in [docs/driver.md](https://github.com/matthias-peterlini/ArcOs/blob/main/docs/driver.md#hardware-supportato).
+![Il Negozio](https://raw.githubusercontent.com/matthias-peterlini/ArcOs/main/docs/screenshots/negozio.jpg)
+
+Ancora senza driver: Wi-Fi, schede video vere (Intel, AMD, nVidia: si usa il framebuffer del firmware), batteria dei portatili. Lo stato di ogni driver è in [docs/driver.md](https://github.com/matthias-peterlini/ArcOs/blob/main/docs/driver.md#hardware-supportato).
 
 ## File
 

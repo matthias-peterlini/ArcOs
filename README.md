@@ -7,7 +7,7 @@
 Boot loader, kernel, file system, driver, interfaccia grafica e linguaggio
 di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
 
-[**Scarica la versione 0.4.0**](https://github.com/matthias-peterlini/ArcOs/releases/latest) ·
+[**Scarica la versione 0.5.0**](https://github.com/matthias-peterlini/ArcOs/releases/latest) ·
 [Documentazione](docs/) ·
 [Architettura](docs/architettura.md)
 
