@@ -193,7 +193,7 @@ impl TiclyDo {
             let (lh, _) = text::metrics(Font::Strong);
             text::draw(c, if sel { Font::Strong } else { Font::Body }, r.x + 48, r.y + (r.h - lh) / 2, name, if sel { TEXT } else { TEXT_DIM });
         }
-        let caption = if self.account.is_some() { "Sincronizzato" } else { "Su questo computer" };
+        let caption = if self.account.is_some() { "Account ticly" } else { "Su questo computer" };
         text::draw(c, Font::Small, area.x + 32, area.bottom() - 162, caption, TEXT_DIM);
         let ur = Self::user_rect(area);
         let ex = Self::exit_rect(area);
@@ -204,8 +204,8 @@ impl TiclyDo {
             }
             None => {
                 c.fill_round(ur, 16, ui::PANEL);
-                text::draw(c, Font::Small, ur.x + 16, ur.y + 12, "Collega il tuo account ticly", TEXT_DIM);
-                text::draw(c, Font::Small, ur.x + 16, ur.y + 32, "per il profilo e i crediti AI.", TEXT_FAINT);
+                text::draw(c, Font::Small, ur.x + 16, ur.y + 12, "Accedi con il tuo account", TEXT_DIM);
+                text::draw(c, Font::Small, ur.x + 16, ur.y + 32, "ticly per vedere il profilo.", TEXT_FAINT);
                 ui::button(c, ex, "Accedi a ticly", true, self.hover == Some(ex));
             }
         }
@@ -457,14 +457,11 @@ impl TiclyDo {
         let pw = ui::caps_width(&plan) + 24;
         c.fill_round(Rect::new(card.x + 136, card.y + 108, pw, 24), 12, 0x40E0_662E);
         ui::caps(c, card.x + 148, card.y + 115, &plan, TEXT);
-        let rows = [
-            ("Crediti AI", tui::thousands(a.ai_tokens)),
-            ("ID account", a.id.chars().take(18).collect::<String>() + "…"),
-            ("Sessione valida fino a", {
-                let d = time::from_epoch(a.expires.saturating_sub(crate::linux::UNIX_2000));
-                format!("{} {} alle {:02}:{:02}", d.day, crate::gui::desktop::MONTHS[(d.month as usize + 11) % 12], d.hour, d.min)
-            }),
-        ];
+        let created = {
+            let d = time::from_epoch(a.created.saturating_sub(crate::linux::UNIX_2000));
+            format!("{} {} {}", d.day, crate::gui::desktop::MONTHS[(d.month as usize + 11) % 12], d.year)
+        };
+        let rows = [("Account", String::from("Su questo computer")), ("ID account", a.id.clone()), ("Creato il", created)];
         let mut y = card.bottom() + 24;
         for (k, v) in rows {
             let r = Rect::new(m.x + 56, y, m.w - 112, 50);
@@ -473,7 +470,7 @@ impl TiclyDo {
             text::draw_right(c, Font::Strong, r.right() - 18, r.y + 15, &v, TEXT);
             y += 58;
         }
-        text::draw(c, Font::Small, m.x + 56, y + 10, "Un unico account per Do, AI, Music, Enchat e Move: gestiscilo su login.ticly.it.", TEXT_FAINT);
+        text::draw(c, Font::Small, m.x + 56, y + 10, "I tuoi dati (attività, note, calendario) restano nei file di questo computer.", TEXT_FAINT);
     }
 }
 

@@ -2,13 +2,14 @@ arcOS: un sistema operativo per PC x86-64 scritto da zero, con il linguaggio Arc
 
 ![La scrivania di arcOS](https://raw.githubusercontent.com/matthias-peterlini/ArcOs/main/docs/screenshots/scrivania.jpg)
 
-## Novità della 0.5
+## Novità della 0.6
 
-- **Una scrivania alla macOS**: il dock ingrandisce le icone sotto il puntatore e fa rimbalzare quella dell'app che parte; finestre animate (si aprono, si chiudono, volano nel dock, si ingrandiscono); Launchpad con sfocatura e zoom; centro di controllo con il volume; notifiche; Alt+Tab e Ctrl+Q; finestre ridimensionabili.
-- **Niente righe di comando fuori dal Terminale**: ogni icona apre un'app grafica, e un errore grave mostra una schermata semplice.
-- **Nuove app**: Editor di testo, Note, Promemoria, Calendario (con le feste italiane), Orologio (città, cronometro, timer), Calcolatrice, Foto, Musica (con tre brani di esempio), Monitor attività; File con il menu del tasto destro (rinomina, Cestino, nuova cartella).
-- **Il Negozio installa app vere**: 2048, Campo minato, Serpente, Sudoku, Tris e Disegno, programmi separati con le loro finestre; categorie, pagina di ogni app, installa, apri, rimuovi. I programmi possono aprire finestre con la nuova libreria `arcui`.
-- **Corretto**: il mouse USB poteva smettere di funzionare dopo qualche secondo; i clic rapidi durante un'animazione potevano andare persi.
+- **L'ecosistema ticly**: ticly Do (panoramica, attività, note, calendario per mese, settimana e giorno, profilo), ticly AI (l'interfaccia di ai.ticly.it con le chat salvate; **in anteprima: le risposte non sono ancora collegate**) e il **ticly browser**, con un unico account ticly. Per ora l'account e i dati restano sul computer: nessuna di queste app usa servizi esterni.
+- **Il ticly browser** con un motore web scritto da zero (`arcweb`): HTML, CSS con flexbox, grid, tabelle e media query, immagini PNG, JPEG e GIF; schede, cronologia, ricerca DuckDuckGo, pagina iniziale ticly, trova nella pagina, moduli, cookie e download. JavaScript non c'è.
+- **Rete vera**: TCP, TLS 1.3 con certificati verificati, HTTP e HTTPS.
+- **Il Negozio scarica app vere**, con la ricerca: programmi Linux e Windows oltre alle app di arcOS.
+- **Lo stile arc**: il logo ARC, il carattere Plus Jakarta Sans, pannelli ticly in vetro con bagliore ruggine, nuovi sfondi; le app a schermo intero (F11) non hanno barre in alto.
+- **Più compatibilità Linux**: thread, futex, mmap, poll e socket.
 
 ![Il Negozio](https://raw.githubusercontent.com/matthias-peterlini/ArcOs/main/docs/screenshots/negozio.jpg)
 

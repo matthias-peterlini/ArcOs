@@ -1,6 +1,7 @@
-//! ticly AI: chats with the models of the ticly AI Gateway, with the
-//! account's shared credits, in the look of ai.ticly.it. Answers stream in
-//! as they are written; chats are kept in `sys:/home/.ticly/ai`.
+//! ticly AI, in the look of ai.ticly.it: chats kept in
+//! `sys:/home/.ticly/ai`, a choice of models, answers that stream in as they
+//! are written. No model is connected yet, so every question gets a note
+//! saying so (see [`ticly::chat`]).
 
 use super::ticly::{self as tui, Login};
 use crate::dev::input::{Key, KeyEvent};
@@ -91,13 +92,6 @@ struct Stream {
     thinking: bool,
 }
 
-/// Account data fetched in the background.
-#[derive(Default)]
-struct Remote {
-    credits: Option<(i64, i64, String)>,
-    models: Option<Vec<Model>>,
-}
-
 pub struct TiclyAi {
     account: Option<Account>,
     login: Login,
@@ -110,8 +104,6 @@ pub struct TiclyAi {
     models: Vec<Model>,
     model_menu: bool,
     stream: Option<Arc<IrqLock<Stream>>>,
-    remote: Arc<IrqLock<Remote>>,
-    credits: Option<(i64, i64, String)>,
     scroll: i32,
     content_h: i32,
     hover: Option<Rect>,
@@ -120,7 +112,7 @@ pub struct TiclyAi {
 impl TiclyAi {
     pub fn new() -> TiclyAi {
         let models = ticly::default_models();
-        let mut t = TiclyAi {
+        let t = TiclyAi {
             account: ticly::account(),
             login: Login::new(),
             chats: load_chats(),
@@ -132,30 +124,11 @@ impl TiclyAi {
             models,
             model_menu: false,
             stream: None,
-            remote: Arc::new(IrqLock::new(Remote::default())),
-            credits: None,
             scroll: 0,
             content_h: 0,
             hover: None,
         };
-        t.refresh_account();
         t
-    }
-
-    /// Credits and models, fetched in the background.
-    fn refresh_account(&mut self) {
-        let Some(a) = self.account.clone() else { return };
-        if !crate::net::online() {
-            return;
-        }
-        let out = self.remote.clone();
-        crate::task::spawn("ticly-account", move || {
-            let credits = ticly::usage(&a.token).ok().map(|(r, m, _, n)| (r, m, n));
-            let models = ticly::models(&a.token).ok();
-            let mut o = out.lock();
-            o.credits = credits;
-            o.models = models;
-        });
     }
 
     fn main_rect(area: Rect) -> Rect {
@@ -269,7 +242,9 @@ impl TiclyAi {
     }
 
     fn send(&mut self, text_in: String) {
-        let Some(a) = self.account.clone() else { return };
+        if self.account.is_none() {
+            return;
+        }
         let text_in = String::from(text_in.trim());
         if text_in.is_empty() || self.stream.is_some() {
             return;
@@ -301,18 +276,7 @@ impl TiclyAi {
         self.scroll = i32::MAX;
         let model = self.model.id.clone();
         crate::task::spawn("ticly-ai", move || {
-            let mut on = |c: ticly::Chunk<'_>| {
-                let mut s = st.lock();
-                match c {
-                    ticly::Chunk::Text(t) => {
-                        s.thinking = false;
-                        s.text.push_str(t);
-                    }
-                    ticly::Chunk::Reasoning => s.thinking = true,
-                }
-                true
-            };
-            let r = ticly::chat(&a.token, &model, &history, &mut on);
+            let r = ticly::chat(&model, &history);
             let mut s = st.lock();
             if let Err(e) = r {
                 s.error = Some(e);
@@ -338,7 +302,6 @@ impl TiclyAi {
         if done {
             self.stream = None;
             self.chats[i].save();
-            self.refresh_account();
         }
         self.scroll = i32::MAX;
         true
@@ -364,8 +327,13 @@ impl TiclyAi {
                 text::draw(c, Font::Small, r.x + 14, r.y + 16 + k as i32 * 18, l, TEXT_DIM);
             }
         }
-        let (rem, max, renew) = self.credits.clone().unwrap_or((a.ai_tokens, a.ai_tokens.max(0), String::new()));
-        tui::credits_box(c, Self::credits_rect(area), rem, max, &tui::renew_text(&renew));
+        // No model answers yet: say so where the credits will be.
+        let cr = Self::credits_rect(area);
+        c.fill_round(cr, 16, ui::PANEL);
+        ui::caps(c, cr.x + 16, cr.y + 16, "Anteprima", TEXT_FAINT);
+        for (k, l) in text::wrap(Font::Small, "Le risposte non sono ancora disponibili.", cr.w - 32).iter().take(2).enumerate() {
+            text::draw(c, Font::Small, cr.x + 16, cr.y + 36 + k as i32 * 17, l, TEXT_DIM);
+        }
         tui::user_card(c, Self::user_rect(area), a);
         let so = Self::sign_out_rect(area);
         tui::sign_out_row(c, so, "Esci", self.hover == Some(so));
@@ -734,28 +702,13 @@ impl App for TiclyAi {
     }
 
     fn tick(&mut self) -> bool {
-        let mut changed = false;
         if self.account.is_none() {
             if let Some(a) = self.login.poll() {
                 self.account = Some(a);
-                self.refresh_account();
-            }
+                }
             return true;
         }
-        let r = core::mem::take(&mut *self.remote.lock());
-        if let Some(cr) = r.credits {
-            self.credits = Some(cr);
-            changed = true;
-        }
-        if let Some(ms) = r.models {
-            if !ms.is_empty() {
-                let keep = self.model.id.clone();
-                self.models = ms;
-                self.model = self.models.iter().find(|m| m.id == keep).or(self.models.iter().find(|m| m.unlocked)).cloned().unwrap_or(self.model.clone());
-                changed = true;
-            }
-        }
-        changed || self.stream.is_some() || true
+        true
     }
 
     fn animating(&self) -> bool {

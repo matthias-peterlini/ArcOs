@@ -330,6 +330,7 @@ pub fn fetch_once(req: &Request<'_>) -> Result<Response, String> {
 
 /// Sends a request and hands a successful reply's body to `sink` piece by
 /// piece; an unsuccessful one comes back whole in the response.
+#[allow(dead_code)] // for streamed answers (ticly AI, once it is connected)
 pub fn stream(req: &Request<'_>, sink: Sink<'_>) -> Result<Response, String> {
     let url = Url::parse(req.url).ok_or_else(|| format!("not a web address: {}", req.url))?;
     let (status, headers, body) = once(&url, req.method, req.headers, req.body, &mut |_, _| true, Some(sink))?;

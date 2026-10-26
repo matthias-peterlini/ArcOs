@@ -7,7 +7,7 @@
 Boot loader, kernel, file system, driver, interfaccia grafica e linguaggio
 di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
 
-[**Scarica la versione 0.5.0**](https://github.com/matthias-peterlini/ArcOs/releases/latest) ·
+[**Scarica la versione 0.6.0**](https://github.com/matthias-peterlini/ArcOs/releases/latest) ·
 [Documentazione](docs/) ·
 [Architettura](docs/architettura.md)
 
@@ -29,9 +29,9 @@ di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
 - **Le app di ogni giorno**: File, Editor di testo, Note, Promemoria,
   Calendario, Orologio, Calcolatrice, Foto, Musica, Monitor attività.
 - **L'ecosistema ticly**: ticly Do (attività, note, calendario), ticly AI
-  (chat con i modelli del gateway ticly) e il ticly browser, con un unico
-  account ticly; il browser usa un motore web (HTML, CSS, immagini) scritto
-  da zero.
+  (in anteprima: le risposte non sono ancora collegate) e il ticly browser,
+  con un unico account ticly salvato sul computer; il browser usa un motore
+  web (HTML, CSS, immagini) scritto da zero.
 - **Un Negozio con app vere**: giochi (2048, Campo minato, Serpente, Sudoku,
   Tris) e Disegno, programmi separati che si installano con un clic e aprono
   le loro finestre.

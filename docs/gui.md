@@ -77,7 +77,7 @@ si ridisegna a ogni fotogramma.
 | App | Cosa fa |
 |---|---|
 | ticly Do | il workspace di ticly: panoramica, attività, note e calendario (mese, settimana, giorno) sugli stessi file di Promemoria, Note e Calendario; profilo dell'account |
-| ticly AI | chat con i modelli del gateway ticly, con i crediti dell'account; le risposte arrivano mentre vengono scritte; chat in `sys:/home/.ticly/ai` |
+| ticly AI | l'interfaccia di ai.ticly.it con le chat salvate in `sys:/home/.ticly/ai`; per ora nessun modello risponde (il collegamento al servizio ticly arriverà) |
 | ticly browser | il browser di ticly: schede, barra degli indirizzi (indirizzi o ricerche DuckDuckGo), avanti/indietro, ricarica, pagina iniziale ticly, trova nella pagina (Ctrl+F), moduli, `<select>`, cookie; i file non visualizzabili vanno in `Scaricati` |
 | File | sfoglia i volumi: risorse a sinistra, cartelle e file a destra; doppio clic apre una cartella o il file con l'app giusta; tasto destro per aprire, rinominare (anche F2), spostare nel Cestino (Canc), creare una cartella; nel Cestino eliminare o svuotare |
 | Editor di testo | file di testo con selezione, copia e incolla, scorrimento; Nuovo, Apri, Salva (Ctrl+N, Ctrl+O, Ctrl+S) con la scelta del file; alla chiusura salva da solo |
@@ -94,6 +94,12 @@ si ridisegna a ogni fotogramma.
 | Monitor attività | i programmi in esecuzione, il processore e la memoria nell'ultimo minuto; un programma si può terminare |
 | Info sistema | panoramica, dispositivi con i loro driver, dischi con lo spazio libero |
 | Terminale | la shell di arcOS: l'unico posto dove si vedono le righe di comando |
+
+L'account ticly per ora vive solo su questo computer: «Crea un account»
+(nome, e-mail, password) lo salva in `sys:/system/ticly/accounts.json`, con
+la password come HMAC-SHA-256 ripetuto 4096 volte con un sale casuale; chi
+ha fatto l'accesso è in `sys:/system/ticly/session`. Nessuna di queste app
+usa la rete.
 
 ### Il motore web
 
