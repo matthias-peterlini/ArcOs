@@ -317,13 +317,32 @@ impl<'a> Request<'a> {
 /// cancels it.
 pub type Progress<'p> = &'p mut dyn FnMut(u64, Option<u64>) -> bool;
 
+/// Receives the body of a reply as it arrives (server-sent events, long
+/// downloads). Returning false stops reading.
+pub type Sink<'s> = &'s mut dyn FnMut(&[u8]) -> bool;
+
+/// Sends a request without following redirects (to read a `Location`).
+pub fn fetch_once(req: &Request<'_>) -> Result<Response, String> {
+    let url = Url::parse(req.url).ok_or_else(|| format!("not a web address: {}", req.url))?;
+    let (status, headers, body) = once(&url, req.method, req.headers, req.body, &mut |_, _| true, None)?;
+    Ok(Response { status, headers, body, url })
+}
+
+/// Sends a request and hands a successful reply's body to `sink` piece by
+/// piece; an unsuccessful one comes back whole in the response.
+pub fn stream(req: &Request<'_>, sink: Sink<'_>) -> Result<Response, String> {
+    let url = Url::parse(req.url).ok_or_else(|| format!("not a web address: {}", req.url))?;
+    let (status, headers, body) = once(&url, req.method, req.headers, req.body, &mut |_, _| true, Some(sink))?;
+    Ok(Response { status, headers, body, url })
+}
+
 /// Sends a request and reads the whole reply, following redirects.
 pub fn fetch(req: &Request<'_>, progress: Progress<'_>) -> Result<Response, String> {
     let mut url = Url::parse(req.url).ok_or_else(|| format!("not a web address: {}", req.url))?;
     let mut method = req.method;
     let mut body = req.body;
     for _ in 0..10 {
-        let (status, headers, data) = once(&url, method, req.headers, body, progress)?;
+        let (status, headers, data) = once(&url, method, req.headers, body, progress, None)?;
         if matches!(status, 301 | 302 | 303 | 307 | 308) {
             if let Some(loc) = headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("location")).map(|(_, v)| v.clone()) {
                 url = url.join(&loc).ok_or("bad redirect")?;
@@ -350,7 +369,7 @@ pub fn get(url: &str) -> Result<Response, String> {
 
 type Reply = (u16, Vec<(String, String)>, Vec<u8>);
 
-fn once(url: &Url, method: &str, extra: &[(&str, &str)], body: Option<&[u8]>, progress: Progress<'_>) -> Result<Reply, String> {
+fn once(url: &Url, method: &str, extra: &[(&str, &str)], body: Option<&[u8]>, progress: Progress<'_>, mut sink: Option<Sink<'_>>) -> Result<Reply, String> {
     let mut s = Stream::open(url)?;
     let host = if url.port == if url.https { 443 } else { 80 } { url.host.clone() } else { format!("{}:{}", url.host, url.port) };
     let mut req = format!("{method} {} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: {USER_AGENT}\r\nAccept: */*\r\nAccept-Encoding: gzip\r\nConnection: close\r\n", url.path);
@@ -377,9 +396,12 @@ fn once(url: &Url, method: &str, extra: &[(&str, &str)], body: Option<&[u8]>, pr
     let length: Option<u64> = get("content-length").and_then(|v| v.parse().ok());
     let mut data = Vec::new();
     let no_body = method == "HEAD" || status == 204 || status == 304 || (100..200).contains(&status);
+    if !(200..300).contains(&status) {
+        sink = None;
+    }
     if !no_body {
         if chunked {
-            read_chunked(&mut s, &mut data, progress)?;
+            read_chunked(&mut s, &mut data, progress, &mut sink)?;
         } else {
             let mut buf = alloc::vec![0u8; 32768];
             if let Some(len) = length {
@@ -393,13 +415,20 @@ fn once(url: &Url, method: &str, extra: &[(&str, &str)], body: Option<&[u8]>, pr
                 if n == 0 {
                     break;
                 }
+                if let Some(f) = sink.as_mut() {
+                    if !f(&buf[..n]) {
+                        s.close();
+                        return Ok((status, headers, data));
+                    }
+                    continue;
+                }
                 data.extend_from_slice(&buf[..n]);
                 if !progress(data.len() as u64, length) {
                     s.close();
                     return Err("cancelled".to_string());
                 }
             }
-            if let Some(l) = length {
+            if let (Some(l), None) = (length, sink.as_ref()) {
                 if (data.len() as u64) < l {
                     s.close();
                     return Err("the download was cut short".to_string());
@@ -432,7 +461,7 @@ fn read_line(s: &mut Stream) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&line).into_owned())
 }
 
-fn read_chunked(s: &mut Stream, data: &mut Vec<u8>, progress: Progress<'_>) -> Result<(), String> {
+fn read_chunked(s: &mut Stream, data: &mut Vec<u8>, progress: Progress<'_>, sink: &mut Option<Sink<'_>>) -> Result<(), String> {
     let mut buf = alloc::vec![0u8; 32768];
     loop {
         let line = read_line(s)?;
@@ -448,8 +477,14 @@ fn read_chunked(s: &mut Stream, data: &mut Vec<u8>, progress: Progress<'_>) -> R
             if n == 0 {
                 return Err("the download was cut short".to_string());
             }
-            data.extend_from_slice(&buf[..n]);
             left -= n;
+            if let Some(f) = sink.as_mut() {
+                if !f(&buf[..n]) {
+                    return Ok(());
+                }
+                continue;
+            }
+            data.extend_from_slice(&buf[..n]);
             if !progress(data.len() as u64, None) {
                 return Err("cancelled".to_string());
             }

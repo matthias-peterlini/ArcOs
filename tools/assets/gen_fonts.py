@@ -29,7 +29,7 @@ import os
 JAKARTA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts", "PlusJakartaSans-")
 DEJAVU = "/usr/share/fonts/truetype/dejavu/"
 
-TEXT = [chr(c) for c in range(0x20, 0x7F)] + list("àèéìòùÀÈÉÌÒÙçÇ°·…–—€«»‘’“”×÷±²³")
+TEXT = [chr(c) for c in range(0x20, 0x7F)] + list("àèéìòùÀÈÉÌÒÙçÇ°·…–—€«»‘’“”×÷±²³•©−★→›")
 DIGITS = list(" 0123456789:.,-")
 
 # (file, pixel size, characters) — the order is the font id in the kernel.
@@ -53,6 +53,10 @@ def render(path, size, chars):
     for ch in chars:
         left, top, right, bottom = font.getbbox(ch, anchor="ls")
         advance = round(font.getlength(ch))
+        if ch == " ":
+            # Jakarta's space is a hair narrow once advances are rounded to
+            # whole pixels: words run together at the small sizes.
+            advance = max(advance, round(size * 0.28))
         w, h = max(0, right - left), max(0, bottom - top)
         if w == 0 or h == 0:
             glyphs.append((ord(ch), 0, 0, 0, 0, advance, b""))

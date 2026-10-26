@@ -398,6 +398,21 @@ def arc_logo():
     return over(img, im)
 
 
+def ticly_app(word, glow, glow2):
+    """A ticly app: the dark warm tile with a coloured glow and its wordmark."""
+    img = tile("#2B1F1B", "#0F0B0A")
+    im, d = layer()
+    d.ellipse((60, 210, 452, 600), fill=hexc(glow))
+    d.ellipse((240, 120, 520, 400), fill=hexc(glow2))
+    im = im.filter(ImageFilter.GaussianBlur(70))
+    clip_to_tile(im)
+    over(img, im)
+    im, d = layer()
+    f = ImageFont.truetype(BOLD, 196)
+    d.text((256, 262), word, font=f, fill=WHITE, anchor="mm")
+    return over(img, im)
+
+
 def font_glyph(img, ch, size, color, dy=0):
     im, d = layer()
     f = ImageFont.truetype(BOLD, size)
@@ -943,6 +958,8 @@ ICONS = [
     ("terminal", terminal),
     ("files", files),
     ("arc", arc_logo),
+    ("ticly-do", lambda: ticly_app("Do", "#C2481C", "#E0662E")),
+    ("ticly-ai", lambda: ticly_app("Ai", "#7C3AED", "#C04CD8")),
     ("info", info),
     ("code", code),
     ("help", help_icon),

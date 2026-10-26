@@ -26,6 +26,7 @@ mod shell;
 mod store;
 mod sync;
 mod task;
+mod ticly;
 mod time;
 mod user;
 mod util;

@@ -16,6 +16,9 @@ mod reminders;
 pub mod store;
 mod terminal;
 mod textedit;
+mod ticly;
+mod ticly_ai;
+mod ticly_do;
 mod viewer;
 
 use super::wm::App;
@@ -28,7 +31,9 @@ pub use files::Files;
 pub use viewer::Viewer;
 
 /// The built-in apps: id, name, icon, window kind.
-pub const BUILT_IN: [(&str, &str, &str); 16] = [
+pub const BUILT_IN: [(&str, &str, &str); 18] = [
+    ("ticly-do", "ticly Do", "ticly-do"),
+    ("ticly-ai", "ticly AI", "ticly-ai"),
     ("files", "File", "files"),
     ("textedit", "Editor di testo", "text-editor"),
     ("notes", "Note", "notes"),
@@ -64,6 +69,8 @@ pub fn open(id: &str) -> Option<Box<dyn App>> {
         "photos" => Box::new(photos::Photos::new()),
         "music" => Box::new(music::Music::new()),
         "monitor" => Box::new(monitor::Monitor::new()),
+        "ticly-do" => Box::new(ticly_do::TiclyDo::new()),
+        "ticly-ai" => Box::new(ticly_ai::TiclyAi::new()),
         "trash" => {
             if let Ok(p) = fs::abs("sys:/home/Cestino") {
                 if !fs::exists(&p) {
