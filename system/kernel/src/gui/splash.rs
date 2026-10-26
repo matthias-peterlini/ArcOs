@@ -1,35 +1,48 @@
-//! The boot splash: the arc logo, the name and a progress bar. No text.
+//! The boot splash: the arc wordmark and a progress bar on the dark ticly
+//! background with its rust glow. No text.
 
-use super::gfx::{isqrt, Canvas, Rect};
-use super::text::{self, Font};
+use super::gfx::{Canvas, Rect};
 
-const BG_TOP: u32 = 0xFF1A_1428;
-const BG_BOTTOM: u32 = 0xFF2C_1F3F;
+pub const BG_TOP: u32 = 0xFF15_1012;
+pub const BG_BOTTOM: u32 = 0xFF0B_0809;
 
-/// The arc logo: a thick half ring open at the top, with round ends, `r`
-/// its outer radius.
-pub fn draw_logo(c: &mut Canvas, cx: i32, cy: i32, r: i32, color: u32) {
-    let t = (r * 2 / 5).max(3); // thickness
-    let inner = r - t;
+static LOGO: &[u8] = include_bytes!("../../assets/logo.bin");
+
+/// Width of the arc wordmark drawn `h` pixels tall.
+pub fn logo_width(h: i32) -> i32 {
+    let (lw, lh) = (u16::from_le_bytes([LOGO[0], LOGO[1]]) as i32, u16::from_le_bytes([LOGO[2], LOGO[3]]) as i32);
+    lw * h / lh
+}
+
+/// The arc wordmark ("ARC", from `tools/assets/gen_logo.py`), `h` pixels
+/// tall and centred on (`cx`, `cy`). Scaled down with a box filter, without
+/// allocating (the fatal error screen uses it too).
+pub fn draw_logo(c: &mut Canvas, cx: i32, cy: i32, h: i32, color: u32) {
+    let (lw, lh) = (u16::from_le_bytes([LOGO[0], LOGO[1]]) as i32, u16::from_le_bytes([LOGO[2], LOGO[3]]) as i32);
+    let mask = &LOGO[4..];
+    let h = h.clamp(4, lh);
+    let w = logo_width(h);
+    let (x0, y0) = (cx - w / 2, cy - h / 2);
     let a = color >> 24;
-    let box_ = Rect::new(cx - r - 1, cy - t / 2 - 1, 2 * r + 2, r + t / 2 + 2).intersect(&c.clip());
-    let cap = |x: i32, y: i32, ex: i32| {
-        let dx = x * 16 + 8 - ex * 16;
-        let dy = y * 16 + 8 - cy * 16;
-        let d = isqrt((dx * dx + dy * dy) as u32) as i32;
-        (t * 8 - d + 8).clamp(0, 16)
-    };
-    for y in box_.y..box_.bottom() {
-        for x in box_.x..box_.right() {
-            let dx = x * 16 + 8 - cx * 16;
-            let dy = y * 16 + 8 - cy * 16;
-            let d = isqrt((dx * dx + dy * dy) as u32) as i32;
-            let ring = (r * 16 - d + 8).clamp(0, 16).min((d - inner * 16 + 8).clamp(0, 16));
-            let ring = if y * 16 + 8 >= cy * 16 { ring } else { 0 };
-            let ends = cap(x, y, cx - r + t / 2).max(cap(x, y, cx + r - t / 2));
-            let cov = ring.max(ends) as u32;
+    let clip = c.clip();
+    for ty in 0..h {
+        let (sy0, sy1) = (ty * lh / h, ((ty + 1) * lh / h).max(ty * lh / h + 1));
+        for tx in 0..w {
+            let (x, y) = (x0 + tx, y0 + ty);
+            if !clip.contains(x, y) {
+                continue;
+            }
+            let (sx0, sx1) = (tx * lw / w, ((tx + 1) * lw / w).max(tx * lw / w + 1));
+            let mut sum = 0u32;
+            for sy in sy0..sy1 {
+                let row = &mask[(sy * lw) as usize..];
+                for sx in sx0..sx1 {
+                    sum += row[sx as usize] as u32;
+                }
+            }
+            let cov = sum / ((sy1 - sy0) * (sx1 - sx0)) as u32;
             if cov > 0 {
-                c.fill(Rect::new(x, y, 1, 1), ((a * cov / 16) << 24) | (color & 0xFF_FFFF));
+                c.fill(Rect::new(x, y, 1, 1), ((a * cov / 255) << 24) | (color & 0xFF_FFFF));
             }
         }
     }
@@ -48,13 +61,15 @@ pub fn show(percent: u32) {
         c.reset_clip();
         if first || percent == 0 {
             c.fill_round_grad(c.bounds(), 0, BG_TOP, BG_BOTTOM);
-            draw_logo(c, cx, logo_y, 46, 0xFFFF_FFFF);
-            text::draw_centered(c, Font::Display, cx, logo_y + 62, "arcOS", 0xFFF2_EFF7);
+            c.glow(cx, logo_y - 40, w.min(h) * 3 / 5, 0xFF78_2E12, 150);
+            draw_logo(c, cx, logo_y, 64, 0xFFFF_FFFF);
         }
         // The bar: a faint track and a white fill.
         let behind = Rect::new(bar.x - 2, bar.y - 2, bar.w + 4, bar.h + 4);
-        c.fill_round_grad(behind, 0, sample(h, behind.y), sample(h, behind.bottom()));
-        c.fill_round(bar, 3, 0x40FF_FFFF);
+        if !(first || percent == 0) {
+            c.fill_round(bar, 3, 0xFF1A_1416);
+        }
+        c.fill_round(bar, 3, 0x30FF_FFFF);
         let filled = bar.w * percent.min(100) as i32 / 100;
         if filled > 0 {
             c.fill_round(Rect::new(bar.x, bar.y, filled.max(6), bar.h), 3, 0xFFFF_FFFF);
@@ -65,9 +80,4 @@ pub fn show(percent: u32) {
             d.present(behind);
         }
     });
-}
-
-/// The background colour at height `y` (to repaint behind the bar).
-fn sample(h: i32, y: i32) -> u32 {
-    super::gfx::mix(BG_TOP, BG_BOTTOM, ((y.clamp(0, h - 1)) * 255 / (h - 1).max(1)) as u32)
 }

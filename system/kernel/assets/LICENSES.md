@@ -1,13 +1,13 @@
 # Licenze dei caratteri
 
 `fonts.bin` contiene glifi rasterizzati (da `tools/assets/gen_fonts.py`) da due
-famiglie di caratteri liberi. Le loro licenze seguono, così come le
-distribuisce Debian.
+famiglie di caratteri liberi. Le loro licenze seguono.
 
-## Inter
+## Plus Jakarta Sans
 
-https://github.com/rsms/inter — Copyright 2016-2023 The Inter Project Authors.
-SIL Open Font License 1.1.
+https://github.com/tokotype/PlusJakartaSans — Copyright 2020 The Plus Jakarta
+Sans Project Authors. SIL Open Font License 1.1 (testo completo in
+`tools/assets/fonts/OFL.txt`, riportato qui sotto).
 
 ```
 License: OFL-1.1

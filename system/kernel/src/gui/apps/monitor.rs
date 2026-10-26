@@ -178,7 +178,7 @@ impl App for Monitor {
             let y = t.y + k as i32 * ROW - self.scroll;
             let row = Rect::new(t.x, y, t.w, ROW);
             if self.selected == Some(i) {
-                c.fill_round(row, 8, ui::ACCENT);
+                c.fill_round(row, 8, ui::SELECTED);
             } else if k % 2 == 1 {
                 c.fill(row, 0x0CFF_FFFF);
             }

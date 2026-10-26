@@ -143,7 +143,7 @@ impl Picker {
                 continue;
             }
             if self.selected == Some(i) {
-                c.fill_round(r, 6, ui::ACCENT);
+                c.fill_round(r, 6, ui::SELECTED);
             }
             res::draw_icon(c, super::files::icon_for(name, *dir), 20, r.x + 6, r.y + 4);
             let color = if *dir || !self.saving { TEXT } else { TEXT_FAINT };

@@ -20,6 +20,8 @@ pub enum Font {
     Clock = 5,
     Mono = 6,
     Display = 7,
+    /// Small bold capitals, spaced out ("OGGI", "SPAZI").
+    Caps = 8,
 }
 
 #[derive(Clone, Copy)]

@@ -217,9 +217,12 @@ impl App for Notes {
         true
     }
 
+    fn sidebar(&self) -> i32 {
+        SIDEBAR - 2
+    }
+
     fn draw(&mut self, c: &mut Canvas, area: Rect, _blur: &Canvas, focused: bool) {
         // The list.
-        c.fill_round(Rect::new(area.x + 4, area.y + 4, SIDEBAR - 4, area.h - 8), 18, 0x22_00_00_00);
         ui::search_field(c, Self::search_rect(area), &self.search, "Cerca", self.searching && focused);
         let lr = Self::list_rect(area);
         let saved = c.clip();
@@ -235,7 +238,7 @@ impl App for Notes {
             }
             let n = &self.list[i];
             if self.current == Some(i) {
-                c.fill_round(r, 10, 0xD9C8_9B1E);
+                c.fill_round(r, 10, ui::SELECTED);
             } else if self.hover == Some(i) {
                 c.fill_round(r, 10, ui::PANEL);
             }

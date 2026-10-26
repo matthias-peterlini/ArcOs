@@ -283,6 +283,10 @@ struct Desktop {
     /// The window under the pointer that was told about it last.
     hovered: Option<u32>,
     ending: Option<(Ending, Anim)>,
+    /// A full-screen window is in front (no bar, no dock).
+    was_full: bool,
+    /// Full screen, pointer at the bottom edge: the dock is shown.
+    dock_reveal: bool,
 }
 
 fn now() -> DateTime {
@@ -296,7 +300,7 @@ impl Desktop {
 
     fn logo_btn(&self) -> Rect {
         let t = self.topbar();
-        Rect::new(t.x + 8, t.y + 4, 36, 32)
+        Rect::new(t.x + 6, t.y + 4, 58, 32)
     }
 
     fn power_btn(&self) -> Rect {
@@ -459,6 +463,22 @@ impl Desktop {
         Rect::new(0, 0, self.w, self.h)
     }
 
+    /// Where a maximised window goes: the whole screen, with a thin margin
+    /// of wallpaper around the card.
+    fn full_area(&self) -> Rect {
+        Rect::new(10, 10, self.w - 20, self.h - 20)
+    }
+
+    /// Is a full-screen window in front? Then the bar and the dock hide.
+    fn full_screen(&self) -> bool {
+        self.launcher.is_none() && self.focused().and_then(|id| self.window(id)).is_some_and(|w| w.full())
+    }
+
+    /// Is the dock on the screen?
+    fn dock_shown(&self) -> bool {
+        !self.full_screen() || self.dock_reveal
+    }
+
     // ------------------------------------------------------------------
     // Windows
 
@@ -587,7 +607,7 @@ impl Desktop {
     }
 
     fn zoom(&mut self, l: &mut Looper, id: u32) {
-        let screen = self.work_area();
+        let screen = self.full_area();
         let Some(win) = self.window_mut(id) else { return };
         let before = win.bounds();
         win.toggle_maximize(screen);
@@ -859,7 +879,8 @@ impl Desktop {
             }
             return;
         }
-        if self.logo_btn().contains(x, y) {
+        let bar = !self.full_screen();
+        if bar && self.logo_btn().contains(x, y) {
             let b = self.logo_btn();
             let p = Popup::menu(
                 b.x,
@@ -879,7 +900,7 @@ impl Desktop {
             self.show_popup(l, p);
             return;
         }
-        if self.power_btn().contains(x, y) {
+        if bar && self.power_btn().contains(x, y) {
             let t = self.topbar();
             let p = Popup::menu(
                 t.right() - 230,
@@ -890,14 +911,14 @@ impl Desktop {
             self.show_popup(l, p);
             return;
         }
-        if self.control_btn().contains(x, y) {
+        if bar && self.control_btn().contains(x, y) {
             let p = Popup { kind: PopupKind::Control, rect: self.control_rect(), items: Vec::new(), anim: Anim::new(160) };
             self.show_popup(l, p);
             return;
         }
         let items = self.dock_items();
         let (rects, bg) = self.dock_layout(&items);
-        if bg.contains(x, y) || rects.iter().any(|r| r.contains(x, y)) {
+        if self.dock_shown() && (bg.contains(x, y) || rects.iter().any(|r| r.contains(x, y))) {
             if let Some(i) = rects.iter().position(|r| r.grow(DOCK_GAP / 2).contains(x, y)) {
                 self.dock_press(l, &items[i]);
             }
@@ -1015,6 +1036,11 @@ impl Desktop {
                 self.close_window(l, id);
                 return;
             }
+            // F11: full screen and back.
+            if k.key == Key::F(11) {
+                self.zoom(l, id);
+                return;
+            }
             if let Some(win) = self.window_mut(id) {
                 let action = win.app.key(k);
                 self.act(l, Some(id), action);
@@ -1088,10 +1114,33 @@ impl Desktop {
             }
             return;
         }
+        // Full screen: the title pill comes down at the top edge, the dock up
+        // at the bottom one.
+        if self.full_screen() {
+            let dock_zone = self.dock_zone();
+            let dock_reveal = y >= self.h - 3 || (self.dock_reveal && dock_zone.contains(x, y));
+            if dock_reveal != self.dock_reveal {
+                self.dock_reveal = dock_reveal;
+                l.damage(dock_zone);
+            }
+            if let Some(id) = self.focused() {
+                if let Some(win) = self.window_mut(id) {
+                    let pill = win.title_rect();
+                    let reveal = y < 6 || (win.reveal && pill.grow(16).contains(x, y));
+                    if reveal != win.reveal {
+                        win.reveal = reveal;
+                        win.hover = None;
+                        l.damage(win.bounds());
+                    }
+                }
+            }
+        } else if self.dock_reveal {
+            self.dock_reveal = false;
+        }
         // The dock magnifies around the pointer.
         let zone = self.dock();
         let near = Rect::new(zone.x - 20, zone.y - MAGNIFY - 10, zone.w + 40, zone.h + MAGNIFY + 20);
-        let inside = near.contains(x, y) && self.popup.is_none();
+        let inside = near.contains(x, y) && self.popup.is_none() && self.dock_shown();
         self.mag.target = if inside { 1000 } else { 0 };
         let items = self.dock_items();
         let hover = if inside {
@@ -1157,14 +1206,14 @@ impl Desktop {
         if lb.contains(self.mouse.0, self.mouse.1) || self.popup.as_ref().is_some_and(|p| p.rect.x < lb.right() && p.kind == PopupKind::Menu) {
             c.fill_round(lb, 10, 0x26FF_FFFF);
         }
-        draw_logo(c, t.x + 26, t.y + 17, 9, 0xFFFF_FFFF);
+        draw_logo(c, lb.x + lb.w / 2, lb.y + lb.h / 2, 14, 0xFFFF_FFFF);
         // The app in front, as macOS shows it.
         let app = self
             .focused()
             .and_then(|id| self.window(id))
             .map(|w| apps::app_name(w.app.kind(), &w.app.title()))
             .unwrap_or_else(|| String::from("Scrivania"));
-        text::draw(c, Font::Strong, t.x + 50, t.y + 11, &text::fit(Font::Strong, &app, 200), TEXT);
+        text::draw(c, Font::Strong, lb.right() + 8, t.y + 11, &text::fit(Font::Strong, &app, 200), TEXT);
         let d = now();
         let clock = format!("{:02}:{:02}", d.hour, d.min);
         let date = format!("{} {} {}", WEEKDAYS_SHORT[d.weekday as usize % 7], d.day, MONTHS_SHORT[(d.month as usize + 11) % 12]);
@@ -1196,26 +1245,27 @@ impl Desktop {
         let name = settings::get().name;
         if n > 0 && r.overlaps(&ui::with_shadow(ws[0])) {
             let g = ws[0];
-            ui::glass(c, &self.blur, g, 22, ui::GLASS);
+            ui::card(c, &self.blur, g, 22, ui::GLASS);
             let hello = match d.hour {
                 5..=11 => "Buongiorno",
                 12..=17 => "Buon pomeriggio",
                 _ => "Buonasera",
             };
             let line = if name.is_empty() { String::from(hello) } else { format!("{hello}, {name}") };
-            text::draw(c, Font::Body, g.x + 22, g.y + 18, &text::fit(Font::Body, &line, g.w - 40), TEXT_DIM);
-            text::draw(c, Font::Clock, g.x + 18, g.y + 36, &format!("{:02}:{:02}", d.hour, d.min), TEXT);
             let date = format!("{} {} {}", WEEKDAYS[d.weekday as usize % 7], d.day, MONTHS[(d.month as usize + 11) % 12]);
-            text::draw(c, Font::Body, g.x + 22, g.y + 116, &date, TEXT);
+            ui::caps(c, g.x + 22, g.y + 20, &date, TEXT_FAINT);
+            text::draw(c, Font::Clock, g.x + 18, g.y + 36, &format!("{:02}:{:02}", d.hour, d.min), TEXT);
+            text::draw(c, Font::Heading, g.x + 22, g.y + 112, &text::fit(Font::Heading, &line, g.w - 40), TEXT);
         }
         if n > 1 && r.overlaps(&ui::with_shadow(ws[1])) {
             let g = ws[1];
-            ui::glass(c, &self.blur, g, 22, ui::GLASS);
+            ui::card(c, &self.blur, g, 22, ui::GLASS);
             let title = format!("{} {}", capitalize(MONTHS[(d.month as usize + 11) % 12]), d.year);
-            text::draw(c, Font::Strong, g.x + 20, g.y + 16, &title, TEXT);
+            text::draw(c, Font::Heading, g.x + 20, g.y + 14, &title, TEXT);
             let cell = (g.w - 30) / 7;
             for (i, h) in ["L", "M", "M", "G", "V", "S", "D"].iter().enumerate() {
-                text::draw_centered(c, Font::Small, g.x + 15 + i as i32 * cell + cell / 2, g.y + 46, h, TEXT_FAINT);
+                let w = ui::caps_width(h);
+                ui::caps(c, g.x + 15 + i as i32 * cell + (cell - w) / 2, g.y + 48, h, TEXT_FAINT);
             }
             let first = time::from_epoch(time::to_epoch(d.year, d.month, 1, 12, 0, 0)).weekday as i32;
             let days = time::days_in_month(d.year, d.month) as i32;
@@ -1226,8 +1276,8 @@ impl Desktop {
                 let cy = g.y + 82 + row * 26;
                 let label = format!("{day}");
                 if day as u64 == d.day {
-                    c.fill_circle(cx, cy, 12, ui::RED);
-                    text::draw_centered(c, Font::Strong, cx, cy - 9, &label, 0xFFFF_FFFF);
+                    c.fill_circle(cx, cy, 12, 0xFFFF_FFFF);
+                    text::draw_centered(c, Font::Strong, cx, cy - 9, &label, 0xFF0E_0B0C);
                 } else {
                     text::draw_centered(c, Font::Body, cx, cy - 9, &label, if col >= 5 { TEXT_DIM } else { TEXT });
                 }
@@ -1235,14 +1285,14 @@ impl Desktop {
         }
         if n > 2 && r.overlaps(&ui::with_shadow(ws[2])) {
             let g = ws[2];
-            ui::glass(c, &self.blur, g, 22, ui::GLASS);
-            text::draw(c, Font::Strong, g.x + 20, g.y + 16, "Sistema", TEXT);
+            ui::card(c, &self.blur, g, 22, ui::GLASS);
+            ui::caps(c, g.x + 20, g.y + 20, "Sistema", TEXT_FAINT);
             let (free, total) = crate::mem::frame::stats();
             let used = total.saturating_sub(free);
             let bar = Rect::new(g.x + 20, g.y + 50, g.w - 40, 8);
-            c.fill_round(bar, 4, 0x33FF_FFFF);
+            c.fill_round(bar, 4, 0x26FF_FFFF);
             let fw = (bar.w as u64 * used).checked_div(total).unwrap_or(0) as i32;
-            c.fill_round(Rect::new(bar.x, bar.y, fw.max(8), bar.h), 4, 0xFFFF_FFFF);
+            c.fill_round(Rect::new(bar.x, bar.y, fw.max(8), bar.h), 4, ui::ACCENT);
             text::draw(c, Font::Small, g.x + 20, g.y + 66, &format!("Memoria: {} in uso su {}", Size(used), Size(total)), TEXT_DIM);
             let up = time::uptime_ms() / 60_000;
             let net = if crate::net::online() { "connessa" } else { "assente" };
@@ -1350,7 +1400,7 @@ impl Desktop {
                     }
                     let r = Rect::new(p.rect.x + 6, y, p.rect.w - 12, 32);
                     if r.contains(self.mouse.0, self.mouse.1) {
-                        c.fill_round(r, 8, ui::ACCENT);
+                        c.fill_round(r, 8, ui::SELECTED);
                     }
                     text::draw(c, Font::Body, r.x + 12, r.y + 7, label, TEXT);
                     y += 34;
@@ -1402,7 +1452,7 @@ impl Desktop {
         c.fill(c.clip(), (t * 255 / 1000) << 24);
         if t > 300 {
             let o = (t - 300) * 255 / 700;
-            draw_logo(c, self.w / 2, self.h / 2 - 20, 30, (o << 24) | 0xFF_FFFF);
+            draw_logo(c, self.w / 2, self.h / 2 - 20, 48, (o << 24) | 0xFF_FFFF);
         }
     }
 }
@@ -1424,9 +1474,10 @@ impl View for Desktop {
         self.popup = None;
         self.fx.clear();
         let area = self.work_area();
+        let full = self.full_area();
         for win in self.windows.iter_mut() {
             if win.restore.is_some() {
-                win.rect = area; // maximised: fill the new screen
+                win.rect = full; // maximised: fill the new screen
             } else {
                 win.rect.w = win.rect.w.min(area.w);
                 win.rect.h = win.rect.h.min(area.h);
@@ -1448,6 +1499,24 @@ impl View for Desktop {
     }
 
     fn event(&mut self, l: &mut Looper, ev: Event) -> bool {
+        let quit = self.handle(l, ev);
+        // Into or out of full screen: the bar and the dock come and go.
+        let full = self.full_screen();
+        if full != self.was_full {
+            self.was_full = full;
+            self.dock_reveal = false;
+            l.damage(self.screen());
+        }
+        quit
+    }
+
+    fn draw(&mut self, c: &mut Canvas, r: Rect) {
+        self.paint(c, r);
+    }
+}
+
+impl Desktop {
+    fn handle(&mut self, l: &mut Looper, ev: Event) -> bool {
         match ev {
             Event::Press { x, y, double } => self.press(l, x, y, double),
             Event::Menu { x, y } => {
@@ -1608,7 +1677,7 @@ impl View for Desktop {
         false
     }
 
-    fn draw(&mut self, c: &mut Canvas, r: Rect) {
+    fn paint(&mut self, c: &mut Canvas, r: Rect) {
         if let Some(la) = &self.launcher {
             if la.shown() >= 1000 {
                 self.draw_launcher(c, la);
@@ -1632,10 +1701,10 @@ impl View for Desktop {
                 c.draw_scaled(&f.snap, dst, opacity);
             }
         }
-        if r.overlaps(&self.dock_zone()) {
+        if self.dock_shown() && r.overlaps(&self.dock_zone()) {
             self.draw_dock(c);
         }
-        if r.overlaps(&ui::with_shadow(self.topbar())) {
+        if !self.full_screen() && r.overlaps(&ui::with_shadow(self.topbar())) {
             self.draw_topbar(c);
         }
         if let Some(p) = &self.popup {
@@ -1679,6 +1748,8 @@ pub fn run(d: &mut Display) {
         cascade: 0,
         hovered: None,
         ending: None,
+        was_full: false,
+        dock_reveal: false,
     };
     let mut l = Looper::new(d);
     l.damage_all(d);

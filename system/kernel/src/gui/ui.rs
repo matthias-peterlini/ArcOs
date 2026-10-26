@@ -7,22 +7,30 @@ use super::text::{self, Font};
 use super::Display;
 use crate::dev::input::{self, KeyEvent};
 
-pub const TEXT: u32 = 0xFFF5_F2F8;
-pub const TEXT_DIM: u32 = 0xB3F5_F2F8;
-pub const TEXT_FAINT: u32 = 0x80F5_F2F8;
-/// The tint of the dark glass panels.
-pub const GLASS: u32 = 0x9E24_1A2C;
-pub const GLASS_STRONG: u32 = 0xC71E_1626;
-pub const BORDER: u32 = 0x2EFF_FFFF;
-/// The highlight colour (selections, switches, the cursor).
-pub const ACCENT: u32 = 0xFF0A_84FF;
+// The ticly palette (login.ticly.it, do.ticly.it, ai.ticly.it): warm dark
+// glass with a rust glow, white text, muted warm greys, white pills.
+pub const TEXT: u32 = 0xFFFF_FFFF;
+pub const TEXT_DIM: u32 = 0xFFB8_ACA7;
+pub const TEXT_FAINT: u32 = 0xFF84_7875;
+/// The tint of the dark glass cards.
+pub const GLASS: u32 = 0xB81A_1414;
+pub const GLASS_STRONG: u32 = 0xDC14_1011;
+pub const BORDER: u32 = 0x17FF_FFFF;
+/// The glow in the corner of a card.
+pub const GLOW: u32 = 0xFF8A_3416;
+/// The highlight colour (text cursor, progress, focus): ticly's ember.
+pub const ACCENT: u32 = 0xFFE0_662E;
 pub const ORANGE: u32 = 0xFFFF_9F0A;
-pub const RED: u32 = 0xFFFF_453A;
-pub const GREEN: u32 = 0xFF30_D158;
+pub const RED: u32 = 0xFFFF_5A4E;
+pub const GREEN: u32 = 0xFF34_C46A;
 /// A panel inside a window (lists, sidebars).
-pub const PANEL: u32 = 0x1FFF_FFFF;
-pub const PANEL_HOVER: u32 = 0x2EFF_FFFF;
-pub const SEPARATOR: u32 = 0x24FF_FFFF;
+pub const PANEL: u32 = 0x0DFF_FFFF;
+pub const PANEL_HOVER: u32 = 0x1AFF_FFFF;
+/// The selected row or item: a lighter pane of glass, as in ticly's sidebars.
+pub const SELECTED: u32 = 0x2EFF_FFFF;
+pub const SEPARATOR: u32 = 0x17FF_FFFF;
+/// The dark well of a text field.
+pub const FIELD: u32 = 0xB80E_0A0A;
 
 /// A frosted-glass panel: blurred wallpaper under a tint, a thin light edge
 /// and a soft shadow.
@@ -32,19 +40,46 @@ pub fn glass(c: &mut Canvas, blur: &Canvas, r: Rect, rad: i32, tint: u32) {
     c.stroke_round(r, rad, 1, BORDER);
 }
 
+/// A ticly card: [`glass`] with the rust glow rising from its top-left corner.
+pub fn card(c: &mut Canvas, blur: &Canvas, r: Rect, rad: i32, tint: u32) {
+    c.shadow(r, rad, 18, 90);
+    c.blit_round(blur, r, rad, tint);
+    let reach = (r.w.max(r.h) * 3 / 5).clamp(120, 520);
+    c.glow_round(r, rad, r.x + r.w / 6, r.y + r.h / 10, reach, GLOW, 120);
+    c.stroke_round(r, rad, 1, BORDER);
+}
+
 /// The area a panel's shadow reaches.
 pub fn with_shadow(r: Rect) -> Rect {
-    r.grow(16).offset(0, 5)
+    r.grow(20).offset(0, 6)
+}
+
+/// A label in small spaced capitals ("OGGI", "CERCA NEL WEB").
+pub fn caps(c: &mut Canvas, x: i32, y: i32, label: &str, color: u32) -> i32 {
+    let mut cx = x;
+    for ch in label.chars().flat_map(|ch| ch.to_uppercase()) {
+        let mut buf = [0u8; 4];
+        cx += text::draw(c, Font::Caps, cx, y, ch.encode_utf8(&mut buf), color) + 2;
+    }
+    cx - x
+}
+
+/// Width of [`caps`] text.
+pub fn caps_width(label: &str) -> i32 {
+    label.chars().flat_map(|ch| ch.to_uppercase()).map(|ch| text::advance(Font::Caps, ch) + 2).sum()
 }
 
 /// A pill-shaped button; `primary` is white with dark text.
 pub fn button(c: &mut Canvas, r: Rect, label: &str, primary: bool, hover: bool) {
-    let (bg, fg) = if primary {
-        (if hover { 0xFFFF_FFFF } else { 0xF2FF_FFFF }, 0xFF1E_1626)
+    if primary {
+        c.shadow(r, r.h / 2, 8, if hover { 70 } else { 45 });
+        c.fill_round(r, r.h / 2, if hover { 0xFFFF_FFFF } else { 0xF5FF_FFFF });
     } else {
-        (if hover { 0x40FF_FFFF } else { 0x26FF_FFFF }, TEXT)
-    };
-    c.fill_round(r, r.h / 2, bg);
+        // The outlined pill of ticly's secondary actions.
+        c.fill_round(r, r.h / 2, if hover { 0x1FFF_FFFF } else { 0x0AFF_FFFF });
+        c.stroke_round(r, r.h / 2, 1, if hover { 0x4DFF_FFFF } else { 0x2EFF_FFFF });
+    }
+    let fg = if primary { 0xFF0E_0B0C } else { TEXT };
     let (lh, _) = text::metrics(Font::Strong);
     text::draw_centered(c, Font::Strong, r.x + r.w / 2, r.y + (r.h - lh) / 2, label, fg);
 }
@@ -58,18 +93,19 @@ pub fn button_color(c: &mut Canvas, r: Rect, label: &str, bg: u32, fg: u32) {
 
 /// A round button with a white glyph from the icon set.
 pub fn icon_button(c: &mut Canvas, r: Rect, glyph: &str, hover: bool) {
-    c.fill_circle(r.x + r.w / 2, r.y + r.h / 2, r.w / 2, if hover { 0x40FF_FFFF } else { 0x26FF_FFFF });
+    c.fill_circle(r.x + r.w / 2, r.y + r.h / 2, r.w / 2, if hover { 0x2EFF_FFFF } else { 0x12FF_FFFF });
+    c.stroke_round(r, r.w / 2, 1, 0x26FF_FFFF);
     let s = r.w * 5 / 9;
     super::res::draw_icon(c, glyph, s, r.x + (r.w - s) / 2, r.y + (r.h - s) / 2);
 }
 
 /// An on/off switch (52 x 30 looks right).
 pub fn toggle(c: &mut Canvas, r: Rect, on: bool) {
-    c.fill_round(r, r.h / 2, if on { GREEN } else { 0x40FF_FFFF });
+    c.fill_round(r, r.h / 2, if on { 0xFFFF_FFFF } else { 0x33FF_FFFF });
     let d = r.h - 6;
     let x = if on { r.right() - 3 - d } else { r.x + 3 };
     c.fill_circle(x + d / 2, r.y + 3 + d / 2, d / 2 + 1, 0x40_00_00_00);
-    c.fill_circle(x + d / 2, r.y + 3 + d / 2, d / 2, 0xFFFF_FFFF);
+    c.fill_circle(x + d / 2, r.y + 3 + d / 2, d / 2, if on { 0xFF1A_1414 } else { 0xFFFF_FFFF });
 }
 
 /// A horizontal slider; `value` in 0..=1000.
@@ -96,23 +132,24 @@ pub fn segments(r: Rect, n: usize) -> alloc::vec::Vec<Rect> {
 
 /// Tabs in a pill: `labels`, with `sel` highlighted.
 pub fn segmented(c: &mut Canvas, r: Rect, labels: &[&str], sel: usize) {
-    c.fill_round(r, r.h / 2, 0x26FF_FFFF);
+    // ticly's "Mese / Settimana / Giorno": a dark pill, the choice in white.
+    c.fill_round(r, r.h / 2, 0x99_0E0A0A);
+    c.stroke_round(r, r.h / 2, 1, BORDER);
     let (lh, _) = text::metrics(Font::Strong);
     for (i, (s, label)) in segments(r, labels.len()).iter().zip(labels).enumerate() {
         if i == sel {
-            c.fill_round(*s, s.h / 2, 0x40FF_FFFF);
+            c.fill_round(*s, s.h / 2, 0xFFFF_FFFF);
         }
-        let color = if i == sel { TEXT } else { TEXT_DIM };
+        let color = if i == sel { 0xFF0E_0B0C } else { TEXT };
         text::draw_centered(c, Font::Strong, s.x + s.w / 2, s.y + (s.h - lh) / 2, label, color);
     }
 }
 
 /// A search field with its magnifier.
 pub fn search_field(c: &mut Canvas, r: Rect, value: &str, placeholder: &str, focused: bool) {
-    c.fill_round(r, r.h / 2, 0x26FF_FFFF);
-    if focused {
-        c.stroke_round(r, r.h / 2, 2, ACCENT);
-    }
+    let rad = (r.h / 2).min(12);
+    c.fill_round(r, rad, FIELD);
+    c.stroke_round(r, rad, 1, if focused { 0x59FF_FFFF } else { BORDER });
     super::res::draw_icon(c, "g-search", 14, r.x + 12, r.y + (r.h - 14) / 2);
     let (lh, _) = text::metrics(Font::Body);
     let ty = r.y + (r.h - lh) / 2;
@@ -132,8 +169,8 @@ pub fn search_field(c: &mut Canvas, r: Rect, value: &str, placeholder: &str, foc
 
 /// A one-line text field.
 pub fn text_field(c: &mut Canvas, r: Rect, value: &str, placeholder: &str, focused: bool) {
-    c.fill_round(r, 12, 0x33FF_FFFF);
-    c.stroke_round(r, 12, if focused { 2 } else { 1 }, if focused { 0xFFFF_FFFF } else { BORDER });
+    c.fill_round(r, 14, FIELD);
+    c.stroke_round(r, 14, 1, if focused { 0x59FF_FFFF } else { BORDER });
     let (lh, _) = text::metrics(Font::Heading);
     let ty = r.y + (r.h - lh) / 2;
     let shown = text::fit(Font::Heading, value, r.w - 36);
@@ -144,7 +181,7 @@ pub fn text_field(c: &mut Canvas, r: Rect, value: &str, placeholder: &str, focus
         text::draw(c, Font::Heading, r.x + 16, ty, &shown, TEXT)
     };
     if focused {
-        c.fill(Rect::new(r.x + 17 + w, ty + 2, 2, lh - 4), 0xFFFF_FFFF);
+        c.fill(Rect::new(r.x + 17 + w, ty + 2, 2, lh - 4), ACCENT);
     }
 }
 

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Paints the arcOS wallpapers.
 
-Every wallpaper is generated here from noise and gradients: a sky, a range of
-rocky peaks lit by the low sun, a band of fog and a forest of firs in front.
-Three moods share the same landscape: "dolomiti" (sunset), "alba" (dawn) and
-"notte" (night).
+Every wallpaper is generated here from noise and gradients: a sky, a far
+range in the haze, a massif of Dolomite towers whose rock is lit from the
+heightfield of its gullies, a sea of fog and rows of firs in front. Three
+moods share the same landscape: "dolomiti" (alpenglow at sunset), "alba"
+(dawn) and "notte" (moonlight).
 
-Output: rootfs/system/gui/wallpapers/<name>.qoi (1280x800).
+Output: rootfs/system/gui/wallpapers/<name>.qoi (1440x900).
 
 Usage: tools/assets/gen_wallpapers.py [output folder]
 """
@@ -14,43 +15,44 @@ import os
 import sys
 
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import qoi  # noqa: E402
 
-W, H = 1280, 800
+W, H = 1440, 900
+XS = np.arange(W)[None, :] / W
+YS = np.arange(H)[:, None] / H
+X = np.arange(W) / W
 
 
-def noise1d(n, octaves, seed, base=8):
-    rng = np.random.default_rng(seed)
-    out = np.zeros(n)
-    amp, freq, total = 1.0, base, 0.0
-    for _ in range(octaves):
-        pts = rng.random(freq + 1)
-        xs = np.linspace(0, freq, n)
-        i = np.floor(xs).astype(int).clip(0, freq - 1)
-        t = xs - i
-        t = t * t * (3 - 2 * t)
-        out += amp * (pts[i] * (1 - t) + pts[i + 1] * t)
-        total += amp
-        amp *= 0.5
-        freq *= 2
-    return out / total
+def upscale(g, w, h):
+    return np.asarray(Image.fromarray(g.astype(np.float32), "F").resize((w, h), Image.BICUBIC), float)
 
 
-def noise2d(h, w, scale, seed, octaves=4):
+def fbm(h, w, sx, sy, seed, octaves=5, ridged=False, gain=0.5):
+    """Fractal noise with features about `sx` x `sy` pixels at the first octave."""
     rng = np.random.default_rng(seed)
     out = np.zeros((h, w))
     amp, total = 1.0, 0.0
     for o in range(octaves):
-        gh, gw = max(2, int(h / scale * 2 ** o)), max(2, int(w / scale * 2 ** o))
-        g = rng.random((gh, gw)).astype(np.float32)
-        img = Image.fromarray((g * 255).astype(np.uint8), "L").resize((w, h), Image.BICUBIC)
-        out += amp * (np.asarray(img, float) / 255)
+        gw, gh = max(2, int(w / sx * 2 ** o)), max(2, int(h / sy * 2 ** o))
+        n = upscale(rng.random((gh, gw)), w, h)
+        if ridged:
+            n = 1 - np.abs(2 * n - 1)
+        out += amp * n
         total += amp
-        amp *= 0.5
+        amp *= gain
     return out / total
+
+
+def noise1d(n, scale, seed, octaves=6, ridged=False, gain=0.5):
+    return fbm(1, n, scale, 1, seed, octaves, ridged, gain)[0]
+
+
+def rgb(h):
+    h = h.lstrip("#")
+    return np.array([int(h[i:i + 2], 16) for i in (0, 2, 4)], float)
 
 
 def lerp(a, b, t):
@@ -58,126 +60,120 @@ def lerp(a, b, t):
 
 
 def vgrad(stops):
-    """A vertical gradient through (position, rgb) stops, as an HxWx3 array."""
-    ys = np.linspace(0, 1, H)
     col = np.zeros((H, 3))
     for c in range(3):
-        col[:, c] = np.interp(ys, [p for p, _ in stops], [rgb[c] for _, rgb in stops])
-    return np.repeat(col[:, None, :], W, axis=1)
-
-
-def hexrgb(h):
-    h = h.lstrip("#")
-    return np.array([int(h[i:i + 2], 16) for i in (0, 2, 4)], float)
+        col[:, c] = np.interp(np.linspace(0, 1, H), [p for p, _ in stops], [rgb(s)[c] for _, s in stops])
+    return np.repeat(col[:, None, :], W, 1)
 
 
 MOODS = {
     "dolomiti": dict(
-        sky=[(0.0, "#4B3C6E"), (0.30, "#B97A9A"), (0.52, "#F1A98E"), (0.70, "#F6C7A2")],
-        lit="#E8662F", lit_hi="#FFB067", shade="#5C2E35", fog="#F4D9D3", fog_a=0.85,
-        trees="#14261D", trees_far="#4B5A55", clouds="#FFC7B8", stars=False),
+        sky=[(0, "#5d5370"), (0.25, "#8f7486"), (0.45, "#c48d86"), (0.6, "#d9a28e")],
+        clouds="#f0c0b0", far="#9a7f8e", dark="#3a2427", rock="#b4532c", glow="#f08a46",
+        shadow="#2c2028", haze="#7d6070", fog="#d8c8cc", mist=(200, 180, 186),
+        trees=["#5e5560", "#3c3a40", "#1d2224", "#111517"], stars=False),
     "alba": dict(
-        sky=[(0.0, "#7FA4D6"), (0.35, "#C9C3E3"), (0.55, "#F7D6D2"), (0.72, "#FFE9D6")],
-        lit="#E39A7C", lit_hi="#FFD2B0", shade="#6A5A73", fog="#F7EFF2", fog_a=0.9,
-        trees="#1B2C2A", trees_far="#6F7F84", clouds="#FFFFFF", stars=False),
+        sky=[(0, "#6a7fa8"), (0.28, "#a7a3c4"), (0.47, "#e6bcb6"), (0.6, "#f4d2bd")],
+        clouds="#fff1ea", far="#a7a2bb", dark="#4a4458", rock="#c98a7e", glow="#ffc9a8",
+        shadow="#3a3648", haze="#9a92aa", fog="#eef0f4", mist=(226, 228, 236),
+        trees=["#7d8392", "#4f5664", "#253036", "#141b1f"], stars=False),
     "notte": dict(
-        sky=[(0.0, "#070B1E"), (0.40, "#16224A"), (0.60, "#2D3A6B"), (0.72, "#3C4877")],
-        lit="#53618F", lit_hi="#8C9BC9", shade="#1C2140", fog="#5A6796", fog_a=0.55,
-        trees="#060A14", trees_far="#1E2645", clouds="#3A4677", stars=True),
+        sky=[(0, "#060a1c"), (0.3, "#121b40"), (0.5, "#24305e"), (0.6, "#2f3a68")],
+        clouds="#3a4677", far="#2a3360", dark="#121731", rock="#4c5886", glow="#9fb0de",
+        shadow="#0d1128", haze="#2b3463", fog="#4a5686", mist=(70, 82, 126),
+        trees=["#1d2546", "#131a33", "#0a0f1f", "#05080f"], stars=True),
 }
+
+
+def fir(draw, rng, x, base, h, color):
+    w = h * 0.22
+    tiers = int(8 + h / 25)
+    for t in range(tiers):
+        f = t / tiers
+        ty = base - h * f
+        tw = w * (1 - f) ** 1.1 + 1.5
+        j = (rng.random() - 0.5) * tw * 0.25
+        draw.polygon([(x - tw + j, ty), (x + tw + j, ty + 2), (x, ty - h / tiers * 2.2)], fill=color)
+    draw.line([(x, base - h - 3), (x, base)], fill=color, width=max(1, int(h / 60)))
 
 
 def paint(mood):
     m = MOODS[mood]
-    img = vgrad([(p, hexrgb(c)) for p, c in m["sky"]])
-
-    # Clouds: soft streaks in the upper sky.
-    cl = noise2d(H, W, 260, 7, 5)
-    cl = np.clip((cl - 0.52) * 3.2, 0, 1)
-    cl *= np.clip(1 - np.linspace(0, 1.7, H), 0, 1)[:, None]
-    img = lerp(img, hexrgb(m["clouds"]), cl[..., None] * 0.55)
+    img = vgrad(m["sky"])
+    cl = fbm(H, W, 420, 160, 3, 6)
+    cl = np.clip((cl - 0.5) * 3, 0, 1) * np.clip(1 - YS * 1.8, 0, 1)
+    img = lerp(img, rgb(m["clouds"]), cl[..., None] * 0.5)
 
     if m["stars"]:
         rng = np.random.default_rng(3)
-        n = 700
-        ys, xs = rng.integers(0, int(H * 0.55), n), rng.integers(0, W, n)
-        br = rng.random(n) ** 3
-        for y, x, b in zip(ys, xs, br):
-            img[y, x] = lerp(img[y, x], np.array([255, 255, 255.]), 0.4 + 0.6 * b)
+        n = 900
+        sy, sx, br = rng.integers(0, int(H * 0.55), n), rng.integers(0, W, n), rng.random(n) ** 3
+        for y, x, b in zip(sy, sx, br):
+            img[y, x] = lerp(img[y, x], np.array([255, 255, 255.]), 0.35 + 0.65 * b)
+        # The moon, with a soft halo.
+        d = np.hypot(XS - 0.22, (YS - 0.16) * H / W)
+        img = lerp(img, rgb("#8a97c8"), (np.clip(1 - d / 0.12, 0, 1) ** 2 * 0.5)[..., None])
+        img = np.where((d < 0.022)[..., None], rgb("#f2f0e6"), img)
 
-    xs = np.arange(W)
-    rows = np.arange(H)[:, None]
+    # Far range, hazy.
+    far = (0.58 - noise1d(W, 160, 5, 8, ridged=True, gain=0.55) * 0.09
+           - np.exp(-((X - 0.18) / 0.10) ** 2) * 0.10 - np.exp(-((X - 0.33) / 0.05) ** 2) * 0.05)
+    img = np.where((YS > far[None, :])[..., None], lerp(img, rgb(m["far"]), 0.85), img)
 
-    # Far ridge, hazy.
-    far = H * 0.48 + noise1d(W, 6, 11, 6) * H * 0.16
-    far_mask = rows >= far[None, :]
-    far_col = lerp(hexrgb(m["shade"]), hexrgb(m["sky"][-1][1]), 0.55)
-    img = np.where(far_mask[..., None], far_col, img)
-
-    # Main peaks: tall on the right, with vertical rock streaks.
-    base = noise1d(W, 7, 21, 5)
-    jag = noise1d(W, 8, 33, 40)
-    spikes = np.abs(noise1d(W, 6, 44, 90) - 0.5) * 2
-    # Dolomite towers: steep walls and broken tops.
-    tower = np.clip(np.exp(-((xs - W * 0.74) / (W * 0.13)) ** 2) * 1.25, 0, 1) ** 1.6 * 0.52
-    tower += np.clip(np.exp(-((xs - W * 0.20) / (W * 0.09)) ** 2) * 1.3, 0, 1) ** 1.6 * 0.30
-    tower += np.clip(np.exp(-((xs - W * 0.86) / (W * 0.05)) ** 2) * 1.3, 0, 1) ** 1.4 * 0.10
-    ridge = H * 0.72 - (base * 0.22 + tower + (jag - 0.5) * 0.09 + spikes * 0.05 * (tower > 0.05)) * H * 0.80
-    ridge = np.minimum(ridge, H * 0.70)
-    mask = rows >= ridge[None, :]
-    streak = noise2d(H, W, 40, 5, 3)
-    streak = np.asarray(Image.fromarray((streak * 255).astype(np.uint8)).resize((W // 6, H)).resize((W, H)), float) / 255
-    # Light: the left faces of the peaks catch the sun.
-    slope = np.gradient(ridge)
-    light = np.clip(0.55 - slope[None, :] * 0.08, 0, 1) * np.clip(1 - (rows - ridge[None, :]) / (H * 0.32), 0, 1)
-    light = np.clip(light * (0.6 + 0.8 * streak), 0, 1)
-    rock = lerp(hexrgb(m["shade"]), hexrgb(m["lit"]), light[..., None])
-    rock = lerp(rock, hexrgb(m["lit_hi"]), (np.clip(light - 0.75, 0, 1) * 3)[..., None])
+    # The massif: a few towers with broken tops.
+    env = np.maximum.reduce([
+        np.exp(-((X - 0.66) / 0.10) ** 4) * 0.95, np.exp(-((X - 0.80) / 0.05) ** 4) * 0.82,
+        np.exp(-((X - 0.90) / 0.035) ** 2) * 0.6, np.exp(-((X - 0.52) / 0.05) ** 4) * 0.55,
+        np.exp(-((X - 0.70) / 0.22) ** 2) * 0.5])
+    towers = noise1d(W, 40, 11, 6, ridged=True, gain=0.55)
+    crest = 0.66 - env * 0.50 - env * (towers - 0.5) * 0.16 - (noise1d(W, 8, 12, 4) - 0.5) * 0.015 * env
+    crest = np.minimum(crest, 0.64)
+    mask = YS > crest[None, :]
+    depth = np.clip((YS - crest[None, :]) / 0.45, 0, 1)
+    # Gullies as a heightfield; its slope across gives the light from the west.
+    relief = fbm(H, W, 30, 120, 21, 6, ridged=True, gain=0.55) * 0.45 + fbm(H, W, 140, 260, 22, 4) * 0.55
+    gx = np.gradient(relief, axis=1) * W / 40
+    strata = fbm(H, W, 900, 6, 23, 3)
+    light = np.clip(0.55 - gx * 0.9 + (0.70 - X[None, :]) * 0.6, 0, 1) * (0.75 + 0.5 * strata)
+    glow = np.clip(1 - depth * 1.9, 0, 1) ** 1.3
+    lit = lerp(rgb(m["dark"]), rgb(m["rock"]), light[..., None])
+    lit = lerp(lit, rgb(m["glow"]), (np.clip(light - 0.6, 0, 1) * 2.2 * glow)[..., None])
+    rock = lerp(rgb(m["shadow"]), lit, (0.35 + 0.65 * glow)[..., None])
+    rock = lerp(rock, rgb(m["haze"]), (np.clip(depth - 0.35, 0, 1) * 0.9)[..., None])
     img = np.where(mask[..., None], rock, img)
 
-    # Fog: a bright band in the valley, thinning upwards.
-    fogn = noise2d(H, W, 120, 9, 4)
-    band = np.exp(-((rows - H * 0.70) / (H * 0.09)) ** 2) * (0.6 + 0.6 * fogn)
-    band += np.clip((rows - H * 0.66) / (H * 0.25), 0, 1) * 0.5
-    img = lerp(img, hexrgb(m["fog"]), np.clip(band * m["fog_a"], 0, 1)[..., None])
+    # A sea of fog with a rolling top.
+    edge = 0.62 + (noise1d(W, 180, 33, 6) - 0.5) * 0.08
+    fn = fbm(H, W, 300, 60, 31, 5)
+    band = (np.exp(-((YS - edge[None, :] - 0.02) / 0.06) ** 2) * (0.45 + 0.8 * fn)
+            + np.clip((YS - edge[None, :]) / 0.10, 0, 1))
+    img = lerp(img, rgb(m["fog"]), np.clip(band, 0, 0.97)[..., None])
 
-    # Forest: rows of firs, from the hazy back to the dark front.
+    out = Image.fromarray(np.clip(img, 0, 255).astype(np.uint8)).convert("RGBA")
     rng = np.random.default_rng(17)
-    forest = Image.fromarray(img.clip(0, 255).astype(np.uint8), "RGB").convert("RGBA")
-    for row, (y0, scale, col, alpha) in enumerate((
-        (0.80, 0.45, m["trees_far"], 170), (0.86, 0.65, m["trees_far"], 220),
-        (0.92, 0.95, m["trees"], 255), (1.02, 1.35, m["trees"], 255),
-    )):
+    for i, (y0, size, blur, gap) in enumerate([(0.80, 55, 1.5, 0.5), (0.85, 85, 1.0, 0.55), (0.91, 140, 0.5, 0.6), (1.0, 230, 0, 0.7)]):
         layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        from PIL import ImageDraw
-        d = ImageDraw.Draw(layer)
-        c = tuple(int(v) for v in hexrgb(col)) + (alpha,)
-        x = -20
-        while x < W + 20:
-            h = (70 + rng.random() * 90) * scale
-            w = h * (0.28 + rng.random() * 0.08)
-            base_y = H * y0 + rng.random() * 18 * scale
-            tiers = 6
-            for t in range(tiers):
-                ty = base_y - h * t / tiers
-                tw = w * (1 - t / tiers) + 2
-                d.polygon([(x - tw, ty), (x + tw, ty), (x, ty - h / tiers * 1.9)], fill=c)
-            d.rectangle((x - 2 * scale, min(base_y - 4, H - 1), x + 2 * scale, H), fill=c)
-            x += w * (0.9 + rng.random() * 0.9)
-        if row >= 2:
-            # Solid ground under the near rows.
-            d.rectangle((0, min(int(H * y0 + 10 * scale), H - 1), W, H), fill=c)
-        if row < 2:
-            layer = layer.filter(ImageFilter.GaussianBlur(1.2))
-        forest.alpha_composite(layer)
-        # A little mist between the rows.
-        if row < 3:
-            mist = Image.new("RGBA", (W, H), tuple(int(v) for v in hexrgb(m["fog"])) + (0,))
-            a = np.clip((np.arange(H) - H * (y0 + 0.02)) / (H * 0.1), 0, 1) * (1 - np.clip((np.arange(H) - H * (y0 + 0.08)) / (H * 0.1), 0, 1))
-            mist.putalpha(Image.fromarray(np.repeat((a * 60)[:, None], W, axis=1).astype(np.uint8), "L"))
-            forest.alpha_composite(mist)
-    out = forest.convert("RGB").filter(ImageFilter.GaussianBlur(0.6))
-    return out
+        draw = ImageDraw.Draw(layer)
+        color = tuple(int(v) for v in rgb(m["trees"][i])) + (255,)
+        x = -30.0
+        while x < W + 30:
+            h = size * (0.55 + 0.7 * rng.random())
+            fir(draw, rng, x, H * y0 + rng.random() * 12, h, color)
+            x += h * 0.22 * (gap + rng.random() * 0.9)
+        if H * y0 + 6 < H:
+            draw.rectangle((0, int(H * y0) + 6, W, H), fill=color)
+        if blur:
+            layer = layer.filter(ImageFilter.GaussianBlur(blur))
+        out.alpha_composite(layer)
+        if i < 3:
+            a = np.exp(-((np.arange(H) / H - (y0 + 0.03)) / 0.035) ** 2) * 90
+            mist = Image.new("RGBA", (W, H), m["mist"] + (0,))
+            mist.putalpha(Image.fromarray(np.repeat(a[:, None], W, 1).astype(np.uint8), "L"))
+            out.alpha_composite(mist)
+    a = np.asarray(out.convert("RGB"), float)
+    vignette = 1 - 0.30 * (((XS - 0.5) ** 2) * 1.5 + ((YS - 0.45) ** 2) * 1.3)
+    a = a * vignette[..., None] + (np.random.default_rng(9).random((H, W, 1)) - 0.5) * 4
+    return Image.fromarray(np.clip(a, 0, 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(0.5))
 
 
 def main():

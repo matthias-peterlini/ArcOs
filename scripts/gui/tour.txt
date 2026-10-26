@@ -26,6 +26,15 @@ shot 07-scrivania
 click 197 715
 wait 3
 shot 08-file
+key f11
+wait 1.5
+shot 08b-schermo-intero
+move 512 2
+wait 1
+shot 08c-controlli
+move 512 400
+key f11
+wait 1
 key ctrl-q
 wait 1
 click 259 715

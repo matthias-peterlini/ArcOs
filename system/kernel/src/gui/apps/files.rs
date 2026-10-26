@@ -215,7 +215,7 @@ impl Files {
     }
 
     fn content(area: Rect) -> Rect {
-        Rect::new(area.x + SIDEBAR + 8, area.y + 10, area.w - SIDEBAR - 18, area.h - 20)
+        Rect::new(area.x + SIDEBAR + 6, area.y, area.w - SIDEBAR - 6, area.h)
     }
 
     fn grid(area: Rect) -> (Rect, i32) {
@@ -275,17 +275,21 @@ impl App for Files {
         true
     }
 
+    fn sidebar(&self) -> i32 {
+        SIDEBAR - 2
+    }
+
     fn size(&self) -> (i32, i32) {
         (SIDEBAR + 18 + 24 + TILE_W * 4 + 8, 430)
     }
 
     fn draw(&mut self, c: &mut Canvas, area: Rect, _blur: &Canvas, _focused: bool) {
         // Places.
-        text::draw(c, Font::Small, area.x + 22, area.y + 18, "Risorse", TEXT_FAINT);
+        crate::gui::ui::caps(c, area.x + 22, area.y + 18, "Risorse", TEXT_FAINT);
         for (i, (name, path)) in PLACES.iter().enumerate() {
             let r = Rect::new(area.x + 10, area.y + 40 + i as i32 * 36, SIDEBAR - 12, 32);
             if fs::abs(path).is_ok_and(|p| p == self.dir) {
-                c.fill_round(r, 10, 0x2EFF_FFFF);
+                c.fill_round(r, 10, crate::gui::ui::SELECTED);
             }
             let icon = if *name == "Home" {
                 "folder-home"
@@ -299,7 +303,6 @@ impl App for Files {
         }
         // The folder.
         let content = Self::content(area);
-        c.fill_round(content, 16, 0xE023_1A2B);
         let back = Rect::new(content.x + 12, content.y + 12, 28, 28);
         c.fill_circle(back.x + 14, back.y + 14, 14, 0x26FF_FFFF);
         res::draw_icon(c, "g-back", 14, back.x + 7, back.y + 7);
@@ -346,7 +349,7 @@ impl App for Files {
             for (k, (label, act)) in items.iter().enumerate() {
                 let row = Rect::new(r.x + 5, r.y + 5 + k as i32 * MENU_ROW, r.w - 10, MENU_ROW - 2);
                 if self.hover_menu == Some(k) {
-                    c.fill_round(row, 7, crate::gui::ui::ACCENT);
+                    c.fill_round(row, 7, crate::gui::ui::SELECTED);
                 }
                 let color = if matches!(act, Do::Delete | Do::EmptyBin) && self.hover_menu != Some(k) { 0xFFFF_6961 } else { TEXT };
                 text::draw(c, Font::Body, row.x + 12, row.y + 6, label, color);

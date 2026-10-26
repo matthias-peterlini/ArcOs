@@ -298,6 +298,40 @@ impl Canvas {
         }
     }
 
+    /// A soft radial glow of `c` around (`cx`, `cy`), fading out at `radius`;
+    /// `strength` is the opacity at the centre (0..=255).
+    pub fn glow(&mut self, cx: i32, cy: i32, radius: i32, c: u32, strength: u32) {
+        let r = Rect::new(cx - radius, cy - radius, radius * 2, radius * 2);
+        self.glow_round(r, 0, cx, cy, radius, c, strength);
+    }
+
+    /// [`glow`](Self::glow), kept inside the rounded rectangle `r` (the rust
+    /// glow in the corner of a ticly card).
+    #[allow(clippy::too_many_arguments)]
+    pub fn glow_round(&mut self, r: Rect, rad: i32, cx: i32, cy: i32, radius: i32, c: u32, strength: u32) {
+        let radius = radius.max(1);
+        let rad = rad.min(r.w / 2).min(r.h / 2);
+        let area = r.intersect(&Rect::new(cx - radius, cy - radius, radius * 2, radius * 2)).intersect(&self.clip);
+        let r2 = radius as i64 * radius as i64;
+        for y in area.y..area.bottom() {
+            let dy = (y - cy) as i64;
+            for x in area.x..area.right() {
+                let dx = (x - cx) as i64;
+                let d2 = dx * dx + dy * dy;
+                if d2 >= r2 {
+                    continue;
+                }
+                // (1 - d/r)^2, smooth at the centre and at the edge.
+                let f = 1024 - (isqrt((d2 * 1024 * 1024 / r2) as u32) as i64);
+                let a = (strength as i64 * f * f / (1024 * 1024)) as u32;
+                let cov = round_cover(&r, rad, x, y);
+                if a > 0 && cov > 0 {
+                    self.put(x, y, c, a * cov / 16);
+                }
+            }
+        }
+    }
+
     /// The outline of a rounded rectangle, `width` pixels wide.
     pub fn stroke_round(&mut self, r: Rect, rad: i32, width: i32, c: u32) {
         let inner = r.grow(-width);

@@ -147,6 +147,7 @@ shots: image
 
 assets:
 	tools/assets/gen_fonts.py system/kernel/assets/fonts.bin
+	tools/assets/gen_logo.py system/kernel/assets/logo.bin
 	tools/assets/gen_icons.py rootfs/system/gui
 	tools/assets/gen_icons.py --store system/store
 	tools/assets/gen_wallpapers.py rootfs/system/gui/wallpapers

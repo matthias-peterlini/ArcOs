@@ -226,8 +226,11 @@ impl App for Store {
         true
     }
 
+    fn sidebar(&self) -> i32 {
+        SIDEBAR
+    }
+
     fn draw(&mut self, c: &mut Canvas, area: Rect, _blur: &Canvas, focused: bool) {
-        c.fill_round(Rect::new(area.x + 4, area.y + 4, SIDEBAR - 4, area.h - 8), 18, 0x22_00_00_00);
         ui::search_field(c, Self::search_rect(area), &self.search, "Cerca", self.searching && focused);
         for (i, (name, icon)) in SECTIONS.iter().enumerate() {
             let r = Self::place(area, i);

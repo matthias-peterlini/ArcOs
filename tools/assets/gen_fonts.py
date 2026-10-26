@@ -13,8 +13,9 @@ Format (little-endian):
                u32 offset of the mask in the data area
     data area: one byte of coverage (0-255) per mask pixel, row by row
 
-Fonts: Inter (SIL Open Font License) and DejaVu Sans Mono (Bitstream Vera
-licence); see system/kernel/assets/LICENSES.md.
+Fonts: Plus Jakarta Sans (SIL Open Font License, in tools/assets/fonts, the
+typeface of the ticly apps) and DejaVu Sans Mono (Bitstream Vera licence);
+see system/kernel/assets/LICENSES.md.
 
 Usage: tools/assets/gen_fonts.py [output]
 """
@@ -23,7 +24,9 @@ import sys
 
 from PIL import Image, ImageDraw, ImageFont
 
-INTER = "/usr/share/fonts/opentype/inter/"
+import os
+
+JAKARTA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts", "PlusJakartaSans-")
 DEJAVU = "/usr/share/fonts/truetype/dejavu/"
 
 TEXT = [chr(c) for c in range(0x20, 0x7F)] + list("àèéìòùÀÈÉÌÒÙçÇ°·…–—€«»‘’“”×÷±²³")
@@ -31,14 +34,15 @@ DIGITS = list(" 0123456789:.,-")
 
 # (file, pixel size, characters) — the order is the font id in the kernel.
 FONTS = [
-    (INTER + "Inter-Regular.otf", 14, TEXT),            # 0 body
-    (INTER + "Inter-SemiBold.otf", 14, TEXT),           # 1 body, strong
-    (INTER + "Inter-Regular.otf", 12, TEXT),            # 2 small
-    (INTER + "Inter-SemiBold.otf", 18, TEXT),           # 3 heading
-    (INTER + "InterDisplay-SemiBold.otf", 34, TEXT),    # 4 title
-    (INTER + "InterDisplay-Light.otf", 64, DIGITS),     # 5 big clock
+    (JAKARTA + "Medium.ttf", 14, TEXT),                 # 0 body
+    (JAKARTA + "Bold.ttf", 14, TEXT),                   # 1 body, strong
+    (JAKARTA + "Medium.ttf", 12, TEXT),                 # 2 small
+    (JAKARTA + "Bold.ttf", 18, TEXT),                   # 3 heading
+    (JAKARTA + "ExtraBold.ttf", 34, TEXT),              # 4 title
+    (JAKARTA + "ExtraBold.ttf", 64, DIGITS),            # 5 big clock
     (DEJAVU + "DejaVuSansMono.ttf", 14, TEXT),          # 6 terminal
-    (INTER + "InterDisplay-Bold.otf", 22, TEXT),        # 7 logo / buttons
+    (JAKARTA + "ExtraBold.ttf", 22, TEXT),              # 7 logo / buttons
+    (JAKARTA + "Bold.ttf", 11, TEXT),                   # 8 spaced capitals ("OGGI")
 ]
 
 
