@@ -22,7 +22,7 @@ use arcdk::syscall::{self as sys, Error};
 use core::ffi::c_void;
 
 const STACK_PAGES: u64 = 64;
-const USER_TOP: u64 = 0x0000_8000_0000_0000;
+pub(crate) const USER_TOP: u64 = 0x0000_8000_0000_0000;
 const MAX_HANDLES: usize = 64;
 
 #[derive(Clone)]
@@ -47,6 +47,11 @@ struct Process {
     name: String,
     cr3: u64,
     tid: Tid,
+    /// Every thread of the process (the first one included).
+    threads: Vec<Tid>,
+    /// The exit code once one thread ended the whole process, while the
+    /// others are still stopping.
+    exit_code: Option<i64>,
     handles: Vec<Option<Handle>>,
     heap_next: u64,
     cwd: Path,
@@ -101,6 +106,8 @@ struct Start {
     image: Vec<u8>,
     args: String,
     kind: Kind,
+    /// The program file (Linux programs see it as /proc/self/exe).
+    exe: String,
 }
 
 /// A path as one argument, quoted if it has spaces.
@@ -121,7 +128,7 @@ pub fn spawn(path: &Path, args: &str, cwd: Path) -> Result<u32, Error> {
         let runner = fs::abs(SCRIPT_RUNNER).map_err(fs_error)?;
         let image = fs::read_file(&runner).map_err(fs_error)?;
         let shown = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
-        return start(image, String::from(shown), &alloc::format!("run {} {args}", quoted(path)), cwd, Kind::Native);
+        return start(image, String::from(shown), &alloc::format!("run {} {args}", quoted(path)), cwd, Kind::Native, path);
     }
     let mut magic = [0u8; 4];
     fs::read_at(path, 0, &mut magic).map_err(fs_error)?;
@@ -130,15 +137,15 @@ pub fn spawn(path: &Path, args: &str, cwd: Path) -> Result<u32, Error> {
         let runner = fs::abs(WINDOWS_RUNNER).map_err(fs_error)?;
         let image = fs::read_file(&runner).map_err(fs_error)?;
         let shown = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
-        return start(image, String::from(shown), &alloc::format!("{} {args}", quoted(path)), cwd, Kind::Native);
+        return start(image, String::from(shown), &alloc::format!("{} {args}", quoted(path)), cwd, Kind::Native, path);
     }
     let image = fs::read_file(path).map_err(fs_error)?;
     let kind = if name.to_ascii_lowercase().ends_with(".app") { Kind::Native } else { Kind::Linux };
     let shown = if kind == Kind::Native { &name[..name.len() - 4] } else { name };
-    start(image, String::from(shown), args, cwd, kind)
+    start(image, String::from(shown), args, cwd, kind, path)
 }
 
-fn start(image: Vec<u8>, name: String, args: &str, cwd: Path, kind: Kind) -> Result<u32, Error> {
+fn start(image: Vec<u8>, name: String, args: &str, cwd: Path, kind: Kind, exe: &Path) -> Result<u32, Error> {
     if image.len() < 64 || &image[..4] != b"\x7fELF" {
         return Err(Error::BadProgram);
     }
@@ -155,6 +162,8 @@ fn start(image: Vec<u8>, name: String, args: &str, cwd: Path, kind: Kind) -> Res
             name: name.clone(),
             cr3,
             tid: 0,
+            threads: Vec::new(),
+            exit_code: None,
             handles: Vec::new(),
             heap_next: sys::USER_HEAP_BASE,
             cwd,
@@ -162,12 +171,14 @@ fn start(image: Vec<u8>, name: String, args: &str, cwd: Path, kind: Kind) -> Res
             kill: false,
         },
     );
-    let start = Box::into_raw(Box::new(Start { image, args: String::from(args), kind }));
-    match task::spawn_in(&name, user_start, start as *mut c_void, cr3, pid) {
+    let start = Box::into_raw(Box::new(Start { image, args: String::from(args), kind, exe: alloc::format!("{exe}") }));
+    match task::spawn_suspended(&name, user_start, start as *mut c_void, cr3, pid) {
         Some(tid) => {
             if let Some(p) = PROCS.lock().get_mut(&pid) {
                 p.tid = tid;
+                p.threads.push(tid);
             }
+            task::wake_new(tid);
             Ok(pid)
         }
         None => {
@@ -196,7 +207,7 @@ unsafe extern "C" fn user_start(arg: *mut c_void) {
     let start = unsafe { Box::from_raw(arg as *mut Start) };
     let (entry, rsp, rdi, rsi) = match start.kind {
         Kind::Native => native_image(&start),
-        Kind::Linux => match crate::linux::load(&start.image, &current_name(), &start.args) {
+        Kind::Linux => match crate::linux::load(&start.image, &current_name(), &start.args, &start.exe) {
             Ok((entry, rsp)) => (entry, rsp, 0, 0),
             Err(e) => {
                 crate::println!("\x1b[91m{}: {}\x1b[0m", current_name(), e.as_str());
@@ -279,29 +290,143 @@ pub(crate) fn current_name() -> String {
     PROCS.lock().get(&pid).map(|p| p.name.clone()).unwrap_or_default()
 }
 
-/// Ends the calling process.
+/// Ends the calling process. With other threads still running, they are
+/// told to stop; the last one out frees the address space.
 pub(crate) fn terminate(code: i64) -> ! {
     let pid = task::current_pid();
-    cpu::disable_irq();
-    let cr3 = {
+    let me = task::current_tid();
+    let last = {
         let mut procs = PROCS.lock();
         match procs.get_mut(&pid) {
             Some(p) => {
-                p.state = State::Exited(code);
-                p.handles.clear();
-                core::mem::replace(&mut p.cr3, 0)
+                let code = *p.exit_code.get_or_insert(code);
+                p.threads.retain(|&t| t != me);
+                if p.threads.is_empty() {
+                    p.state = State::Exited(code);
+                    p.handles.clear();
+                    Some(core::mem::replace(&mut p.cr3, 0))
+                } else {
+                    p.kill = true;
+                    None
+                }
             }
-            None => 0,
+            None => Some(0),
         }
     };
+    match last {
+        Some(cr3) => teardown(pid, cr3),
+        None => task::exit(),
+    }
+}
+
+/// The calling thread ends; the process goes on if it has others.
+pub(crate) fn exit_thread(code: i64) -> ! {
+    let pid = task::current_pid();
+    let me = task::current_tid();
+    let others = PROCS.lock().get(&pid).is_some_and(|p| p.threads.iter().any(|&t| t != me));
+    if !others {
+        terminate(code);
+    }
+    if let Some(p) = PROCS.lock().get_mut(&pid) {
+        p.threads.retain(|&t| t != me);
+    }
+    task::exit()
+}
+
+fn teardown(pid: u32, cr3: u64) -> ! {
+    cpu::disable_irq();
+    // Descriptors (sockets, pipes) are closed before the memory goes.
+    cpu::enable_irq();
+    crate::linux::forget(pid);
+    cpu::disable_irq();
     if cr3 != 0 {
         task::leave_address_space();
         paging::free_address_space(cr3);
     }
-    crate::linux::forget(pid);
     crate::gui::window::process_ended(pid);
     EXITED.notify_all();
     task::exit();
+}
+
+/// The first thread of the calling process.
+pub(crate) fn main_thread() -> Option<Tid> {
+    let pid = task::current_pid();
+    PROCS.lock().get(&pid).map(|p| p.tid)
+}
+
+struct ThreadStart {
+    frame: TrapFrame,
+    fs: u64,
+}
+
+/// Starts another thread in the calling process, resuming user mode with
+/// the registers of `frame` (a copy of the parent's, as `clone` makes it).
+/// The thread is created suspended: wake it with [`task::wake_new`].
+pub(crate) fn spawn_thread(frame: TrapFrame, fs: u64) -> Result<Tid, Error> {
+    let pid = task::current_pid();
+    let (cr3, name) = {
+        let procs = PROCS.lock();
+        let p = procs.get(&pid).ok_or(Error::Unknown)?;
+        if p.kill {
+            return Err(Error::Unknown);
+        }
+        (p.cr3, p.name.clone())
+    };
+    if PROCS.lock().get(&pid).map_or(0, |p| p.threads.len()) >= 512 {
+        return Err(Error::NoMemory);
+    }
+    let arg = Box::into_raw(Box::new(ThreadStart { frame, fs }));
+    match task::spawn_suspended(&name, thread_start, arg as *mut c_void, cr3, pid) {
+        Some(tid) => {
+            if let Some(p) = PROCS.lock().get_mut(&pid) {
+                p.threads.push(tid);
+            }
+            Ok(tid)
+        }
+        None => {
+            // SAFETY: not handed to any thread; take it back.
+            drop(unsafe { Box::from_raw(arg) });
+            Err(Error::NoMemory)
+        }
+    }
+}
+
+unsafe extern "C" fn thread_start(arg: *mut c_void) {
+    // SAFETY: the Box leaked by spawn_thread, used once.
+    let start = unsafe { Box::from_raw(arg as *mut ThreadStart) };
+    let frame = start.frame;
+    let (_, gs) = crate::arch::syscall::user_bases();
+    crate::arch::syscall::set_user_bases(start.fs, gs);
+    drop(start);
+    // SAFETY: the frame holds user-mode registers of this address space.
+    unsafe { resume_user(&frame) }
+}
+
+/// Returns to user mode with every register from `frame`, through the
+/// common trap return path.
+///
+/// # Safety
+/// `frame` must describe user code and stack of the running address space.
+unsafe fn resume_user(frame: &TrapFrame) -> ! {
+    let mut f = *frame;
+    f.cs = gdt::USER_CODE as u64;
+    f.ss = gdt::USER_DATA as u64;
+    f.rflags |= 0x200;
+    extern "C" {
+        fn trap_return();
+    }
+    // SAFETY: `f` lives on this kernel stack; with interrupts off, rsp is
+    // pointed at it and trap_return pops it and leaves with iretq.
+    unsafe {
+        core::arch::asm!(
+            "cli",
+            "mov rsp, {f}",
+            "jmp {ret}",
+            f = in(reg) &f as *const TrapFrame,
+            ret = sym trap_return,
+            options(noreturn)
+        );
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -334,7 +459,7 @@ pub fn run_foreground(path: &Path, args: &str, cwd: Path) -> Result<i64, Error> 
 /// how the shell runs `ls` out of a single `busybox` image.
 pub fn run_applet_foreground(path: &Path, argv0: &str, args: &str, cwd: Path) -> Result<i64, Error> {
     let image = fs::read_file(path).map_err(fs_error)?;
-    let pid = start(image, String::from(argv0), args, cwd, Kind::Linux)?;
+    let pid = start(image, String::from(argv0), args, cwd, Kind::Linux, path)?;
     *FOREGROUND.lock() = Some(pid);
     let code = wait(pid);
     *FOREGROUND.lock() = None;
@@ -387,6 +512,8 @@ pub(crate) fn user_slice<'a>(ptr: u64, len: u64) -> Result<&'a mut [u8], Error> 
     if ptr == 0 || end > USER_TOP {
         return Err(Error::BadAddress);
     }
+    // Pages a Linux program reserved but never touched are made now.
+    crate::linux::mm::populate(ptr, len);
     let cr3 = cpu::read_cr3();
     let mut page = mem::align_down(ptr, PAGE_SIZE);
     while page < end {
@@ -396,7 +523,8 @@ pub(crate) fn user_slice<'a>(ptr: u64, len: u64) -> Result<&'a mut [u8], Error> 
         page += PAGE_SIZE;
     }
     // SAFETY: every page of the range is mapped for user access in the
-    // current address space, and the process has a single thread.
+    // current address space. Other threads of the process may write to it
+    // too, as they could on Linux; the kernel only copies bytes.
     Ok(unsafe { core::slice::from_raw_parts_mut(ptr as *mut u8, len as usize) })
 }
 
@@ -410,6 +538,9 @@ pub(crate) fn user_cstr(ptr: u64, max: u64) -> Result<String, Error> {
     let mut out = Vec::new();
     let mut at = ptr;
     while (out.len() as u64) < max {
+        if at < USER_TOP && !paging::user_accessible(cr3, mem::align_down(at, PAGE_SIZE)) {
+            crate::linux::mm::populate(at, 1);
+        }
         if at >= USER_TOP || !paging::user_accessible(cr3, mem::align_down(at, PAGE_SIZE)) {
             return Err(Error::BadAddress);
         }
@@ -792,6 +923,10 @@ pub fn syscall(frame: &mut TrapFrame) {
 }
 
 pub fn fault(frame: &mut TrapFrame, what: &str) {
+    // A page a Linux program reserved and touches for the first time.
+    if frame.vector == 14 && crate::linux::mm::fault(cpu::read_cr2(), frame.error & 2 != 0) {
+        return;
+    }
     cpu::enable_irq();
     let extra = if frame.vector == 14 { alloc::format!(" (address {:#x})", cpu::read_cr2()) } else { String::new() };
     crate::println!("\x1b[91m{} stopped: {what} at {:#x}{extra}\x1b[0m", current_name(), frame.rip);

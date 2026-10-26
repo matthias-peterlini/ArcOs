@@ -740,6 +740,70 @@ pub fn timers() {
 /// A connection (or a listener), by number.
 pub type Conn = u32;
 
+/// Starts opening a connection to `ip`:`port` from `local_port` (0: any),
+/// without waiting: [`status`] tells how it goes.
+pub fn open(ip: Ip, port: u16, local_port: u16) -> Result<Conn, &'static str> {
+    if local_ip().is_none() {
+        return Err("the network is not configured");
+    }
+    let mut out = Vec::new();
+    let id = {
+        let mut t = TABLE.lock();
+        let tab = &mut *t;
+        let mut lport = if local_port != 0 { local_port } else { tab.next_port };
+        if local_port == 0 {
+            for _ in 0..16384 {
+                lport = if lport >= 65535 { 49152 } else { lport + 1 };
+                if !tab.conns.values().any(|c| c.local_port == lport) {
+                    break;
+                }
+            }
+            tab.next_port = lport;
+        }
+        let mut c = Tcb::new(lport, (ip, port), State::SynSent);
+        let opts = c.syn_options();
+        let seq = c.snd_nxt;
+        let o = c.header(SYN, seq, &[], &opts);
+        out.push(o);
+        c.snd_nxt = c.snd_nxt.wrapping_add(1);
+        c.arm_timer();
+        let id = tab.next_id;
+        tab.next_id += 1;
+        tab.conns.insert(id, c);
+        id
+    };
+    send_all(out);
+    Ok(id)
+}
+
+/// How a connection being opened is doing: `None` while it is still
+/// trying, then `Ok` or the reason it failed.
+pub fn status(id: Conn) -> Option<Result<(), &'static str>> {
+    let t = TABLE.lock();
+    let Some(c) = t.conns.get(&id) else { return Some(Err("connection reset by peer")) };
+    match c.state {
+        State::SynSent | State::SynReceived => None,
+        State::Closed => Some(Err(c.error.unwrap_or("connection failed"))),
+        _ => Some(c.error.map_or(Ok(()), Err)),
+    }
+}
+
+/// Copies received bytes without taking them.
+pub fn peek(id: Conn, buf: &mut [u8]) -> usize {
+    let t = TABLE.lock();
+    let Some(c) = t.conns.get(&id) else { return 0 };
+    let n = buf.len().min(c.recv_buf.len());
+    for (d, s) in buf.iter_mut().zip(c.recv_buf.iter()) {
+        *d = *s;
+    }
+    n
+}
+
+/// Bytes received and not read yet.
+pub fn pending(id: Conn) -> usize {
+    TABLE.lock().conns.get(&id).map_or(0, |c| c.recv_buf.len())
+}
+
 /// Opens a connection to `ip`:`port`; waits up to `timeout_ms`.
 pub fn connect(ip: Ip, port: u16, timeout_ms: u64) -> Result<Conn, &'static str> {
     if local_ip().is_none() {

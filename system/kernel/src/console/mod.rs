@@ -231,20 +231,42 @@ impl Terminal {
         let n = |i: usize| params.get(i).copied().unwrap_or(0) as usize;
         match cmd {
             b'm' => self.sgr(params),
-            b'J' if n(0) == 2 => self.clear(),
+            b'J' if n(0) >= 2 => self.clear(),
+            b'J' => {
+                // 0: from the cursor to the end; 1: from the start to the cursor.
+                let (c, r) = (self.col, self.row);
+                for y in 0..self.rows {
+                    for x in 0..self.cols {
+                        let after = (y, x) >= (r, c);
+                        if after == (n(0) == 0) {
+                            *self.cell(x, y) = Cell { bg: self.bg, ..BLANK };
+                            self.redraw_cell(x, y, false);
+                        }
+                    }
+                }
+            }
             b'K' => {
                 let (c, r) = (self.col, self.row);
-                for x in c..self.cols {
+                let (from, to) = match n(0) {
+                    1 => (0, c + 1),
+                    2 => (0, self.cols),
+                    _ => (c, self.cols),
+                };
+                for x in from..to.min(self.cols) {
                     *self.cell(x, r) = Cell { bg: self.bg, ..BLANK };
                     self.redraw_cell(x, r, false);
                 }
             }
-            b'H' => {
+            b'H' | b'f' => {
                 self.row = n(0).saturating_sub(1).min(self.rows - 1);
                 self.col = n(1).saturating_sub(1).min(self.cols - 1);
             }
+            b'A' => self.row = self.row.saturating_sub(n(0).max(1)),
+            b'B' => self.row = (self.row + n(0).max(1)).min(self.rows - 1),
             b'D' => self.col = self.col.saturating_sub(n(0).max(1)),
             b'C' => self.col = (self.col + n(0).max(1)).min(self.cols - 1),
+            b'G' => self.col = n(0).saturating_sub(1).min(self.cols - 1),
+            b'd' => self.row = n(0).saturating_sub(1).min(self.rows - 1),
             _ => {}
         }
     }
@@ -272,6 +294,8 @@ impl Terminal {
                         self.esc = Esc::Csi { params, count };
                     }
                     '\x40'..='\x7e' => self.csi(c as u8, &params[..count]),
+                    // Private markers ("\x1b[?25l"): the sequence goes on.
+                    '?' | '>' | '=' | ' ' => self.esc = Esc::Csi { params, count },
                     _ => {}
                 }
                 return;

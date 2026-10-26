@@ -80,7 +80,9 @@ struct Stack {
 
 static STACK: IrqLock<Stack> =
     IrqLock::new(Stack { ifaces: BTreeMap::new(), arp: BTreeMap::new(), pings: BTreeMap::new(), udp: BTreeMap::new(), ident: 1 });
-static EVENTS: WaitQueue = WaitQueue::new();
+/// Signalled on every network event (and by pipes and eventfds of Linux
+/// programs, so that poll and epoll wait on a single queue).
+pub(crate) static EVENTS: WaitQueue = WaitQueue::new();
 
 fn checksum(data: &[u8]) -> u16 {
     let mut sum = 0u32;
@@ -112,7 +114,7 @@ fn checksum_with(src: Ip, dst: Ip, proto: u8, data: &[u8]) -> u16 {
 }
 
 /// Our address (of the first interface that has one).
-fn local_ip() -> Option<Ip> {
+pub(crate) fn local_ip() -> Option<Ip> {
     let s = STACK.lock();
     s.ifaces.values().find(|i| i.dhcp == Dhcp::Bound || i.config.ip != Ip::ANY).map(|i| i.config.ip)
 }
@@ -545,6 +547,52 @@ pub fn arp_table() -> Vec<(Ip, Mac, u64)> {
 /// Does any interface have an address?
 pub fn online() -> bool {
     STACK.lock().ifaces.values().any(|i| i.dhcp == Dhcp::Bound)
+}
+
+/// The DNS server from DHCP.
+pub fn dns_server() -> Option<Ip> {
+    STACK.lock().ifaces.values().find(|i| i.dhcp == Dhcp::Bound).map(|i| i.config.dns).filter(|d| *d != Ip::ANY)
+}
+
+// ----------------------------------------------------------------------------
+// UDP for sockets
+
+/// Opens UDP port `port` (0: any free one). Returns the port.
+pub fn udp_bind(port: u16) -> Result<u16, &'static str> {
+    let mut s = STACK.lock();
+    let port = if port == 0 {
+        let mut p = 40000 + (time::uptime_ms() % 20000) as u16;
+        for _ in 0..25000 {
+            if !s.udp.contains_key(&p) {
+                break;
+            }
+            p = if p >= 64999 { 40000 } else { p + 1 };
+        }
+        p
+    } else {
+        port
+    };
+    if s.udp.contains_key(&port) {
+        return Err("address in use");
+    }
+    s.udp.insert(port, Vec::new());
+    Ok(port)
+}
+
+pub fn udp_close(port: u16) {
+    STACK.lock().udp.remove(&port);
+}
+
+/// The next datagram on `port`: (sender, sender's port, data).
+pub fn udp_try_recv(port: u16) -> Option<(Ip, u16, Vec<u8>)> {
+    let mut s = STACK.lock();
+    let q = s.udp.get_mut(&port)?;
+    (!q.is_empty()).then(|| q.remove(0))
+}
+
+/// Bytes in the next datagram waiting on `port`, if any.
+pub fn udp_peek(port: u16) -> Option<usize> {
+    STACK.lock().udp.get(&port).and_then(|q| q.first().map(|d| d.2.len()))
 }
 
 /// The address of the first interface that has one (for the interface).

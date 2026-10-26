@@ -210,6 +210,15 @@ pub fn spawn_raw(name: &str, entry: Entry, arg: *mut c_void) -> Option<Tid> {
 }
 
 pub(crate) fn spawn_in(name: &str, entry: Entry, arg: *mut c_void, cr3: u64, pid: u32) -> Option<Tid> {
+    spawn_with(name, entry, arg, cr3, pid, false)
+}
+
+/// Like [`spawn_in`], but the thread waits for [`wake`] before it runs.
+pub(crate) fn spawn_suspended(name: &str, entry: Entry, arg: *mut c_void, cr3: u64, pid: u32) -> Option<Tid> {
+    spawn_with(name, entry, arg, cr3, pid, true)
+}
+
+fn spawn_with(name: &str, entry: Entry, arg: *mut c_void, cr3: u64, pid: u32, suspended: bool) -> Option<Tid> {
     let stack = region::alloc_pages(&region::STACKS, STACK_PAGES, 1)?;
     let top = stack + STACK_PAGES * mem::PAGE_SIZE;
     let rsp = top - 9 * 8;
@@ -236,7 +245,11 @@ pub(crate) fn spawn_in(name: &str, entry: Entry, arg: *mut c_void, cr3: u64, pid
             fpu: FpuArea::new(),
         }),
     );
-    s.ready.push_back(tid);
+    if suspended {
+        s.threads.get_mut(&tid).unwrap().state = State::Blocked;
+    } else {
+        s.ready.push_back(tid);
+    }
     Some(tid)
 }
 
@@ -435,6 +448,16 @@ pub fn leave_address_space() {
     }
     // SAFETY: the kernel tables map everything the kernel needs.
     unsafe { cpu::write_cr3(mem::paging::kernel_pml4()) };
+}
+
+/// The running thread.
+pub fn current_tid() -> Tid {
+    SCHED.lock().current
+}
+
+/// Lets a thread made with [`spawn_suspended`] run.
+pub fn wake_new(tid: Tid) {
+    wake(tid);
 }
 
 pub fn current_pid() -> u32 {

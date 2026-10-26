@@ -1,0 +1,1008 @@
+//! Running Linux programs.
+//!
+//! arcOS loads statically linked Linux executables (built against musl or
+//! glibc, or by the Go and Rust toolchains) and serves the Linux system
+//! calls they make. Programs arrive on the `syscall` instruction (see
+//! [`crate::arch::syscall`]) with the call number in `rax` and arguments in
+//! `rdi, rsi, rdx, r10, r8, r9`, as on Linux for x86-64.
+//!
+//! What is there: files and folders (the Linux file tree is a view of the
+//! process's arcOS volume), the console as a terminal ([`tty`]), memory with
+//! demand paging ([`mm`]), threads and futexes ([`thread`]), pipes and
+//! eventfds ([`fd`]), TCP and UDP sockets ([`sock`]), poll, select and epoll
+//! ([`poll`]), clocks and randomness. What is not: new processes (fork,
+//! exec), shared libraries, asynchronous signal delivery.
+
+pub mod fd;
+pub mod mm;
+mod poll;
+mod sock;
+mod thread;
+mod tty;
+
+use crate::arch::idt::TrapFrame;
+use crate::fs::Path;
+use crate::mem::{self, PAGE_SIZE};
+use crate::sync::IrqLock;
+use crate::task;
+use crate::user;
+use alloc::collections::BTreeMap;
+use alloc::string::{String, ToString};
+use alloc::sync::Arc;
+use alloc::vec::Vec;
+use arcdk::syscall::Error as ArcError;
+
+/// Seconds between the Unix epoch (1970) and arcOS's epoch (2000).
+pub const UNIX_2000: u64 = 946_684_800;
+
+// ----------------------------------------------------------------------------
+// Errors (Linux errno values, returned negated)
+
+#[allow(dead_code)]
+pub mod err {
+    pub const EPERM: i64 = 1;
+    pub const ENOENT: i64 = 2;
+    pub const ESRCH: i64 = 3;
+    pub const EINTR: i64 = 4;
+    pub const EBADF: i64 = 9;
+    pub const ECHILD: i64 = 10;
+    pub const EAGAIN: i64 = 11;
+    pub const ENOMEM: i64 = 12;
+    pub const EACCES: i64 = 13;
+    pub const EFAULT: i64 = 14;
+    pub const EEXIST: i64 = 17;
+    pub const ENOTDIR: i64 = 20;
+    pub const EISDIR: i64 = 21;
+    pub const EINVAL: i64 = 22;
+    pub const EMFILE: i64 = 24;
+    pub const ENOTTY: i64 = 25;
+    pub const ENOSPC: i64 = 28;
+    pub const ESPIPE: i64 = 29;
+    pub const EPIPE: i64 = 32;
+    pub const ERANGE: i64 = 34;
+    pub const ENOSYS: i64 = 38;
+    pub const ENOTEMPTY: i64 = 39;
+    pub const ENOTSOCK: i64 = 88;
+    pub const EDESTADDRREQ: i64 = 89;
+    pub const EOPNOTSUPP: i64 = 95;
+    pub const EAFNOSUPPORT: i64 = 97;
+    pub const EADDRINUSE: i64 = 98;
+    pub const ENETUNREACH: i64 = 101;
+    pub const ECONNRESET: i64 = 104;
+    pub const EISCONN: i64 = 106;
+    pub const ENOTCONN: i64 = 107;
+    pub const ETIMEDOUT: i64 = 110;
+    pub const ECONNREFUSED: i64 = 111;
+    pub const EALREADY: i64 = 114;
+    pub const EINPROGRESS: i64 = 115;
+}
+
+pub fn errno(e: ArcError) -> i64 {
+    match e {
+        ArcError::NotFound => err::ENOENT,
+        ArcError::Exists => err::EEXIST,
+        ArcError::NotDir => err::ENOTDIR,
+        ArcError::IsDir => err::EISDIR,
+        ArcError::NotEmpty => err::ENOTEMPTY,
+        ArcError::NoSpace => err::ENOSPC,
+        ArcError::InvalidName => err::EINVAL,
+        ArcError::ReadOnly => err::EACCES,
+        ArcError::Io => err::EACCES,
+        ArcError::BadHandle => err::EBADF,
+        ArcError::BadAddress => err::EFAULT,
+        ArcError::NoMemory => err::ENOMEM,
+        ArcError::BadProgram => err::ENOENT,
+        ArcError::Unknown => err::EINVAL,
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Per-process state
+
+pub struct LinuxState {
+    /// Open descriptors and their close-on-exec flag.
+    pub fds: BTreeMap<i32, (Arc<fd::Desc>, bool)>,
+    pub brk_start: u64,
+    pub brk_cur: u64,
+    pub mmap_next: u64,
+    /// Areas reserved with mmap (and the stack), by start address.
+    pub vmas: BTreeMap<u64, mm::Vma>,
+    /// Per thread: where to write 0 and wake when it ends.
+    pub clear_tid: BTreeMap<task::Tid, u64>,
+    pub sigactions: [[u8; 32]; 65],
+    pub sigmask: u64,
+    pub altstack: [u8; 24],
+    /// The program, as a Linux path.
+    pub exe: String,
+}
+
+const BRK_BASE: u64 = 0x1000_0000_0000;
+
+impl LinuxState {
+    fn new() -> LinuxState {
+        let mut fds = BTreeMap::new();
+        let console = fd::Desc::new(fd::Kind::Console, fd::O_RDWR);
+        for i in 0..3 {
+            fds.insert(i, (console.clone(), false));
+        }
+        LinuxState {
+            fds,
+            brk_start: BRK_BASE,
+            brk_cur: BRK_BASE,
+            mmap_next: mm::MMAP_BASE,
+            vmas: mm::new_map(),
+            clear_tid: BTreeMap::new(),
+            sigactions: [[0; 32]; 65],
+            sigmask: 0,
+            altstack: [0; 24],
+            exe: String::new(),
+        }
+    }
+}
+
+static STATES: IrqLock<BTreeMap<u32, LinuxState>> = IrqLock::new(BTreeMap::new());
+
+/// Drops the Linux state of a process that is ending (closing its
+/// descriptors outside the lock).
+pub fn forget(pid: u32) {
+    let st = STATES.lock().remove(&pid);
+    drop(st);
+}
+
+pub fn with_state<T>(f: impl FnOnce(&mut LinuxState) -> T) -> T {
+    let pid = task::current_pid();
+    let mut states = STATES.lock();
+    f(states.entry(pid).or_insert_with(LinuxState::new))
+}
+
+/// Like [`with_state`], but only for a process that already has a Linux
+/// state (never creates one: native programs fault through here too).
+pub fn try_state<T>(f: impl FnOnce(&mut LinuxState) -> T) -> Option<T> {
+    let pid = task::current_pid();
+    let mut states = STATES.lock();
+    states.get_mut(&pid).map(f)
+}
+
+/// The program's path as Linux shows it.
+pub fn exe_path() -> String {
+    with_state(|st| st.exe.clone())
+}
+
+// ----------------------------------------------------------------------------
+// Paths: a Linux path names a place in the running process's arcOS volume.
+
+pub fn linux_path(text: &str) -> Result<Path, i64> {
+    let cwd = user::cwd().map_err(errno)?;
+    // An absolute Linux path is rooted at the volume; a relative one hangs
+    // off the current folder.
+    let base = if text.starts_with('/') { Path::root(&cwd.volume) } else { cwd };
+    Path::parse(text, &base).map_err(|e| errno(user::fs_error(e)))
+}
+
+/// Turns an arcOS path back into the Linux path a program sees ("/a/b").
+pub fn show_path(path: &Path) -> String {
+    path.inner.clone()
+}
+
+pub fn user_bytes<'a>(ptr: u64, len: u64) -> Result<&'a mut [u8], i64> {
+    user::user_slice(ptr, len).map_err(errno)
+}
+
+// ----------------------------------------------------------------------------
+// Loading a static executable
+
+/// Loads a Linux program into the current (empty) address space and returns
+/// its entry point and the initial stack pointer. The stack holds argc, the
+/// argument and environment pointers and the auxiliary vector, as the System
+/// V ABI lays them out.
+pub fn load(elf: &[u8], name: &str, args: &str, exe: &str) -> Result<(u64, u64), ArcError> {
+    if needs_interpreter(elf) {
+        crate::println!("\x1b[91m{name}: this program needs Linux shared libraries; arcOS runs static programs only\x1b[0m");
+        return Err(ArcError::BadProgram);
+    }
+    let info = map_segments(elf).map_err(|_| ArcError::BadProgram)?;
+    let argv = core::iter::once(name.to_string()).chain(arcrt_split(args)).collect::<Vec<_>>();
+    // The Linux view of the program's path ("/apps/rg").
+    let exe_linux = match exe.split_once(':') {
+        Some((_, rest)) => rest.to_string(),
+        None => exe.to_string(),
+    };
+    tty::reset();
+    with_state(|st| {
+        st.exe = exe_linux.clone();
+        st.brk_start = info.brk;
+        st.brk_cur = info.brk;
+    });
+    let stack = build_stack(&info, &argv, &exe_linux)?;
+    Ok((info.entry, stack))
+}
+
+/// Does the ELF ask for a dynamic loader (PT_INTERP)?
+fn needs_interpreter(elf: &[u8]) -> bool {
+    const PT_INTERP: u32 = 3;
+    let (Some(phoff), Some(phent), Some(phnum)) = (u64_at(elf, 32), u16_at(elf, 54), u16_at(elf, 56)) else { return false };
+    (0..phnum as u64).any(|i| u32_at(elf, (phoff + i * phent as u64) as usize) == Some(PT_INTERP))
+}
+
+struct Loaded {
+    entry: u64,
+    phdr: u64,
+    phent: u64,
+    phnum: u64,
+    /// The first page after the program: where the break starts.
+    brk: u64,
+}
+
+const PT_LOAD: u32 = 1;
+const PT_PHDR: u32 = 6;
+
+fn u16_at(b: &[u8], o: usize) -> Option<u16> {
+    Some(u16::from_le_bytes(b.get(o..o + 2)?.try_into().ok()?))
+}
+fn u32_at(b: &[u8], o: usize) -> Option<u32> {
+    Some(u32::from_le_bytes(b.get(o..o + 4)?.try_into().ok()?))
+}
+fn u64_at(b: &[u8], o: usize) -> Option<u64> {
+    Some(u64::from_le_bytes(b.get(o..o + 8)?.try_into().ok()?))
+}
+
+/// Maps the loadable segments of a static ELF (ET_EXEC at its own addresses,
+/// or a static PIE rebased above 0) and returns where the headers landed.
+fn map_segments(elf: &[u8]) -> Result<Loaded, ()> {
+    if elf.len() < 64 || &elf[..4] != b"\x7fELF" || elf[4] != 2 || elf[5] != 1 {
+        return Err(());
+    }
+    let etype = u16_at(elf, 16).ok_or(())?;
+    if etype != 2 && etype != 3 {
+        return Err(()); // only ET_EXEC and ET_DYN (static PIE)
+    }
+    if u16_at(elf, 18) != Some(0x3E) {
+        return Err(()); // not x86-64
+    }
+    // A PIE is rebased so its lowest page sits here; an ET_EXEC keeps its
+    // own addresses (bias 0).
+    const PIE_BASE: u64 = 0x10_0000;
+    let entry = u64_at(elf, 24).ok_or(())?;
+    let phoff = u64_at(elf, 32).ok_or(())?;
+    let phentsize = u16_at(elf, 54).ok_or(())? as u64;
+    let phnum = u16_at(elf, 56).ok_or(())? as u64;
+    if phentsize < 56 || phnum == 0 || phnum > 64 {
+        return Err(());
+    }
+
+    let mut min_vaddr = u64::MAX;
+    for i in 0..phnum {
+        let p = (phoff + i * phentsize) as usize;
+        if u32_at(elf, p).ok_or(())? == PT_LOAD {
+            min_vaddr = min_vaddr.min(u64_at(elf, p + 16).ok_or(())?);
+        }
+    }
+    let bias = if etype == 3 { PIE_BASE.wrapping_sub(min_vaddr & !(PAGE_SIZE - 1)) } else { 0 };
+
+    let mut phdr = 0;
+    let mut top = 0u64;
+    for i in 0..phnum {
+        let p = (phoff + i * phentsize) as usize;
+        let kind = u32_at(elf, p).ok_or(())?;
+        let offset = u64_at(elf, p + 8).ok_or(())?;
+        let vaddr = u64_at(elf, p + 16).ok_or(())?.wrapping_add(bias);
+        let filesz = u64_at(elf, p + 32).ok_or(())?;
+        let memsz = u64_at(elf, p + 40).ok_or(())?;
+        if kind == PT_PHDR {
+            phdr = vaddr;
+        }
+        if kind != PT_LOAD || memsz == 0 {
+            continue;
+        }
+        if filesz > memsz || offset.checked_add(filesz).is_none_or(|e| e > elf.len() as u64) {
+            return Err(());
+        }
+        // Map whole pages covering [vaddr, vaddr + memsz), then copy the file
+        // part in. Fresh pages are zero, so .bss needs nothing.
+        let start = vaddr & !(PAGE_SIZE - 1);
+        let end = mem::align_up(vaddr + memsz, PAGE_SIZE);
+        top = top.max(end);
+        map_maybe(start, end - start).map_err(|_| ())?;
+        // SAFETY: the range was just mapped writable in this address space.
+        unsafe {
+            core::ptr::copy_nonoverlapping(elf.as_ptr().add(offset as usize), vaddr as *mut u8, filesz as usize);
+        }
+    }
+    // If there was no PT_PHDR, the headers are still in the first segment at
+    // file offset phoff, which the ABI places at min_vaddr + phoff for a
+    // standard layout.
+    if phdr == 0 {
+        phdr = min_vaddr.wrapping_add(bias).wrapping_add(phoff);
+    }
+    // The break starts a little after the program (a gap catches strays).
+    let brk = if top != 0 { mem::align_up(top, PAGE_SIZE) + 16 * PAGE_SIZE } else { BRK_BASE };
+    Ok(Loaded { entry: entry.wrapping_add(bias), phdr, phent: phentsize, phnum, brk })
+}
+
+/// Maps pages for a range, skipping any page already present (segments can
+/// share a page at their boundary).
+fn map_maybe(addr: u64, len: u64) -> Result<(), ArcError> {
+    let mut page = addr;
+    let end = addr + len;
+    while page < end {
+        if crate::mem::paging::translate_in(crate::arch::cpu::read_cr3(), page).is_none() {
+            user::map_fixed(page, PAGE_SIZE)?;
+        }
+        page += PAGE_SIZE;
+    }
+    Ok(())
+}
+
+fn arcrt_split(args: &str) -> Vec<String> {
+    // The same splitting arcrt::split_args does, kept here to avoid a cycle.
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut quote = None;
+    let mut any = false;
+    for c in args.chars() {
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some(_) => cur.push(c),
+            None if c == '"' || c == '\'' => {
+                quote = Some(c);
+                any = true;
+            }
+            None if c.is_whitespace() => {
+                if any {
+                    out.push(core::mem::take(&mut cur));
+                    any = false;
+                }
+            }
+            None => {
+                cur.push(c);
+                any = true;
+            }
+        }
+    }
+    if any {
+        out.push(cur);
+    }
+    out
+}
+
+const AT_NULL: u64 = 0;
+const AT_PHDR: u64 = 3;
+const AT_PHENT: u64 = 4;
+const AT_PHNUM: u64 = 5;
+const AT_PAGESZ: u64 = 6;
+const AT_ENTRY: u64 = 9;
+const AT_RANDOM: u64 = 25;
+const AT_UID: u64 = 11;
+const AT_EUID: u64 = 12;
+const AT_GID: u64 = 13;
+const AT_EGID: u64 = 14;
+const AT_PLATFORM: u64 = 15;
+const AT_HWCAP: u64 = 16;
+const AT_CLKTCK: u64 = 17;
+const AT_SECURE: u64 = 23;
+const AT_EXECFN: u64 = 31;
+
+/// Builds the initial stack: argc, argv, envp, the auxiliary vector and the
+/// strings they point at. Returns the stack pointer to start the program on.
+fn build_stack(info: &Loaded, argv: &[String], exe: &str) -> Result<u64, ArcError> {
+    const PAGES: u64 = 64;
+    let top = arcdk::syscall::USER_STACK_TOP;
+    let bottom = top - PAGES * PAGE_SIZE;
+    user::map_fixed(bottom, PAGES * PAGE_SIZE)?;
+    // The rest of an 8 MiB stack comes page by page as it is used.
+    with_state(|st| {
+        st.vmas.insert(top - mm::STACK_RESERVE, mm::Vma { end: bottom, prot: mm::PROT_READ | mm::PROT_WRITE, file: None });
+    });
+
+    let (cols, rows) = crate::console::size();
+    let columns = alloc::format!("COLUMNS={cols}");
+    let lines = alloc::format!("LINES={rows}");
+    let envp: [&str; 9] =
+        ["PATH=/apps:/bin:/usr/bin", "HOME=/home", "USER=root", "LANG=C.UTF-8", "TERM=xterm", "SHELL=/bin/sh", "TMPDIR=/home/tmp", &columns, &lines];
+
+    // String area at the top; collect the addresses as we go.
+    let mut p = top;
+    let mut push_str = |s: &str| {
+        p -= s.len() as u64 + 1;
+        // SAFETY: inside the mapped stack; we stay well below its size.
+        unsafe {
+            core::ptr::copy_nonoverlapping(s.as_ptr(), p as *mut u8, s.len());
+            *(p as *mut u8).add(s.len()) = 0;
+        }
+        p
+    };
+    let arg_ptrs: Vec<u64> = argv.iter().map(|a| push_str(a)).collect();
+    let env_ptrs: Vec<u64> = envp.iter().map(|e| push_str(e)).collect();
+    let platform = push_str("x86_64");
+    let execfn = push_str(exe);
+    // 16 random bytes for AT_RANDOM (stack protector and pointer guard).
+    let mut seed = [0u8; 16];
+    crate::rand::fill(&mut seed);
+    p -= 16;
+    p &= !15;
+    let rand_at = p;
+    // SAFETY: inside the mapped stack.
+    unsafe { core::ptr::copy_nonoverlapping(seed.as_ptr(), p as *mut u8, 16) };
+
+    // The word array: argc, argv[...], 0, envp[...], 0, auxv..., must end
+    // 16-byte aligned so that after `argc` the stack meets the ABI.
+    let mut words: Vec<u64> = Vec::new();
+    words.push(arg_ptrs.len() as u64);
+    words.extend_from_slice(&arg_ptrs);
+    words.push(0);
+    words.extend_from_slice(&env_ptrs);
+    words.push(0);
+    for (k, v) in [
+        (AT_PHDR, info.phdr),
+        (AT_PHENT, info.phent),
+        (AT_PHNUM, info.phnum),
+        (AT_PAGESZ, PAGE_SIZE),
+        (AT_ENTRY, info.entry),
+        (AT_RANDOM, rand_at),
+        (AT_UID, 0),
+        (AT_EUID, 0),
+        (AT_GID, 0),
+        (AT_EGID, 0),
+        (AT_SECURE, 0),
+        (AT_CLKTCK, 100),
+        (AT_HWCAP, crate::arch::cpu::cpuid(1, 0).edx as u64),
+        (AT_PLATFORM, platform),
+        (AT_EXECFN, execfn),
+        (AT_NULL, 0),
+    ] {
+        words.push(k);
+        words.push(v);
+    }
+    let mut sp = p & !15;
+    if (sp - words.len() as u64 * 8) & 15 != 0 {
+        sp -= 8;
+    }
+    sp -= words.len() as u64 * 8;
+    // SAFETY: inside the mapped stack, which is much larger than this.
+    unsafe { core::ptr::copy_nonoverlapping(words.as_ptr(), sp as *mut u64, words.len()) };
+    Ok(sp)
+}
+
+// ----------------------------------------------------------------------------
+// System call dispatch
+
+pub fn syscall(frame: &mut TrapFrame) {
+    crate::arch::cpu::enable_irq();
+    let n = frame.rax;
+    let a = [frame.rdi, frame.rsi, frame.rdx, frame.r10, frame.r8, frame.r9];
+    let ret = if n == 56 {
+        // clone needs the caller's registers for the new thread.
+        thread::sys_clone(frame, a[0], a[1], a[2], a[3], a[4])
+    } else {
+        dispatch(n, a)
+    };
+    if ret == -err::ENOSYS {
+        crate::debug!("linux", "{}: unimplemented syscall {n}", user::current_name());
+    }
+    frame.rax = ret as u64;
+    if user::kill_requested() {
+        user::terminate(-130);
+    }
+    crate::arch::cpu::disable_irq();
+}
+
+fn dispatch(n: u64, a: [u64; 6]) -> i64 {
+    let fd0 = a[0] as i32;
+    match n {
+        0 => fd::sys_read(fd0, a[1], a[2]),
+        1 => fd::sys_write(fd0, a[1], a[2]),
+        2 => fd::sys_openat(fd::AT_FDCWD, a[0], a[1] as u32),
+        3 => fd::sys_close(fd0),
+        4 | 6 => fd::sys_newfstatat(fd::AT_FDCWD, a[0], a[1], 0), // stat, lstat
+        5 => fd::sys_fstat(fd0, a[1]),
+        7 => poll::sys_poll(a[0], a[1], a[2] as i32 as i64),
+        8 => fd::sys_lseek(fd0, a[1] as i64, a[2] as i32),
+        9 => mm::sys_mmap(a[0], a[1], a[2] as u32, a[3] as u32, a[4] as i32, a[5]),
+        10 => mm::sys_mprotect(a[0], a[1], a[2] as u32),
+        11 => mm::sys_munmap(a[0], a[1]),
+        12 => sys_brk(a[0]),
+        13 => thread::sys_rt_sigaction(a[0], a[1], a[2], a[3]),
+        14 => thread::sys_rt_sigprocmask(a[0], a[1], a[2]),
+        15 => -err::ENOSYS, // rt_sigreturn: signals are never delivered
+        16 => fd::sys_ioctl(fd0, a[1], a[2]),
+        17 => fd::sys_pread(fd0, a[1], a[2], a[3]),
+        18 => fd::sys_pwrite(fd0, a[1], a[2], a[3]),
+        19 => sys_readv(fd0, a[1], a[2]),
+        20 => sys_writev(fd0, a[1], a[2]),
+        21 => fd::sys_faccessat(fd::AT_FDCWD, a[0]),
+        22 => fd::sys_pipe2(a[0], 0),
+        23 => poll::sys_select_tv(a[0], a[1], a[2], a[3], a[4]),
+        24 => {
+            task::yield_now();
+            0
+        }
+        25 => mm::sys_mremap(a[0], a[1], a[2], a[3] as u32),
+        26 | 27 => 0, // msync, mincore
+        28 => mm::sys_madvise(a[0], a[1], a[2]),
+        32 => fd::sys_dup(fd0),
+        33 => fd::sys_dup3(fd0, a[1] as i32, u32::MAX),
+        35 => sys_nanosleep(a[0]),
+        39 => task::current_pid() as i64,
+        41 => sock::sys_socket(a[0], a[1], a[2]),
+        42 => sock::sys_connect(fd0, a[1], a[2]),
+        43 => sock::sys_accept4(fd0, a[1], a[2], 0),
+        44 => sock::sys_sendto(fd0, a[1], a[2], a[3], a[4], a[5]),
+        45 => sock::sys_recvfrom(fd0, a[1], a[2], a[3], a[4], a[5]),
+        46 => sock::sys_sendmsg(fd0, a[1], a[2]),
+        47 => sock::sys_recvmsg(fd0, a[1], a[2]),
+        48 => sock::sys_shutdown(fd0, a[1]),
+        49 => sock::sys_bind(fd0, a[1], a[2]),
+        50 => sock::sys_listen(fd0),
+        51 => sock::sys_getsockname(fd0, a[1], a[2]),
+        52 => sock::sys_getpeername(fd0, a[1], a[2]),
+        53 => sock::sys_socketpair(a[3]),
+        54 => 0, // setsockopt
+        55 => sock::sys_getsockopt(fd0, a[1], a[2], a[3], a[4]),
+        57 | 58 | 59 => -err::ENOSYS, // fork, vfork, execve
+        60 => thread::sys_exit(a[0] as i64),
+        61 => -err::ECHILD, // wait4: no children
+        62 => thread::sys_kill(a[0] as i64, a[1]),
+        63 => sys_uname(a[0]),
+        72 => fd::sys_fcntl(fd0, a[1], a[2]),
+        73 | 74 | 75 => 0, // flock, fsync, fdatasync
+        76 => match linux_arg_path(a[0]) {
+            Ok(p) => fd::truncate_path(&p, a[1]),
+            Err(e) => e,
+        },
+        77 => fd::sys_ftruncate(fd0, a[1]),
+        78 | 217 => fd::sys_getdents64(fd0, a[1], a[2]),
+        79 => sys_getcwd(a[0], a[1]),
+        80 => sys_chdir(a[0]),
+        81 => sys_fchdir(fd0),
+        82 => fd::sys_renameat(fd::AT_FDCWD, a[0], fd::AT_FDCWD, a[1]),
+        83 => fd::sys_mkdirat(fd::AT_FDCWD, a[0]),
+        84 | 87 => fd::sys_unlinkat(fd::AT_FDCWD, a[0]),
+        86 | 88 => -err::EPERM, // link, symlink
+        89 => fd::sys_readlinkat(fd::AT_FDCWD, a[0], a[1], a[2]),
+        90..=94 => 0, // chmod, fchmod, chown, fchown, lchown
+        95 => 0o022,  // umask
+        96 => sys_gettimeofday(a[0]),
+        97 => sys_getrlimit(a[0], a[1]),
+        98 => zero_out(a[1], 144), // getrusage
+        99 => sys_sysinfo(a[0]),
+        100 => zero_out(a[0], 32), // times
+        102 | 104 | 107 | 108 => 0, // getuid, getgid, geteuid, getegid: root
+        105 | 106 | 109 | 112 | 113 | 114 | 116 | 117 | 119 => 0, // set*id, setpgid, setsid...
+        110 => 1,                                                 // getppid
+        111 | 121 | 124 => task::current_pid() as i64,             // getpgrp, getpgid, getsid
+        115 => 0,                                                 // getgroups: none
+        118 | 120 => sys_getresid(a[0], a[1], a[2]),
+        131 => thread::sys_sigaltstack(a[0], a[1]),
+        137 | 138 => sys_statfs(a[1]),
+        157 => 0, // prctl
+        158 => sys_arch_prctl(a[0], a[1]),
+        160 => 0, // setrlimit
+        186 => thread::sys_gettid(),
+        200 => thread::sys_tgkill(0, a[0] as i64, a[1]),
+        201 => sys_time(a[0]),
+        202 => thread::sys_futex(a[0], a[1], a[2], a[3], a[4], a[5]),
+        203 => 0, // sched_setaffinity
+        204 => sys_sched_getaffinity(a[1], a[2]),
+        213 => poll::sys_epoll_create1(0),
+        218 => thread::sys_set_tid_address(a[0]),
+        228 => sys_clock_gettime(a[0], a[1]),
+        229 => sys_clock_getres(a[1]),
+        230 => sys_clock_nanosleep(a[0], a[1], a[2]),
+        231 => user::terminate(a[0] as i64),
+        232 => poll::sys_epoll_wait(fd0, a[1], a[2] as i32, a[3] as i32 as i64),
+        233 => poll::sys_epoll_ctl(fd0, a[1] as u32, a[2] as i32, a[3]),
+        234 => thread::sys_tgkill(a[0] as i64, a[1] as i64, a[2]),
+        257 => fd::sys_openat(fd0, a[1], a[2] as u32),
+        258 => fd::sys_mkdirat(fd0, a[1]),
+        262 => fd::sys_newfstatat(fd0, a[1], a[2], a[3]),
+        263 => fd::sys_unlinkat(fd0, a[1]),
+        264 | 316 => fd::sys_renameat(fd0, a[1], a[2] as i32, a[3]),
+        265 | 266 => -err::EPERM, // linkat, symlinkat
+        267 => fd::sys_readlinkat(fd0, a[1], a[2], a[3]),
+        268 | 260 | 280 => 0,     // fchmodat, fchownat, utimensat
+        269 | 439 => fd::sys_faccessat(fd0, a[1]),
+        270 => poll::sys_pselect6(a[0], a[1], a[2], a[3], a[4]),
+        271 => poll::sys_ppoll(a[0], a[1], a[2]),
+        273 | 334 => 0, // set_robust_list, rseq... (glibc asks rseq; 0 = "fine")
+        281 => poll::sys_epoll_wait(fd0, a[1], a[2] as i32, a[3] as i32 as i64),
+        284 => fd::sys_eventfd2(a[0] as u32, 0),
+        288 => sock::sys_accept4(fd0, a[1], a[2], a[3]),
+        290 => fd::sys_eventfd2(a[0] as u32, a[1] as u32),
+        291 => poll::sys_epoll_create1(a[0] as u32),
+        292 => fd::sys_dup3(fd0, a[1] as i32, a[2] as u32),
+        293 => fd::sys_pipe2(a[0], a[1] as u32),
+        302 => sys_prlimit(a[2], a[3]),
+        309 => sys_getcpu(a[0], a[1]),
+        318 => sys_getrandom(a[0], a[1]),
+        324 => 0, // membarrier
+        332 => fd::sys_statx(fd0, a[1], a[2], a[4]),
+        435 => -err::ENOSYS, // clone3: callers fall back to clone
+        441 => poll::sys_epoll_pwait2(fd0, a[1], a[2] as i32, a[3]),
+        _ => -err::ENOSYS,
+    }
+}
+
+fn linux_arg_path(ptr: u64) -> Result<Path, i64> {
+    let text = user::user_cstr(ptr, 4096).map_err(errno)?;
+    linux_path(&text)
+}
+
+fn zero_out(ptr: u64, len: u64) -> i64 {
+    if ptr == 0 {
+        return 0;
+    }
+    match user_bytes(ptr, len) {
+        Ok(b) => {
+            b.fill(0);
+            0
+        }
+        Err(e) => e,
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Memory
+
+fn sys_brk(req: u64) -> i64 {
+    with_state(|st| {
+        if req == 0 || req < st.brk_start {
+            return st.brk_cur as i64;
+        }
+        let new = mem::align_up(req, PAGE_SIZE);
+        let old = mem::align_up(st.brk_cur, PAGE_SIZE);
+        if new > old {
+            if user::map_fixed(old, new - old).is_err() {
+                return st.brk_cur as i64;
+            }
+        } else if new < old {
+            let _ = user::unmap_range(new, old - new);
+        }
+        st.brk_cur = req;
+        req as i64
+    })
+}
+
+// ----------------------------------------------------------------------------
+// Thread-local storage
+
+const ARCH_SET_FS: u64 = 0x1002;
+const ARCH_SET_GS: u64 = 0x1001;
+const ARCH_GET_FS: u64 = 0x1003;
+
+fn sys_arch_prctl(code: u64, addr: u64) -> i64 {
+    let which = match code {
+        ARCH_SET_FS => arcdk::syscall::TLS_FS,
+        ARCH_SET_GS => arcdk::syscall::TLS_GS,
+        ARCH_GET_FS => {
+            let fs = crate::arch::syscall::user_bases().0;
+            return match user_bytes(addr, 8) {
+                Ok(b) => {
+                    b.copy_from_slice(&fs.to_le_bytes());
+                    0
+                }
+                Err(e) => e,
+            };
+        }
+        _ => return -err::EINVAL,
+    };
+    match user::set_tls(which, addr) {
+        Ok(()) => 0,
+        Err(e) => -errno(e),
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Vectored I/O
+
+fn sys_readv(fd: i32, iov: u64, count: u64) -> i64 {
+    iov_each(iov, count, |ptr, len| fd::sys_read(fd, ptr, len))
+}
+
+fn sys_writev(fd: i32, iov: u64, count: u64) -> i64 {
+    iov_each(iov, count, |ptr, len| fd::sys_write(fd, ptr, len))
+}
+
+/// Runs `f` on each `struct iovec { base, len }`, summing the bytes until one
+/// transfer falls short or fails.
+fn iov_each(iov: u64, count: u64, mut f: impl FnMut(u64, u64) -> i64) -> i64 {
+    let bytes = match user_bytes(iov, count.saturating_mul(16)) {
+        Ok(b) => b.to_vec(),
+        Err(e) => return e,
+    };
+    let mut total = 0i64;
+    for chunk in bytes.chunks(16) {
+        let base = u64::from_le_bytes(chunk[..8].try_into().unwrap());
+        let len = u64::from_le_bytes(chunk[8..].try_into().unwrap());
+        if len == 0 {
+            continue;
+        }
+        let r = f(base, len);
+        if r < 0 {
+            return if total > 0 { total } else { r };
+        }
+        total += r;
+        if (r as u64) < len {
+            break;
+        }
+    }
+    total
+}
+
+// ----------------------------------------------------------------------------
+// cwd
+
+fn sys_getcwd(ptr: u64, cap: u64) -> i64 {
+    let cwd = match user::cwd() {
+        Ok(c) => c,
+        Err(e) => return -errno(e),
+    };
+    let text = show_path(&cwd);
+    let bytes = text.as_bytes();
+    if bytes.len() + 1 > cap as usize {
+        return -err::ERANGE;
+    }
+    let buf = match user_bytes(ptr, bytes.len() as u64 + 1) {
+        Ok(b) => b,
+        Err(e) => return e,
+    };
+    buf[..bytes.len()].copy_from_slice(bytes);
+    buf[bytes.len()] = 0;
+    bytes.len() as i64 + 1
+}
+
+fn sys_chdir(path_ptr: u64) -> i64 {
+    let path = match linux_arg_path(path_ptr) {
+        Ok(p) => p,
+        Err(e) => return e,
+    };
+    if !crate::fs::is_dir(&path) {
+        return -err::ENOTDIR;
+    }
+    user::set_cwd(path);
+    0
+}
+
+fn sys_fchdir(fd: i32) -> i64 {
+    match fd::get(fd).map(|d| match &d.kind {
+        fd::Kind::Dir { path, .. } => Some(path.clone()),
+        _ => None,
+    }) {
+        Some(Some(p)) => {
+            user::set_cwd(p);
+            0
+        }
+        Some(None) => -err::ENOTDIR,
+        None => -err::EBADF,
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Time
+
+fn sleep_interruptible(mut ms: u64) {
+    while ms > 0 {
+        if user::kill_requested() {
+            user::terminate(-130);
+        }
+        let step = ms.min(50);
+        task::sleep_ms(step);
+        ms -= step;
+    }
+}
+
+fn read_timespec(ptr: u64) -> Result<(u64, u64), i64> {
+    let b = user_bytes(ptr, 16)?;
+    Ok((
+        i64::from_le_bytes(b[0..8].try_into().unwrap()).max(0) as u64,
+        i64::from_le_bytes(b[8..16].try_into().unwrap()).max(0) as u64,
+    ))
+}
+
+fn sys_nanosleep(req: u64) -> i64 {
+    match read_timespec(req) {
+        Ok((s, ns)) => {
+            sleep_interruptible(s.saturating_mul(1000).saturating_add(ns.div_ceil(1_000_000)).min(86_400_000));
+            0
+        }
+        Err(e) => e,
+    }
+}
+
+/// (seconds, nanoseconds) on one of the Linux clocks.
+fn clock_now(id: u64) -> (u64, u64) {
+    let ms = crate::time::uptime_ms();
+    // A finer counter for the sub-millisecond part.
+    let tsc = unsafe { core::arch::x86_64::_rdtsc() };
+    let sub = (tsc % 1_000_000) / 1000 * 1000 % 1_000_000;
+    match id {
+        0 | 5 | 8 | 11 => (crate::time::unix_now(), (ms % 1000) * 1_000_000 + sub % 1_000_000 / 1000), // realtime
+        _ => (ms / 1000, (ms % 1000) * 1_000_000 + sub % 1_000_000 / 1000),                          // monotonic, boottime, cputime
+    }
+}
+
+fn sys_clock_gettime(id: u64, tp: u64) -> i64 {
+    let (s, ns) = clock_now(id);
+    match user_bytes(tp, 16) {
+        Ok(b) => {
+            b[0..8].copy_from_slice(&s.to_le_bytes());
+            b[8..16].copy_from_slice(&ns.to_le_bytes());
+            0
+        }
+        Err(e) => e,
+    }
+}
+
+fn sys_clock_getres(tp: u64) -> i64 {
+    if tp == 0 {
+        return 0;
+    }
+    match user_bytes(tp, 16) {
+        Ok(b) => {
+            b[0..8].copy_from_slice(&0u64.to_le_bytes());
+            b[8..16].copy_from_slice(&1_000_000u64.to_le_bytes());
+            0
+        }
+        Err(e) => e,
+    }
+}
+
+fn sys_clock_nanosleep(id: u64, flags: u64, req: u64) -> i64 {
+    const TIMER_ABSTIME: u64 = 1;
+    let (s, ns) = match read_timespec(req) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let want = s.saturating_mul(1000).saturating_add(ns / 1_000_000);
+    let ms = if flags & TIMER_ABSTIME != 0 {
+        let (ns_, nns) = clock_now(id);
+        want.saturating_sub(ns_ * 1000 + nns / 1_000_000)
+    } else {
+        want
+    };
+    sleep_interruptible(ms.min(86_400_000));
+    0
+}
+
+fn sys_gettimeofday(tv: u64) -> i64 {
+    if tv == 0 {
+        return 0;
+    }
+    let (s, ns) = clock_now(0);
+    match user_bytes(tv, 16) {
+        Ok(b) => {
+            b[0..8].copy_from_slice(&s.to_le_bytes());
+            b[8..16].copy_from_slice(&(ns / 1000).to_le_bytes());
+            0
+        }
+        Err(e) => e,
+    }
+}
+
+fn sys_time(ptr: u64) -> i64 {
+    let t = crate::time::unix_now();
+    if ptr != 0 {
+        if let Ok(b) = user_bytes(ptr, 8) {
+            b.copy_from_slice(&t.to_le_bytes());
+        }
+    }
+    t as i64
+}
+
+// ----------------------------------------------------------------------------
+// The rest: random, uname, limits, CPU, file systems
+
+fn sys_getrandom(ptr: u64, len: u64) -> i64 {
+    let buf = match user_bytes(ptr, len.min(1 << 20)) {
+        Ok(b) => b,
+        Err(e) => return e,
+    };
+    crate::rand::fill(buf);
+    buf.len() as i64
+}
+
+fn sys_uname(buf: u64) -> i64 {
+    // struct utsname: six fixed 65-byte fields.
+    let out = match user_bytes(buf, 65 * 6) {
+        Ok(b) => b,
+        Err(e) => return e,
+    };
+    out.fill(0);
+    let fields = ["Linux", "arcos", "6.1.0-arcos", "#1 SMP arcOS", "x86_64", "(none)"];
+    for (i, f) in fields.iter().enumerate() {
+        let at = i * 65;
+        out[at..at + f.len()].copy_from_slice(f.as_bytes());
+    }
+    0
+}
+
+fn rlimit(resource: u64) -> (u64, u64) {
+    match resource {
+        3 => (8 * 1024 * 1024, u64::MAX), // RLIMIT_STACK
+        7 => (4096, 4096),                // RLIMIT_NOFILE
+        _ => (u64::MAX, u64::MAX),
+    }
+}
+
+fn sys_getrlimit(resource: u64, ptr: u64) -> i64 {
+    let (cur, max) = rlimit(resource);
+    match user_bytes(ptr, 16) {
+        Ok(b) => {
+            b[0..8].copy_from_slice(&cur.to_le_bytes());
+            b[8..16].copy_from_slice(&max.to_le_bytes());
+            0
+        }
+        Err(e) => e,
+    }
+}
+
+fn sys_prlimit(resource: u64, old: u64) -> i64 {
+    if old != 0 {
+        return sys_getrlimit(resource, old);
+    }
+    0
+}
+
+fn sys_getresid(a: u64, b: u64, c: u64) -> i64 {
+    for p in [a, b, c] {
+        if p != 0 {
+            if let Ok(x) = user_bytes(p, 4) {
+                x.copy_from_slice(&0u32.to_le_bytes());
+            }
+        }
+    }
+    0
+}
+
+fn sys_sched_getaffinity(len: u64, mask: u64) -> i64 {
+    if len < 8 {
+        return -err::EINVAL;
+    }
+    match user_bytes(mask, 8) {
+        Ok(b) => {
+            b.copy_from_slice(&1u64.to_le_bytes()); // one CPU
+            8
+        }
+        Err(e) => e,
+    }
+}
+
+fn sys_getcpu(cpu: u64, node: u64) -> i64 {
+    for p in [cpu, node] {
+        if p != 0 {
+            if let Ok(b) = user_bytes(p, 4) {
+                b.copy_from_slice(&0u32.to_le_bytes());
+            }
+        }
+    }
+    0
+}
+
+fn sys_sysinfo(ptr: u64) -> i64 {
+    let out = match user_bytes(ptr, 112) {
+        Ok(b) => b,
+        Err(e) => return e,
+    };
+    out.fill(0);
+    let (free, total) = crate::mem::frame::stats();
+    out[0..8].copy_from_slice(&(crate::time::uptime_ms() / 1000).to_le_bytes());
+    out[32..40].copy_from_slice(&total.to_le_bytes());
+    out[40..48].copy_from_slice(&free.to_le_bytes());
+    out[80..82].copy_from_slice(&(user::count() as u16).to_le_bytes());
+    out[104..108].copy_from_slice(&1u32.to_le_bytes()); // mem_unit
+    0
+}
+
+fn sys_statfs(ptr: u64) -> i64 {
+    let out = match user_bytes(ptr, 120) {
+        Ok(b) => b,
+        Err(e) => return e,
+    };
+    out.fill(0);
+    out[0..8].copy_from_slice(&0xA2C0u64.to_le_bytes()); // f_type
+    out[8..16].copy_from_slice(&4096u64.to_le_bytes()); // f_bsize
+    for off in [16, 24, 32] {
+        out[off..off + 8].copy_from_slice(&(1u64 << 20).to_le_bytes()); // blocks, free, avail
+    }
+    out[64..72].copy_from_slice(&255u64.to_le_bytes()); // f_namelen
+    0
+}
