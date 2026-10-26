@@ -21,7 +21,7 @@ pub mod text;
 mod apps;
 mod cursor;
 mod desktop;
-mod res;
+pub(crate) mod res;
 mod settings;
 mod setup;
 mod splash;

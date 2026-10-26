@@ -23,6 +23,7 @@ dependencies = [
  "arcdk",
  "arcfs",
  "arcgfx",
+ "arcjson",
  "arctls",
  "arczip",
 ]
@@ -64,6 +65,10 @@ version = "0.5.0"
 
 [[package]]
 name = "arcgfx"
+version = "0.5.0"
+
+[[package]]
+name = "arcjson"
 version = "0.5.0"
 
 [[package]]

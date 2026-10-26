@@ -18,6 +18,7 @@ arcfs.workspace = true
 arcgfx.workspace = true
 arctls.workspace = true
 arczip.workspace = true
+arcjson.workspace = true
 
 [lints]
 workspace = true

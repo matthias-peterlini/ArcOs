@@ -856,33 +856,96 @@ impl Shell {
         }
     }
 
-    /// Installs a program from the store (`sys:/store`) into `sys:/apps`, so
-    /// it can be run by name. With no argument, lists the store.
+    /// Installs a program into `sys:/apps`, so it can be run by name: from
+    /// this computer (`sys:/store`) or, failing that, from the online
+    /// catalog. With no argument, lists both; `install --refresh` downloads
+    /// the newest catalog; `install --search <words>` searches GitHub.
     fn install(&self, args: &[&str]) {
         let packages = crate::store::available();
-        if packages.is_empty() {
-            println!("{DIM}no store on this system (sys:/store is empty){RESET}");
-            return;
-        }
         let Some(&name) = args.first() else {
-            println!("Programs you can install (install <name>):");
+            println!("On this computer (install <name>):");
             for p in &packages {
                 let mark = if crate::store::installed(&p.id).is_some() { " (installed)" } else { "" };
-                println!("  {BOLD}{:<12}{RESET}{DIM}{}{mark}{RESET}", p.id, p.about);
+                println!("  {BOLD}{:<14}{RESET}{DIM}{}{mark}{RESET}", p.id, p.about);
+            }
+            let online = crate::store::catalog();
+            if !online.is_empty() {
+                println!("From the internet:");
+                for a in &online {
+                    let mark = if crate::store::installed(&a.id).is_some() { " (installed)" } else { "" };
+                    println!("  {BOLD}{:<14}{RESET}{DIM}{} · {}{mark}{RESET}", a.id, a.platform.name(), a.about);
+                }
             }
             return;
         };
-        match crate::store::install(name) {
-            Ok(p) => {
-                println!("installed {BOLD}{}{RESET} → {}", p.name, crate::store::program_path(&p));
-                if p.id == "busybox" {
-                    println!("{DIM}{} commands are now available (ls, cat, grep, …){RESET}", BUSYBOX_APPLETS.len());
-                } else if p.gui {
-                    println!("{DIM}it is in the launcher (Ctrl+Space){RESET}");
-                }
+        if name == "--refresh" {
+            match crate::store::refresh_catalog() {
+                Ok(n) => println!("the catalog lists {n} programs"),
+                Err(e) => println!("{ERR}{e}{RESET}"),
             }
-            Err(fs::Error::NotFound) => println!("{ERR}no package named {name}{RESET} {DIM}(type install){RESET}"),
-            Err(e) => println!("{ERR}{name}: {}{RESET}", e.as_str()),
+            return;
+        }
+        if name == "--search" {
+            let q = args[1..].join(" ");
+            match crate::store::github_search(&q) {
+                Ok(v) => {
+                    for r in v {
+                        println!("  {BOLD}{}{RESET} {DIM}★{} {}{RESET}", r.full_name, r.stars, r.description);
+                    }
+                }
+                Err(e) => println!("{ERR}{e}{RESET}"),
+            }
+            return;
+        }
+        if packages.iter().any(|p| p.id == name) {
+            match crate::store::install(name) {
+                Ok(p) => {
+                    println!("installed {BOLD}{}{RESET} → {}", p.name, crate::store::program_path(&p));
+                    if p.id == "busybox" {
+                        println!("{DIM}{} commands are now available (ls, cat, grep, …){RESET}", BUSYBOX_APPLETS.len());
+                    } else if p.gui {
+                        println!("{DIM}it is in the launcher (Ctrl+Space){RESET}");
+                    }
+                }
+                Err(e) => println!("{ERR}{name}: {}{RESET}", e.as_str()),
+            }
+            return;
+        }
+        let Some(app) = crate::store::catalog().into_iter().find(|a| a.id == name || a.command == name) else {
+            println!("{ERR}no package named {name}{RESET} {DIM}(type install){RESET}");
+            return;
+        };
+        if !crate::net::wait_configured(5000) {
+            println!("{ERR}the network is not configured{RESET}");
+            return;
+        }
+        let id = app.id.clone();
+        crate::store::start_install(app);
+        let mut last = (String::new(), 0u64);
+        loop {
+            let Some(j) = crate::store::job(&id) else { break };
+            if let Some(r) = j.result {
+                crate::store::clear_job(&id);
+                match r {
+                    Ok(()) => {
+                        let p = crate::store::installed(&id);
+                        let file = p.as_ref().map(crate::store::program_path).unwrap_or_default();
+                        let version = p.map(|p| p.version).unwrap_or_default();
+                        println!("installed {BOLD}{id}{RESET} {version} → {file}");
+                    }
+                    Err(e) => println!("{ERR}{id}: {e}{RESET}"),
+                }
+                break;
+            }
+            let now = (alloc::string::String::from(j.phase), j.done / (256 * 1024));
+            if now != last {
+                match j.total {
+                    Some(t) => println!("  {} {} of {}", j.phase, Size(j.done), Size(t)),
+                    None => println!("  {}", j.phase),
+                }
+                last = now;
+            }
+            task::sleep_ms(100);
         }
     }
 

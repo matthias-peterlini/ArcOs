@@ -1,0 +1,376 @@
+{
+ "version": 1,
+ "updated": "2026-10-26",
+ "apps": [
+  {
+   "id": "ripgrep",
+   "name": "ripgrep",
+   "category": "Sviluppatori",
+   "platform": "linux",
+   "developer": "Andrew Gallant",
+   "license": "MIT / Unlicense",
+   "about": "Cerca testo in migliaia di file, velocissimo.",
+   "details": "ripgrep cerca un'espressione regolare in tutti i file di una cartella, rispettando .gitignore. Esempio: rg TODO sys:/home",
+   "color": "#2E7D32",
+   "tags": [
+    "cerca",
+    "grep",
+    "testo"
+   ],
+   "github": "BurntSushi/ripgrep",
+   "asset": "x86_64-unknown-linux-musl.tar.gz",
+   "file": "rg",
+   "command": "rg",
+   "open": "rg --help",
+   "featured": true
+  },
+  {
+   "id": "fd",
+   "name": "fd",
+   "category": "Sviluppatori",
+   "platform": "linux",
+   "developer": "David Peter",
+   "license": "MIT / Apache-2.0",
+   "about": "Trova file e cartelle per nome.",
+   "details": "Un'alternativa semplice e veloce a find. Esempio: fd .txt",
+   "color": "#0277BD",
+   "tags": [
+    "trova",
+    "find",
+    "file"
+   ],
+   "github": "sharkdp/fd",
+   "asset": "x86_64-unknown-linux-musl.tar.gz",
+   "command": "fd",
+   "open": "fd --help"
+  },
+  {
+   "id": "bat",
+   "name": "bat",
+   "category": "Sviluppatori",
+   "platform": "linux",
+   "developer": "David Peter",
+   "license": "MIT / Apache-2.0",
+   "about": "Mostra i file con i colori della sintassi.",
+   "details": "Come cat, ma con evidenziazione della sintassi e numeri di riga. Esempio: bat --paging never file.rs",
+   "color": "#6A1B9A",
+   "tags": [
+    "cat",
+    "sintassi",
+    "colori"
+   ],
+   "github": "sharkdp/bat",
+   "asset": "x86_64-unknown-linux-musl.tar.gz",
+   "command": "bat",
+   "open": "bat --help"
+  },
+  {
+   "id": "hexyl",
+   "name": "hexyl",
+   "category": "Sviluppatori",
+   "platform": "linux",
+   "developer": "David Peter",
+   "license": "MIT / Apache-2.0",
+   "about": "Visualizzatore esadecimale a colori.",
+   "details": "Mostra il contenuto binario di un file in esadecimale, con colori per tipo di byte.",
+   "color": "#C62828",
+   "tags": [
+    "hex",
+    "binario"
+   ],
+   "github": "sharkdp/hexyl",
+   "asset": "x86_64-unknown-linux-musl.tar.gz",
+   "command": "hexyl",
+   "open": "hexyl --help"
+  },
+  {
+   "id": "sd",
+   "name": "sd",
+   "category": "Sviluppatori",
+   "platform": "linux",
+   "developer": "Gregory",
+   "license": "MIT",
+   "about": "Trova e sostituisci, facile.",
+   "details": "Sostituisce testo nei file con una sintassi semplice. Esempio: sd vecchio nuovo file.txt",
+   "color": "#EF6C00",
+   "tags": [
+    "sostituisci",
+    "sed"
+   ],
+   "github": "chmln/sd",
+   "asset": "x86_64-unknown-linux-musl.tar.gz",
+   "command": "sd",
+   "open": "sd --help"
+  },
+  {
+   "id": "fzf",
+   "name": "fzf",
+   "category": "Strumenti",
+   "platform": "linux",
+   "developer": "Junegunn Choi",
+   "license": "MIT",
+   "about": "Ricerca approssimata interattiva.",
+   "details": "Filtra liste di testo mentre scrivi. Esempio: fzf --filter nota < elenco.txt",
+   "color": "#455A64",
+   "tags": [
+    "filtro",
+    "fuzzy"
+   ],
+   "github": "junegunn/fzf",
+   "asset": "linux_amd64.tar.gz",
+   "command": "fzf",
+   "open": "fzf --version",
+   "featured": true
+  },
+  {
+   "id": "jq",
+   "name": "jq",
+   "category": "Sviluppatori",
+   "platform": "linux",
+   "developer": "jq team",
+   "license": "MIT",
+   "about": "Il coltellino svizzero per il JSON.",
+   "details": "Legge, filtra e trasforma dati JSON dalla riga di comando.",
+   "color": "#5D4037",
+   "tags": [
+    "json",
+    "dati"
+   ],
+   "github": "jqlang/jq",
+   "asset": "jq-linux-amd64",
+   "command": "jq",
+   "open": "jq --help"
+  },
+  {
+   "id": "yq",
+   "name": "yq",
+   "category": "Sviluppatori",
+   "platform": "linux",
+   "developer": "Mike Farah",
+   "license": "MIT",
+   "about": "jq per YAML, JSON e XML.",
+   "details": "Legge e modifica file YAML, JSON, XML e TOML.",
+   "color": "#00838F",
+   "tags": [
+    "yaml",
+    "json",
+    "xml"
+   ],
+   "github": "mikefarah/yq",
+   "asset": "yq_linux_amd64",
+   "command": "yq",
+   "open": "yq --help"
+  },
+  {
+   "id": "xh",
+   "name": "xh",
+   "category": "Internet",
+   "platform": "linux",
+   "developer": "Mohamed Daahir",
+   "license": "MIT",
+   "about": "Richieste web dal terminale.",
+   "details": "Un client HTTP amichevole: xh https://api.github.com/zen",
+   "color": "#1565C0",
+   "tags": [
+    "http",
+    "web",
+    "api"
+   ],
+   "github": "ducaale/xh",
+   "asset": "x86_64-unknown-linux-musl.tar.gz",
+   "command": "xh",
+   "open": "xh --help",
+   "featured": true
+  },
+  {
+   "id": "glow",
+   "name": "Glow",
+   "category": "Strumenti",
+   "platform": "linux",
+   "developer": "Charm",
+   "license": "MIT",
+   "about": "Leggi il Markdown nel terminale.",
+   "details": "Mostra file Markdown con titoli, elenchi e colori. Esempio: glow README.md",
+   "color": "#AD1457",
+   "tags": [
+    "markdown",
+    "lettura"
+   ],
+   "github": "charmbracelet/glow",
+   "asset": "Linux_x86_64.tar.gz",
+   "command": "glow",
+   "open": "glow --help"
+  },
+  {
+   "id": "dust",
+   "name": "dust",
+   "category": "Strumenti",
+   "platform": "linux",
+   "developer": "Andy Boot",
+   "license": "Apache-2.0",
+   "about": "Quanto spazio occupano le cartelle.",
+   "details": "Un du più chiaro, con barre: dust sys:/home",
+   "color": "#795548",
+   "tags": [
+    "spazio",
+    "disco"
+   ],
+   "github": "bootandy/dust",
+   "asset": "x86_64-unknown-linux-musl.tar.gz",
+   "command": "dust",
+   "open": "dust --help"
+  },
+  {
+   "id": "tokei",
+   "name": "tokei",
+   "category": "Sviluppatori",
+   "platform": "linux",
+   "developer": "XAMPPRocky",
+   "license": "MIT / Apache-2.0",
+   "about": "Conta le righe di codice.",
+   "details": "Statistiche per linguaggio di un progetto: tokei sys:/home/Progetti",
+   "color": "#3949AB",
+   "tags": [
+    "codice",
+    "statistiche"
+   ],
+   "github": "XAMPPRocky/tokei",
+   "asset": "x86_64-unknown-linux-musl.tar.gz",
+   "command": "tokei",
+   "open": "tokei --help"
+  },
+  {
+   "id": "eza",
+   "name": "eza",
+   "category": "Strumenti",
+   "platform": "linux",
+   "developer": "eza community",
+   "license": "EUPL-1.2",
+   "about": "Un elenco dei file moderno.",
+   "details": "Come ls, con colori, icone e albero: eza --tree",
+   "color": "#00695C",
+   "tags": [
+    "ls",
+    "file"
+   ],
+   "github": "eza-community/eza",
+   "asset": "x86_64-unknown-linux-musl.tar.gz",
+   "command": "eza",
+   "open": "eza --help"
+  },
+  {
+   "id": "delta",
+   "name": "delta",
+   "category": "Sviluppatori",
+   "platform": "linux",
+   "developer": "Dan Davison",
+   "license": "MIT",
+   "about": "Differenze tra file, leggibili.",
+   "details": "Mostra le differenze tra due file con colori ed evidenziazione.",
+   "color": "#4527A0",
+   "tags": [
+    "diff"
+   ],
+   "github": "dandavison/delta",
+   "asset": "x86_64-unknown-linux-musl.tar.gz",
+   "command": "delta",
+   "open": "delta --help"
+  },
+  {
+   "id": "tealdeer",
+   "name": "tldr",
+   "category": "Strumenti",
+   "platform": "linux",
+   "developer": "tealdeer",
+   "license": "MIT / Apache-2.0",
+   "about": "Esempi pratici dei comandi.",
+   "details": "Pagine tldr: esempi brevi per centinaia di comandi. Esempio: tldr tar",
+   "color": "#F9A825",
+   "tags": [
+    "aiuto",
+    "esempi"
+   ],
+   "github": "tealdeer-rs/tealdeer",
+   "asset": "linux-x86_64-musl",
+   "command": "tldr",
+   "open": "tldr --help"
+  },
+  {
+   "id": "micro",
+   "name": "micro",
+   "category": "Strumenti",
+   "platform": "linux",
+   "developer": "Zachary Yedidia",
+   "license": "MIT",
+   "about": "Un editor di testo nel terminale.",
+   "details": "Editor moderno con mouse e scorciatoie familiari (Ctrl+S, Ctrl+Q).",
+   "color": "#2E7D32",
+   "tags": [
+    "editor",
+    "testo"
+   ],
+   "github": "zyedidia/micro",
+   "asset": "linux64-static.tar.gz",
+   "command": "micro",
+   "open": "micro --version"
+  },
+  {
+   "id": "lf",
+   "name": "lf",
+   "category": "Strumenti",
+   "platform": "linux",
+   "developer": "Gokcehan Kara",
+   "license": "MIT",
+   "about": "Gestore di file nel terminale.",
+   "details": "Sfoglia le cartelle con la tastiera.",
+   "color": "#6D4C41",
+   "tags": [
+    "file",
+    "gestore"
+   ],
+   "github": "gokcehan/lf",
+   "asset": "linux-amd64.tar.gz",
+   "command": "lf",
+   "open": "lf --version"
+  },
+  {
+   "id": "jq-win",
+   "name": "jq (Windows)",
+   "category": "Windows",
+   "platform": "windows",
+   "developer": "jq team",
+   "license": "MIT",
+   "about": "La versione Windows di jq.",
+   "details": "Lo stesso jq, compilato per Windows: arcOS lo esegue con winrun.",
+   "color": "#5D4037",
+   "tags": [
+    "json",
+    "windows"
+   ],
+   "github": "jqlang/jq",
+   "asset": "jq-windows-amd64.exe",
+   "command": "jqw",
+   "open": "jqw --help"
+  },
+  {
+   "id": "ripgrep-win",
+   "name": "ripgrep (Windows)",
+   "category": "Windows",
+   "platform": "windows",
+   "developer": "Andrew Gallant",
+   "license": "MIT / Unlicense",
+   "about": "ripgrep compilato per Windows.",
+   "details": "La versione Windows (MinGW) di ripgrep.",
+   "color": "#2E7D32",
+   "tags": [
+    "cerca",
+    "windows"
+   ],
+   "github": "BurntSushi/ripgrep",
+   "asset": "x86_64-pc-windows-gnu.zip",
+   "file": "rg.exe",
+   "command": "rgw",
+   "open": "rgw --version"
+  }
+ ]
+}

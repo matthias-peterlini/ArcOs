@@ -163,7 +163,7 @@ assets:
 	tools/assets/gen_sounds.py rootfs/system/sounds rootfs/home/Musica
 
 check:
-	cd system && $(CARGO) test --target x86_64-unknown-linux-gnu -p arcdk -p arcfs -p arcgfx -p arctls -p arczip -p arcc-core -p arc-vm
+	cd system && $(CARGO) test --target x86_64-unknown-linux-gnu -p arcdk -p arcfs -p arcgfx -p arctls -p arczip -p arcjson -p arcc-core -p arc-vm
 	cd tools && $(CARGO) test --release
 
 clean:

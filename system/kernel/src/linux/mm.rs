@@ -15,7 +15,6 @@ use crate::user::USER_TOP;
 
 pub const PROT_READ: u32 = 1;
 pub const PROT_WRITE: u32 = 2;
-pub const PROT_EXEC: u32 = 4;
 
 const MAP_SHARED: u32 = 0x01;
 const MAP_FIXED: u32 = 0x10;

@@ -137,7 +137,7 @@ pub fn catalog() -> Vec<Entry> {
         .map(|&(id, name, icon)| Entry { name: name.to_string(), icon: icon.to_string(), launch: Launch::App(id) })
         .collect();
     for p in crate::store::installed_all() {
-        let launch = if p.gui { Launch::Spawn(crate::store::program_path(&p)) } else { Launch::Run(p.command.clone()) };
+        let launch = if p.gui { Launch::Spawn(crate::store::program_path(&p)) } else { Launch::Run(p.open.clone()) };
         v.push(Entry { icon: package_icon(&p.id), name: p.name, launch });
     }
     v

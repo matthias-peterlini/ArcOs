@@ -879,11 +879,6 @@ pub fn try_accept(l: Conn) -> Option<Conn> {
     Some(id)
 }
 
-/// Waits for a connection on listener `l`.
-pub fn accept(l: Conn, timeout_ms: u64) -> Result<Conn, &'static str> {
-    EVENTS.wait_for_timeout(timeout_ms, || try_accept(l)).ok_or("timed out")
-}
-
 /// Queues bytes to send; returns how many fitted (0: the buffer is full).
 pub fn try_send(id: Conn, data: &[u8]) -> Result<usize, &'static str> {
     let mut out = Vec::new();
@@ -1031,9 +1026,4 @@ pub fn ready(id: Conn) -> (bool, bool, bool) {
 /// The two ends of a connection: (local port, remote address and port).
 pub fn endpoints(id: Conn) -> Option<(u16, Ip, u16)> {
     TABLE.lock().conns.get(&id).map(|c| (c.local_port, c.remote.0, c.remote.1))
-}
-
-/// For `netstat`: (local port, remote, state) of every connection.
-pub fn list() -> Vec<(u16, Ip, u16, State)> {
-    TABLE.lock().conns.values().map(|c| (c.local_port, c.remote.0, c.remote.1, c.state)).collect()
 }

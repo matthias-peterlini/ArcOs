@@ -125,4 +125,39 @@ pub fn wallpaper_thumb(name: &str, w: i32, h: i32) -> Canvas {
     }
 }
 
+/// An icon for a downloaded program (QOI, 128 pixels): a squircle in its
+/// colour with its initials, and a terminal mark for text programs.
+pub fn make_icon(name: &str, color: u32, platform: crate::store::Platform) -> Vec<u8> {
+    use super::text::{self, Font};
+    let mut c = Canvas::new_layer(CELL, CELL);
+    let r = Rect::new(6, 6, CELL - 12, CELL - 12);
+    let darker = super::gfx::mix(color, 0xFF10_0C10, 110);
+    c.fill_round_grad(r, 30, color, darker);
+    c.glow_round(r, 30, r.x + 24, r.y + 18, 90, 0xFFFF_FFFF, 60);
+    let initials: String = {
+        let words: Vec<&str> = name.split(|ch: char| !ch.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+        let mut s: String = words.iter().take(2).filter_map(|w| w.chars().next()).collect();
+        if words.len() == 1 {
+            s = words[0].chars().take(2).collect();
+        }
+        let mut cs = s.chars();
+        match cs.next() {
+            Some(f) => f.to_uppercase().chain(cs).collect(),
+            None => String::from("?"),
+        }
+    };
+    let (lh, _) = text::metrics(Font::Title);
+    text::draw_centered(&mut c, Font::Title, CELL / 2, CELL / 2 - lh / 2 - 6, &initials, 0xFFFF_FFFF);
+    // A badge: ">_" for Linux, a window for Windows.
+    let badge = Rect::new(CELL - 46, CELL - 40, 34, 24);
+    c.fill_round(badge, 8, 0x8C00_0000);
+    let label = match platform {
+        crate::store::Platform::Windows => "win",
+        _ => ">_",
+    };
+    let (sh, _) = text::metrics(Font::Small);
+    text::draw_centered(&mut c, Font::Small, badge.x + badge.w / 2, badge.y + (badge.h - sh) / 2, label, 0xFFFF_FFFF);
+    super::qoi::encode(&c)
+}
+
 pub const WALLPAPERS: [(&str, &str); 3] = [("dolomiti", "Dolomiti"), ("alba", "Alba"), ("notte", "Notte")];
