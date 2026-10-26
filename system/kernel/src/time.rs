@@ -27,6 +27,11 @@ pub fn now() -> u64 {
     BOOT_TIME.load(Ordering::Relaxed) + uptime_ms() / 1000
 }
 
+/// Seconds since 1970-01-01 (Unix time), taking the clock as UTC.
+pub fn unix_now() -> u64 {
+    now() + 946_684_800
+}
+
 fn cmos(reg: u8) -> u8 {
     outb(0x70, reg);
     inb(0x71)

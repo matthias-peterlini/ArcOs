@@ -66,7 +66,7 @@ const INTR_MASK_8125: u16 = 0x38;
 const INTR_STATUS_8125: u16 = 0x3C;
 const TX_POLL_8125: u16 = 0x90;
 
-const RX_COUNT: usize = 64;
+const RX_COUNT: usize = 256;
 const TX_COUNT: usize = 64;
 const BUF: usize = 2048;
 const MAX_FRAME: usize = 1518;

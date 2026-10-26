@@ -14,6 +14,8 @@ arc-vm = { path = "libs/arc-vm" }
 arcdk = { path = "libs/arcdk" }
 arcfs = { path = "libs/arcfs" }
 arcgfx = { path = "libs/arcgfx" }
+arctls = { path = "libs/arctls" }
+arczip = { path = "libs/arczip" }
 arcui = { path = "libs/arcui" }
 arcdrv = { path = "libs/arcdrv" }
 arcrt = { path = "libs/arcrt" }

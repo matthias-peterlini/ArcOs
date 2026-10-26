@@ -46,8 +46,10 @@ const RAH: usize = 0x5404;
 /// Interrupt vector allocation (82574 only).
 const IVAR: usize = 0x00E4;
 
-const RX_COUNT: usize = 32;
-const TX_COUNT: usize = 32;
+// Room for a burst of a full TCP window (slirp and real links send many
+// segments back to back; a short ring drops them and TCP stalls).
+const RX_COUNT: usize = 256;
+const TX_COUNT: usize = 64;
 const BUF: usize = 2048;
 
 struct Rings {

@@ -45,7 +45,7 @@ const ERR: u32 = 1 << 30;
 const STP: u32 = 1 << 25;
 const ENP: u32 = 1 << 24;
 
-const RX_LOG2: u32 = 4;
+const RX_LOG2: u32 = 7;
 const TX_LOG2: u32 = 4;
 const RX_COUNT: usize = 1 << RX_LOG2;
 const TX_COUNT: usize = 1 << TX_LOG2;

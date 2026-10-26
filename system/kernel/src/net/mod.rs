@@ -1,6 +1,9 @@
-//! A small IPv4 network stack: ARP, IPv4, ICMP echo, UDP, a DHCP client and
-//! a DNS resolver. Frames come from network drivers through
+//! A small IPv4 network stack: ARP, IPv4, ICMP echo, UDP, TCP ([`tcp`]), a
+//! DHCP client and a DNS resolver. Frames come from network drivers through
 //! [`crate::dev::net`]; the `netd` thread handles them.
+
+pub mod http;
+pub mod tcp;
 
 use crate::dev::net as nic;
 use crate::sync::IrqLock;
@@ -89,6 +92,29 @@ fn checksum(data: &[u8]) -> u16 {
         sum = (sum & 0xFFFF) + (sum >> 16);
     }
     !(sum as u16)
+}
+
+/// The checksum of a TCP or UDP segment, with the IPv4 pseudo-header.
+fn checksum_with(src: Ip, dst: Ip, proto: u8, data: &[u8]) -> u16 {
+    let mut sum = 0u32;
+    for w in [src.0, dst.0] {
+        sum += u16::from_be_bytes([w[0], w[1]]) as u32 + u16::from_be_bytes([w[2], w[3]]) as u32;
+    }
+    sum += proto as u32 + data.len() as u32;
+    for chunk in data.chunks(2) {
+        let word = if chunk.len() == 2 { u16::from_be_bytes([chunk[0], chunk[1]]) } else { (chunk[0] as u16) << 8 };
+        sum += word as u32;
+    }
+    while sum > 0xFFFF {
+        sum = (sum & 0xFFFF) + (sum >> 16);
+    }
+    !(sum as u16)
+}
+
+/// Our address (of the first interface that has one).
+fn local_ip() -> Option<Ip> {
+    let s = STACK.lock();
+    s.ifaces.values().find(|i| i.dhcp == Dhcp::Bound || i.config.ip != Ip::ANY).map(|i| i.config.ip)
 }
 
 fn be16(b: &[u8], o: usize) -> u16 {
@@ -339,6 +365,7 @@ fn handle_frame(iface: u32, f: &[u8]) {
                         EVENTS.notify_all();
                     }
                 }
+                6 => tcp::input(src, ip_at(p, 16), body),
                 17 if body.len() >= 8 => {
                     let (sport, dport) = (be16(body, 0), be16(body, 2));
                     let len = (be16(body, 4) as usize).clamp(8, body.len());
@@ -366,6 +393,7 @@ fn handle_frame(iface: u32, f: &[u8]) {
 /// The network thread: picks up new interfaces, runs DHCP, handles frames.
 pub fn start() {
     task::spawn("netd", || loop {
+        let mut busy = false;
         for info in nic::list() {
             let start_dhcp = {
                 let mut s = STACK.lock();
@@ -390,9 +418,16 @@ pub fn start() {
             }
             while let Some(frame) = nic::poll(info.index) {
                 handle_frame(info.index, &frame);
+                busy = true;
             }
         }
-        task::sleep_ms(2);
+        tcp::timers();
+        // While packets flow, look again at once; when quiet, rest a little.
+        if busy {
+            task::yield_now();
+        } else {
+            task::sleep_ms(1);
+        }
     });
 }
 

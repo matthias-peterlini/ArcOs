@@ -16,6 +16,8 @@ bench = false
 arcdk.workspace = true
 arcfs.workspace = true
 arcgfx.workspace = true
+arctls.workspace = true
+arczip.workspace = true
 
 [lints]
 workspace = true

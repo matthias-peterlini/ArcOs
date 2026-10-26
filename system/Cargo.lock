@@ -23,6 +23,8 @@ dependencies = [
  "arcdk",
  "arcfs",
  "arcgfx",
+ "arctls",
+ "arczip",
 ]
 
 [[package]]
@@ -72,6 +74,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "arctls"
+version = "0.5.0"
+
+[[package]]
 name = "arcui"
 version = "0.5.0"
 dependencies = [
@@ -93,6 +99,10 @@ version = "0.5.0"
 dependencies = [
  "arcdrv",
 ]
+
+[[package]]
+name = "arczip"
+version = "0.5.0"
 
 [[package]]
 name = "ata"

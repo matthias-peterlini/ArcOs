@@ -69,7 +69,7 @@ const RX_EOP: u32 = 1 << 1;
 const TX_CMD: u32 = 1 << 24 | 1 << 25 | 1 << 27 | 1 << 29 | 3 << 20;
 const TX_DD: u32 = 1 << 0;
 
-const RX_COUNT: usize = 64;
+const RX_COUNT: usize = 256;
 const TX_COUNT: usize = 64;
 const BUF: usize = 2048;
 

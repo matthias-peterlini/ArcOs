@@ -17,6 +17,7 @@
 #   make test-audio    play sounds on every emulated sound card and check them
 #   make test-display  switch the resolution on every emulated display
 #   make test-acpi     press the power button and check that arcOS turns off
+#   make test-net      TCP, HTTP and HTTPS against servers on this machine
 #   make shots      boot headless, drive the GUI and save screenshots (build/shots)
 #   make assets     regenerate fonts, icons, wallpapers and sounds (Python, Pillow, numpy)
 #   make check      unit tests of the shared libraries and the host tool
@@ -49,7 +50,7 @@ ifeq ($(PROFILE),release)
 CARGO_PROFILE := --release
 endif
 
-.PHONY: all uefi system tools root image iso run-iso test-iso run run-q35 run-nvme run-uefi test test-uefi test-drivers test-arcscript test-compat test-audio test-display test-acpi shots assets check clean $(PACKAGES)
+.PHONY: all uefi system tools root image iso run-iso test-iso run run-q35 run-nvme run-uefi test test-uefi test-drivers test-arcscript test-compat test-audio test-display test-acpi test-net shots assets check clean $(PACKAGES)
 
 all: image
 
@@ -142,19 +143,23 @@ test-display: image
 test-acpi: image
 	scripts/test-acpi.sh $(IMAGE)
 
+test-net: image
+	scripts/test-net.sh $(IMAGE)
+
 shots: image
 	scripts/gui-shots.py $(IMAGE) scripts/gui/tour.txt $(BUILD)/shots
 
 assets:
 	tools/assets/gen_fonts.py system/kernel/assets/fonts.bin
 	tools/assets/gen_logo.py system/kernel/assets/logo.bin
+	tools/assets/gen_certs.py rootfs
 	tools/assets/gen_icons.py rootfs/system/gui
 	tools/assets/gen_icons.py --store system/store
 	tools/assets/gen_wallpapers.py rootfs/system/gui/wallpapers
 	tools/assets/gen_sounds.py rootfs/system/sounds rootfs/home/Musica
 
 check:
-	cd system && $(CARGO) test --target x86_64-unknown-linux-gnu -p arcdk -p arcfs -p arcgfx -p arcc-core -p arc-vm
+	cd system && $(CARGO) test --target x86_64-unknown-linux-gnu -p arcdk -p arcfs -p arcgfx -p arctls -p arczip -p arcc-core -p arc-vm
 	cd tools && $(CARGO) test --release
 
 clean:

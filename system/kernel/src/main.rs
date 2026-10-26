@@ -21,6 +21,7 @@ mod gui;
 mod linux;
 mod mem;
 mod net;
+mod rand;
 mod shell;
 mod store;
 mod sync;

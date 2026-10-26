@@ -67,6 +67,8 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("net", "", "network interfaces and addresses"),
     ("ping", "<host> [count]", "send ICMP echo requests"),
     ("host", "<name>", "look up the address of a host name"),
+    ("fetch", "<url> [file]", "download from the web (http and https)"),
+    ("sha256", "<file>", "the SHA-256 checksum of a file"),
     ("sysinfo", "", "about this machine"),
     ("date", "", "date and time"),
     ("uptime", "", "time since start"),
@@ -665,6 +667,65 @@ impl Shell {
                     }
                     match crate::net::resolve(rest[0]) {
                         Ok(ip) => println!("{} has address {ip}", rest[0]),
+                        Err(e) => println!("{ERR}{}: {e}{RESET}", rest[0]),
+                    }
+                }
+            }
+            "fetch" => {
+                if need(1, "<url> [file]") {
+                    if !crate::net::wait_configured(5000) {
+                        println!("{ERR}the network is not configured{RESET}");
+                        return;
+                    }
+                    let started = time::uptime_ms();
+                    let mut last = 0;
+                    let mut report = |done: u64, total: Option<u64>| {
+                        let now = time::uptime_ms();
+                        if now - last > 1000 {
+                            last = now;
+                            match total {
+                                Some(t) => println!("  {} of {}", Size(done), Size(t)),
+                                None => println!("  {}", Size(done)),
+                            }
+                        }
+                        true
+                    };
+                    match crate::net::http::fetch(&crate::net::http::Request::get(rest[0]), &mut report) {
+                        Ok(r) => {
+                            let ms = (time::uptime_ms() - started).max(1);
+                            println!(
+                                "{} {} · {} in {} ms · {}",
+                                r.status,
+                                r.url,
+                                Size(r.body.len() as u64),
+                                ms,
+                                r.header("content-type").unwrap_or("")
+                            );
+                            match rest.get(1) {
+                                Some(file) => match fs::abs(file).and_then(|p| fs::write_file(&p, &r.body)) {
+                                    Ok(()) => println!("saved to {file}"),
+                                    Err(e) => println!("{ERR}{file}: {e}{RESET}"),
+                                },
+                                None => {
+                                    let text = String::from_utf8_lossy(&r.body);
+                                    for line in text.lines().take(12) {
+                                        println!("  {}", line.chars().take(100).collect::<String>());
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => println!("{ERR}{e}{RESET}"),
+                    }
+                }
+            }
+            "sha256" => {
+                if need(1, "<file>") {
+                    match fs::abs(rest[0]).and_then(|p| fs::read_file(&p)) {
+                        Ok(data) => {
+                            let d = arctls::sha2::Sha256::digest(&data);
+                            let hex: String = d.iter().map(|b| alloc::format!("{b:02x}")).collect();
+                            println!("{hex}  {}", rest[0]);
+                        }
                         Err(e) => println!("{ERR}{}: {e}{RESET}", rest[0]),
                     }
                 }
