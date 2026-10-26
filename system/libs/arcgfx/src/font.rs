@@ -36,6 +36,7 @@ struct Glyph {
 }
 
 struct Face {
+    size: u16,
     line: u16,
     ascent: i16,
     glyphs: Vec<Glyph>,
@@ -60,6 +61,7 @@ impl Fonts {
         let mut at = 8;
         let mut faces = Vec::new();
         for _ in 0..count {
+            let size = u16_at(at)?;
             let line = u16_at(at + 2)?;
             let ascent = u16_at(at + 4)? as i16;
             let n = u16_at(at + 6)? as usize;
@@ -79,13 +81,61 @@ impl Fonts {
                 at += 14;
             }
             glyphs.sort_by_key(|g| g.code);
-            faces.push(Face { line, ascent, glyphs });
+            faces.push(Face { size, line, ascent, glyphs });
         }
         Some(Fonts { bytes, faces, data: at })
     }
 
     fn face(&self, font: Font) -> &Face {
         &self.faces[(font as usize).min(self.faces.len() - 1)]
+    }
+
+    /// How many faces the atlas holds (an atlas of web faces is addressed
+    /// by number rather than by [`Font`]).
+    pub fn face_count(&self) -> usize {
+        self.faces.len()
+    }
+
+    /// The pixel size a face was rendered at.
+    pub fn face_size(&self, face: usize) -> i32 {
+        self.faces.get(face).map_or(0, |f| f.size as i32)
+    }
+
+    /// Line height and ascent of a face by number.
+    pub fn face_metrics(&self, face: usize) -> (i32, i32) {
+        self.faces.get(face).map_or((0, 0), |f| (f.line as i32, f.ascent as i32))
+    }
+
+    /// Width of one character in a face by number.
+    pub fn face_advance(&self, face: usize, c: char) -> i32 {
+        self.faces.get(face).and_then(|f| Self::find(f, c)).map_or(0, |g| g.advance as i32)
+    }
+
+    /// Width of `s` in a face by number.
+    pub fn face_width(&self, face: usize, s: &str) -> i32 {
+        let Some(f) = self.faces.get(face) else { return 0 };
+        s.chars().map(|c| Self::find(f, c).map_or(0, |g| g.advance as i32)).sum()
+    }
+
+    /// Draws `s` in a face by number, its top-left corner at (`x`, `y`).
+    pub fn face_draw(&self, c: &mut Canvas, face: usize, x: i32, y: i32, s: &str, color: u32) -> i32 {
+        let Some(f) = self.faces.get(face) else { return 0 };
+        self.draw_face(c, f, x, y, s, color)
+    }
+
+    fn draw_face(&self, c: &mut Canvas, face: &Face, x: i32, y: i32, s: &str, color: u32) -> i32 {
+        let base = y + face.ascent as i32;
+        let mut pen = x;
+        for ch in s.chars() {
+            let Some(g) = Self::find(face, ch) else { continue };
+            if g.w > 0 {
+                if let Some(mask) = self.mask(&g) {
+                    c.draw_mask(mask, g.w as i32, g.h as i32, pen + g.x as i32, base + g.y as i32, color);
+                }
+            }
+            pen += g.advance as i32;
+        }
+        pen - x
     }
 
     fn find(face: &Face, c: char) -> Option<Glyph> {
@@ -132,19 +182,7 @@ impl Fonts {
 
     /// Draws `s` with its top-left corner at (`x`, `y`). Returns the width.
     pub fn draw(&self, c: &mut Canvas, font: Font, x: i32, y: i32, s: &str, color: u32) -> i32 {
-        let face = self.face(font);
-        let base = y + face.ascent as i32;
-        let mut pen = x;
-        for ch in s.chars() {
-            let Some(g) = Self::find(face, ch) else { continue };
-            if g.w > 0 {
-                if let Some(mask) = self.mask(&g) {
-                    c.draw_mask(mask, g.w as i32, g.h as i32, pen + g.x as i32, base + g.y as i32, color);
-                }
-            }
-            pen += g.advance as i32;
-        }
-        pen - x
+        self.draw_face(c, self.face(font), x, y, s, color)
     }
 
     /// Draws `s` centred horizontally on `cx`.

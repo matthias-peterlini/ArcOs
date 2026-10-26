@@ -27,6 +27,7 @@ files
 arc
 ticly-do
 ticly-ai
+ticly-browser
 info
 code
 help
@@ -62,6 +63,9 @@ g-close
 g-folder
 g-back
 g-cloud
+g-reload
+g-home
+g-more
 notes
 reminders
 g-mute

@@ -407,8 +407,9 @@ impl Canvas {
                 if cov == 0 {
                     continue;
                 }
-                let s = blend(src.get(sxx, syy), tint, ta);
-                self.put(x, y, s, 255 * cov / 16);
+                let px = src.get(sxx, syy);
+                let s = blend(px, tint, ta);
+                self.put(x, y, s, (px >> 24) * cov / 16);
             }
         }
     }

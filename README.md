@@ -28,6 +28,10 @@ di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
   musica creati per arcOS. Le righe di comando si vedono solo nel Terminale.
 - **Le app di ogni giorno**: File, Editor di testo, Note, Promemoria,
   Calendario, Orologio, Calcolatrice, Foto, Musica, Monitor attività.
+- **L'ecosistema ticly**: ticly Do (attività, note, calendario), ticly AI
+  (chat con i modelli del gateway ticly) e il ticly browser, con un unico
+  account ticly; il browser usa un motore web (HTML, CSS, immagini) scritto
+  da zero.
 - **Un Negozio con app vere**: giochi (2048, Campo minato, Serpente, Sudoku,
   Tris) e Disegno, programmi separati che si installano con un clic e aprono
   le loro finestre.
@@ -98,7 +102,8 @@ memoria e `arcos.iso` nel lettore CD.
 | **Negozio** | 2048, Campo minato, Serpente, Sudoku, Tris, Disegno; BusyBox e Lua per il Terminale | [gui](docs/gui.md#il-negozio-e-le-app-installabili) |
 | **Compatibilità** | eseguibili ELF statici Linux e `.exe` Windows x64 da console | [compatibilità](docs/compat.md) |
 | **ArcScript** | il linguaggio di arcOS: `arcc` compila ed esegue `.as` e pacchetti `.arc` | [ArcScript](docs/arcscript.md) |
-| **Rete** | ARP, IPv4, ICMP, UDP, DHCP, DNS | |
+| **Rete** | ARP, IPv4, ICMP, UDP, TCP, DHCP, DNS; TLS 1.3 con certificati verificati e HTTP(S) | |
+| **Web** | `arcweb`: HTML, CSS (flexbox, grid, tabelle, media query), PNG, JPEG e GIF, per il ticly browser | [gui](docs/gui.md#il-motore-web) |
 | **Shell** | una quarantina di comandi, cronologia, completamento con Tab | [primi passi](#primi-passi-nel-terminale) |
 
 ### Hardware
@@ -187,7 +192,7 @@ shutdown / restart
 | `system/drivers/` | i driver, uno per cartella, ognuno con il suo `driver.manifest` |
 | `system/apps/` | i programmi, tra cui `winrun` (programmi Windows) e `arcc` (ArcScript) |
 | `system/store/` | le app del Negozio (giochi e Disegno), con icona e scheda |
-| `system/libs/` | le librerie: ABI dei driver (`arcdk`, `arcdrv`), programmi (`arcrt`), finestre (`arcui`), disegno (`arcgfx`), ArcFS, USB, virtio, ArcScript |
+| `system/libs/` | le librerie: ABI dei driver (`arcdk`, `arcdrv`), programmi (`arcrt`), finestre (`arcui`), disegno (`arcgfx`), ArcFS, USB, virtio, ArcScript, TLS (`arctls`), web (`arcweb`) |
 | `tools/arctool/` | strumento host: crea pacchetti, immagini e CD, legge e scrive volumi ArcFS |
 | `tools/assets/` | i generatori di caratteri, icone, sfondi, suoni e musica |
 | `tools/qemu/` | modelli per QEMU di dispositivi che QEMU non ha (Realtek RTL8169, RTL8168, RTL8125) |

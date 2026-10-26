@@ -372,7 +372,15 @@ type Reply = (u16, Vec<(String, String)>, Vec<u8>);
 fn once(url: &Url, method: &str, extra: &[(&str, &str)], body: Option<&[u8]>, progress: Progress<'_>, mut sink: Option<Sink<'_>>) -> Result<Reply, String> {
     let mut s = Stream::open(url)?;
     let host = if url.port == if url.https { 443 } else { 80 } { url.host.clone() } else { format!("{}:{}", url.host, url.port) };
-    let mut req = format!("{method} {} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: {USER_AGENT}\r\nAccept: */*\r\nAccept-Encoding: gzip\r\nConnection: close\r\n", url.path);
+    let mut req = format!("{method} {} HTTP/1.1\r\nHost: {host}\r\n", url.path);
+    let has = |name: &str| extra.iter().any(|(k, _)| k.eq_ignore_ascii_case(name));
+    if !has("user-agent") {
+        req.push_str(&format!("User-Agent: {USER_AGENT}\r\n"));
+    }
+    if !has("accept") {
+        req.push_str("Accept: */*\r\n");
+    }
+    req.push_str("Accept-Encoding: gzip\r\nConnection: close\r\n");
     for (k, v) in extra {
         req.push_str(&format!("{k}: {v}\r\n"));
     }

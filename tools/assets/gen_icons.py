@@ -413,6 +413,25 @@ def ticly_app(word, glow, glow2):
     return over(img, im)
 
 
+def ticly_browser():
+    """ticly browser: the ticly tile with an ember glow and a white globe."""
+    img = tile("#2B1F1B", "#0F0B0A")
+    im, d = layer()
+    d.ellipse((40, 220, 440, 620), fill=hexc("#B8441A"))
+    d.ellipse((250, 90, 520, 360), fill=hexc("#E0662E"))
+    im = im.filter(ImageFilter.GaussianBlur(70))
+    clip_to_tile(im)
+    over(img, im)
+    im, d = layer()
+    box = (126, 126, 386, 386)
+    d.ellipse(box, outline=WHITE, width=22)
+    d.ellipse((196, 126, 316, 386), outline=WHITE, width=18)
+    d.line([(136, 256), (376, 256)], fill=WHITE, width=18)
+    d.line([(160, 186), (352, 186)], fill=WHITE, width=16)
+    d.line([(160, 326), (352, 326)], fill=WHITE, width=16)
+    return over(img, im)
+
+
 def font_glyph(img, ch, size, color, dy=0):
     im, d = layer()
     f = ImageFont.truetype(BOLD, size)
@@ -735,6 +754,27 @@ def g_back():
     return im
 
 
+def g_reload():
+    im, d = layer()
+    d.arc((116, 116, 396, 396), 330, 270, fill=WHITE, width=44)
+    d.polygon([(250, 60), (350, 128), (250, 196)], fill=WHITE)
+    return im
+
+
+def g_home():
+    im, d = layer()
+    d.line([(96, 250), (256, 106), (416, 250)], fill=WHITE, width=44, joint="curve")
+    d.line([(150, 222), (150, 400), (362, 400), (362, 222)], fill=WHITE, width=44, joint="curve")
+    return im
+
+
+def g_more():
+    im, d = layer()
+    for y in (128, 256, 384):
+        d.ellipse((222, y - 34, 290, y + 34), fill=WHITE)
+    return im
+
+
 def g_cloud():
     im, d = layer()
     d.ellipse((90, 230, 250, 390), fill=WHITE)
@@ -960,6 +1000,7 @@ ICONS = [
     ("arc", arc_logo),
     ("ticly-do", lambda: ticly_app("Do", "#C2481C", "#E0662E")),
     ("ticly-ai", lambda: ticly_app("Ai", "#7C3AED", "#C04CD8")),
+    ("ticly-browser", ticly_browser),
     ("info", info),
     ("code", code),
     ("help", help_icon),
@@ -995,6 +1036,9 @@ ICONS = [
     ("g-folder", g_folder),
     ("g-back", g_back),
     ("g-cloud", g_cloud),
+    ("g-reload", g_reload),
+    ("g-home", g_home),
+    ("g-more", g_more),
     ("notes", notes),
     ("reminders", reminders),
     ("g-mute", g_mute),

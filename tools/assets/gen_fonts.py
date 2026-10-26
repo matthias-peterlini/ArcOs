@@ -67,22 +67,40 @@ def render(path, size, chars):
     return ascent, ascent + descent, glyphs
 
 
+# The faces of web pages (the browser), in sys:/system/webfonts.bin: every
+# size a page is likely to ask for, regular and bold, and a monospaced face.
+# The size field carries the style in its high bits (0x1000 bold, 0x2000
+# monospaced); the file is gzipped.
+WEB_TEXT = ([chr(c) for c in range(0x20, 0x7F)] + [chr(c) for c in range(0xA0, 0x180)]
+            + list("ƒˆ˜‐‑‒–—―‘’‚‛“”„†‡•…‰′″‹›€™←↑→↓↔−∞≈≠≤≥✓✔✕✗★☆♥◆●○■□▲▶▼◀"))
+WEB_SIZES = [10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26, 28, 30, 32, 36, 40, 44, 48]
+WEB_FONTS = ([(JAKARTA + "Medium.ttf", s, WEB_TEXT, s) for s in WEB_SIZES]
+             + [(JAKARTA + "Bold.ttf", s, WEB_TEXT, 0x1000 | s) for s in WEB_SIZES]
+             + [(DEJAVU + "DejaVuSansMono.ttf", s, WEB_TEXT, 0x2000 | s) for s in (11, 12, 13, 14, 16)])
+
+
 def main():
-    out = sys.argv[1] if len(sys.argv) > 1 else "system/kernel/assets/fonts.bin"
-    header = bytearray(b"ARCF" + struct.pack("<HH", 1, len(FONTS)))
+    web = len(sys.argv) > 1 and sys.argv[1] == "--web"
+    args = sys.argv[2:] if web else sys.argv[1:]
+    out = args[0] if args else ("rootfs/system/webfonts.bin" if web else "system/kernel/assets/fonts.bin")
+    fonts = WEB_FONTS if web else [(p, s, c, s) for p, s, c in FONTS]
+    header = bytearray(b"ARCF" + struct.pack("<HH", 1, len(fonts)))
     data = bytearray()
     tables = bytearray()
-    for path, size, chars in FONTS:
+    for path, size, chars, tag in fonts:
         ascent, line, glyphs = render(path, size, chars)
-        tables += struct.pack("<HHhH", size, line, ascent, len(glyphs))
+        tables += struct.pack("<HHhH", tag, line, ascent, len(glyphs))
         for code, w, h, x, y, adv, mask in glyphs:
             assert w < 256 and h < 256 and -128 <= x < 128 and -128 <= y < 128 and adv < 256, (path, size, chr(code))
             tables += struct.pack("<IBBbbBBI", code, w, h, x, y, adv, 0, len(data))
             data += mask
-    blob = header + tables + data
+    blob = bytes(header + tables + data)
+    if web:
+        import gzip
+        blob = gzip.compress(blob, 9, mtime=0)
     with open(out, "wb") as f:
         f.write(blob)
-    print(f"{out}: {len(FONTS)} fonts, {len(blob)} bytes")
+    print(f"{out}: {len(fonts)} fonts, {len(blob)} bytes")
 
 
 if __name__ == "__main__":

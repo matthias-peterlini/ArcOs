@@ -155,6 +155,7 @@ shots: image
 
 assets:
 	tools/assets/gen_fonts.py system/kernel/assets/fonts.bin
+	tools/assets/gen_fonts.py --web rootfs/system/webfonts.bin
 	tools/assets/gen_logo.py system/kernel/assets/logo.bin
 	tools/assets/gen_certs.py rootfs
 	tools/assets/gen_icons.py rootfs/system/gui
@@ -163,7 +164,7 @@ assets:
 	tools/assets/gen_sounds.py rootfs/system/sounds rootfs/home/Musica
 
 check:
-	cd system && $(CARGO) test --target x86_64-unknown-linux-gnu -p arcdk -p arcfs -p arcgfx -p arctls -p arczip -p arcjson -p arcc-core -p arc-vm
+	cd system && $(CARGO) test --target x86_64-unknown-linux-gnu -p arcdk -p arcfs -p arcgfx -p arctls -p arczip -p arcjson -p arcc-core -p arc-vm -p arcweb
 	cd tools && $(CARGO) test --release
 
 clean:

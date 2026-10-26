@@ -77,6 +77,7 @@ struct Thread {
     rsp: u64,
     /// Lowest address of the stack (0 for the boot thread's static stack).
     stack: u64,
+    stack_pages: u64,
     wake_at: u64,
     cpu_ticks: u64,
     /// Address space (0 = kernel only).
@@ -92,7 +93,7 @@ struct Thread {
 
 impl Thread {
     fn stack_top(&self) -> u64 {
-        self.stack + STACK_PAGES * mem::PAGE_SIZE
+        self.stack + self.stack_pages * mem::PAGE_SIZE
     }
 }
 
@@ -180,6 +181,7 @@ pub fn init() {
             state: State::Running,
             rsp: 0,
             stack: 0,
+            stack_pages: 0,
             wake_at: 0,
             cpu_ticks: 0,
             cr3: 0,
@@ -219,8 +221,13 @@ pub(crate) fn spawn_suspended(name: &str, entry: Entry, arg: *mut c_void, cr3: u
 }
 
 fn spawn_with(name: &str, entry: Entry, arg: *mut c_void, cr3: u64, pid: u32, suspended: bool) -> Option<Tid> {
-    let stack = region::alloc_pages(&region::STACKS, STACK_PAGES, 1)?;
-    let top = stack + STACK_PAGES * mem::PAGE_SIZE;
+    spawn_sized(name, entry, arg, cr3, pid, suspended, STACK_PAGES)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_sized(name: &str, entry: Entry, arg: *mut c_void, cr3: u64, pid: u32, suspended: bool, pages: u64) -> Option<Tid> {
+    let stack = region::alloc_pages(&region::STACKS, pages, 1)?;
+    let top = stack + pages * mem::PAGE_SIZE;
     let rsp = top - 9 * 8;
     let frame = [0u64, 0, arg as u64, entry as usize as u64, 0, 0, thread_trampoline as *const () as u64, 0, 0];
     // SAFETY: the stack was just mapped and is owned by the new thread.
@@ -236,6 +243,7 @@ fn spawn_with(name: &str, entry: Entry, arg: *mut c_void, cr3: u64, pid: u32, su
             state: State::Ready,
             rsp,
             stack,
+            stack_pages: pages,
             wake_at: 0,
             cpu_ticks: 0,
             cr3,
@@ -255,13 +263,20 @@ fn spawn_with(name: &str, entry: Entry, arg: *mut c_void, cr3: u64, pid: u32, su
 
 /// Starts a thread running a closure.
 pub fn spawn<F: FnOnce() + Send + 'static>(name: &str, f: F) -> Option<Tid> {
+    spawn_big(name, STACK_PAGES * mem::PAGE_SIZE, f)
+}
+
+/// Starts a thread running a closure on a stack of at least `bytes` (for
+/// deep recursion, such as laying out web pages).
+pub fn spawn_big<F: FnOnce() + Send + 'static>(name: &str, bytes: u64, f: F) -> Option<Tid> {
     unsafe extern "C" fn run<F: FnOnce()>(arg: *mut c_void) {
         // SAFETY: arg is the Box leaked below, used exactly once.
         let f = unsafe { Box::from_raw(arg as *mut F) };
         f();
     }
     let arg = Box::into_raw(Box::new(f)) as *mut c_void;
-    let tid = spawn_raw(name, run::<F>, arg);
+    let pages = bytes.div_ceil(mem::PAGE_SIZE).max(STACK_PAGES);
+    let tid = spawn_sized(name, run::<F>, arg, 0, 0, false, pages);
     if tid.is_none() {
         // SAFETY: the thread was not created; reclaim the closure.
         drop(unsafe { Box::from_raw(arg as *mut F) });
@@ -274,7 +289,7 @@ fn after_switch() {
     let zombies = core::mem::take(&mut SCHED.lock().zombies);
     for z in zombies {
         if z.stack != 0 {
-            region::free_pages(&region::STACKS, z.stack, STACK_PAGES, 1);
+            region::free_pages(&region::STACKS, z.stack, z.stack_pages, 1);
         }
     }
 }

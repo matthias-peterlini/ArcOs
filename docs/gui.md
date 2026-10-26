@@ -76,6 +76,9 @@ si ridisegna a ogni fotogramma.
 
 | App | Cosa fa |
 |---|---|
+| ticly Do | il workspace di ticly: panoramica, attività, note e calendario (mese, settimana, giorno) sugli stessi file di Promemoria, Note e Calendario; profilo dell'account |
+| ticly AI | chat con i modelli del gateway ticly, con i crediti dell'account; le risposte arrivano mentre vengono scritte; chat in `sys:/home/.ticly/ai` |
+| ticly browser | il browser di ticly: schede, barra degli indirizzi (indirizzi o ricerche DuckDuckGo), avanti/indietro, ricarica, pagina iniziale ticly, trova nella pagina (Ctrl+F), moduli, `<select>`, cookie; i file non visualizzabili vanno in `Scaricati` |
 | File | sfoglia i volumi: risorse a sinistra, cartelle e file a destra; doppio clic apre una cartella o il file con l'app giusta; tasto destro per aprire, rinominare (anche F2), spostare nel Cestino (Canc), creare una cartella; nel Cestino eliminare o svuotare |
 | Editor di testo | file di testo con selezione, copia e incolla, scorrimento; Nuovo, Apri, Salva (Ctrl+N, Ctrl+O, Ctrl+S) con la scelta del file; alla chiusura salva da solo |
 | Note | note in `sys:/home/Note`, la prima riga è il titolo, ricerca, si salvano mentre si scrive |
@@ -91,6 +94,27 @@ si ridisegna a ogni fotogramma.
 | Monitor attività | i programmi in esecuzione, il processore e la memoria nell'ultimo minuto; un programma si può terminare |
 | Info sistema | panoramica, dispositivi con i loro driver, dischi con lo spazio libero |
 | Terminale | la shell di arcOS: l'unico posto dove si vedono le righe di comando |
+
+### Il motore web
+
+Le pagine del ticly browser le disegna `arcweb` (`system/libs/arcweb`),
+scritto da zero come il resto: tokenizer e albero HTML con le regole di
+chiusura implicita, CSS con selettori, media query, `@import`, `@supports`,
+annidamento, variabili, `calc()`/`min()`/`max()`/`clamp()`; layout a blocchi
+e in linea, float, flexbox, grid, tabelle, liste, campi dei moduli; immagini
+PNG, JPEG (anche progressive) e GIF. JavaScript non c'è: i siti che ne hanno
+bisogno per mostrare il contenuto restano parziali.
+
+Ogni pagina si carica su un thread suo (pagina, fogli di stile, poi le
+immagini quattro alla volta) e viene impaginata di nuovo quando arrivano le
+immagini o la finestra cambia misura; i caratteri delle pagine (Plus Jakarta
+Sans in varie misure, normale e grassetto, e DejaVu Sans Mono) sono in
+`sys:/system/webfonts.bin`. Per provarlo sull'host:
+
+```sh
+cd system && cargo run --release --target x86_64-unknown-linux-gnu \
+    -p arcweb --example render -- pagina.html 1024 pagina.ppm
+```
 
 ## Il Negozio e le app installabili
 

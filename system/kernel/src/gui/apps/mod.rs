@@ -2,6 +2,7 @@
 //! opens which file.
 
 mod about;
+mod browser;
 mod calculator;
 mod calendar;
 mod clock;
@@ -31,9 +32,10 @@ pub use files::Files;
 pub use viewer::Viewer;
 
 /// The built-in apps: id, name, icon, window kind.
-pub const BUILT_IN: [(&str, &str, &str); 18] = [
+pub const BUILT_IN: [(&str, &str, &str); 19] = [
     ("ticly-do", "ticly Do", "ticly-do"),
     ("ticly-ai", "ticly AI", "ticly-ai"),
+    ("browser", "ticly browser", "ticly-browser"),
     ("files", "File", "files"),
     ("textedit", "Editor di testo", "text-editor"),
     ("notes", "Note", "notes"),
@@ -71,6 +73,7 @@ pub fn open(id: &str) -> Option<Box<dyn App>> {
         "monitor" => Box::new(monitor::Monitor::new()),
         "ticly-do" => Box::new(ticly_do::TiclyDo::new()),
         "ticly-ai" => Box::new(ticly_ai::TiclyAi::new()),
+        "browser" => Box::new(browser::Browser::new(None)),
         "trash" => {
             if let Ok(p) = fs::abs("sys:/home/Cestino") {
                 if !fs::exists(&p) {
