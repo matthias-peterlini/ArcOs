@@ -7,7 +7,8 @@
 //!
 //! Two other kinds of program run here too: Linux programs (any other ELF
 //! file), which talk to [`crate::linux`] through `syscall`, and Windows
-//! programs (`.exe`), which `winrun.app` loads and runs.
+//! programs (`.exe`), which `winrun.app` loads and runs, and Android apps
+//! and Java programs (`.apk`, `.dex`, `.jar`), which `dalvik.app` runs.
 
 use crate::arch::{cpu, gdt, idt::TrapFrame};
 use crate::fs::{self, Path};
@@ -79,15 +80,15 @@ pub(crate) fn fs_error(e: fs::Error) -> Error {
 }
 
 /// Where a program name points: `edit` -> `sys:/apps/edit.app`, else
-/// `edit.arc` or `edit.as` there (ArcScript programs), `edit.exe` (Windows)
-/// or `edit` (Linux); paths are taken as they are.
+/// `edit.arc` or `edit.as` there (ArcScript programs), `edit.exe` (Windows),
+/// `edit.apk` (Android) or `edit` (Linux); paths are taken as they are.
 pub fn find_program(name: &str, cwd: &Path) -> Option<Path> {
     let lower = name.to_ascii_lowercase();
-    if name.contains(':') || name.contains('/') || lower.ends_with(".app") || lower.ends_with(".exe") || is_script(name) {
+    if name.contains(':') || name.contains('/') || lower.ends_with(".app") || lower.ends_with(".exe") || is_script(name) || is_android(name) {
         let p = Path::parse(name, cwd).ok()?;
         return fs::stat(&p).ok().filter(|s| s.kind == arcfs::Kind::File).map(|_| p);
     }
-    [".app", ".arc", ".as", ".exe", ""].iter().find_map(|ext| {
+    [".app", ".arc", ".as", ".exe", ".apk", ""].iter().find_map(|ext| {
         let p = fs::abs(&alloc::format!("sys:/apps/{lower}{ext}")).ok()?;
         fs::stat(&p).ok().filter(|s| s.kind == arcfs::Kind::File).map(|_| p)
     })
@@ -99,8 +100,15 @@ fn is_script(name: &str) -> bool {
     lower.ends_with(".arc") || lower.ends_with(".as")
 }
 
+/// Android apps and Java programs in DEX form, which `dalvik` runs.
+fn is_android(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.ends_with(".apk") || lower.ends_with(".dex") || lower.ends_with(".jar")
+}
+
 const SCRIPT_RUNNER: &str = "sys:/apps/arcc.app";
 const WINDOWS_RUNNER: &str = "sys:/apps/winrun.app";
+const ANDROID_RUNNER: &str = "sys:/apps/dalvik.app";
 
 struct Start {
     image: Vec<u8>,
@@ -132,9 +140,17 @@ pub fn spawn(path: &Path, args: &str, cwd: Path) -> Result<u32, Error> {
     }
     let mut magic = [0u8; 4];
     fs::read_at(path, 0, &mut magic).map_err(fs_error)?;
-    if magic[..2] == *b"MZ" {
-        // `winrun <file> <args>`, under the program's own name.
-        let runner = fs::abs(WINDOWS_RUNNER).map_err(fs_error)?;
+    let runner = if magic[..2] == *b"MZ" {
+        Some(WINDOWS_RUNNER)
+    } else if magic == *b"dex\n" || is_android(name) {
+        Some(ANDROID_RUNNER)
+    } else {
+        None
+    };
+    if let Some(runner) = runner {
+        // `winrun <file> <args>` or `dalvik <file> <args>`, under the
+        // program's own name.
+        let runner = fs::abs(runner).map_err(fs_error)?;
         let image = fs::read_file(&runner).map_err(fs_error)?;
         let shown = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
         return start(image, String::from(shown), &alloc::format!("{} {args}", quoted(path)), cwd, Kind::Native, path);

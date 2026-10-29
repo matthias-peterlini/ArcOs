@@ -50,6 +50,14 @@ name = "arcc-core"
 version = "0.5.0"
 
 [[package]]
+name = "arcdex"
+version = "1.0.0"
+dependencies = [
+ "arcc-core",
+ "arczip",
+]
+
+[[package]]
 name = "arcdk"
 version = "0.6.0"
 
@@ -152,6 +160,15 @@ name = "cirrus"
 version = "1.0.0"
 dependencies = [
  "arcdrv",
+]
+
+[[package]]
+name = "dalvik"
+version = "1.0.0"
+dependencies = [
+ "arcdex",
+ "arcrt",
+ "arcui",
 ]
 
 [[package]]

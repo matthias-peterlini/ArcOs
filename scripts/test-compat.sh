@@ -1,9 +1,10 @@
 #!/bin/sh
 # Builds a small Linux program and three Windows programs (scripts/compat:
 # console, files and keyboard, and one with a window), puts them on a copy of
-# the image together with the store programs, boots arcOS and checks that they
-# run: the Linux ABI, the Windows loader (winrun), `install` and the BusyBox
-# applets.
+# the image together with the store programs and two Java programs (a DEX
+# file and an Android app, already built: system/libs/arcdex/tests), boots
+# arcOS and checks that they run: the Linux ABI, the Windows loader (winrun),
+# the Dalvik interpreter, `install` and the BusyBox applets.
 #
 # Needs musl-gcc (musl-tools) and x86_64-w64-mingw32-gcc (mingw-w64). If either
 # is missing, that half is skipped (and noted), so the script still checks what
@@ -94,6 +95,9 @@ print("lua: sum 1..100 = " .. s)
 print(string.format("lua: float=%.3f", 1.0 / 3.0))
 EOF
 "$ARCTOOL" fs "$WORK/arcos.img" put "$WORK/t.lua" /home/compat/t.lua >/dev/null
+DEX=$HERE/../system/libs/arcdex/tests
+"$ARCTOOL" fs "$WORK/arcos.img" put "$DEX/Basics.dex" /home/compat/Basics.dex >/dev/null
+"$ARCTOOL" fs "$WORK/arcos.img" put "$DEX/SelfTest.apk" /home/compat/SelfTest.apk >/dev/null
 
 # Build the session depending on what is available.
 {
@@ -108,6 +112,9 @@ EOF
     # wtest reads a number from the keyboard: the line after it.
     [ $have_windows = 1 ] && { echo 'whello.exe alpha beta'; echo 'wtest.exe'; echo '21'; echo 'wgui.exe'; echo '@sleep 2'; }
     echo 'lua t.lua'
+    echo 'Basics.dex'
+    echo '@sleep 2'
+    echo 'SelfTest.apk'
     echo '@sleep 2'
     echo 'shutdown'
 } > "$WORK/session.txt"
@@ -116,6 +123,14 @@ EOF
     echo 'busybox-echo-works'
     echo 'lua: sum 1..100 = 5050'
     echo 'lua: float=0.333'
+    echo 'Ciao da Java! args=0'
+    echo '0.30000000000000004'
+    echo '[cerchio(3.14), quadrato(4.00), rettangolo(6.00)] made=3'
+    echo '{la=3, neve=2, roccia=1} la 2 false'
+    echo '30 63 -1360544799 false 0.30871945533265976'
+    echo 'I/selftest: window open'
+    echo 'I/selftest: label clic 2'
+    echo 'I/selftest: destroyed after 2 clicks'
     [ $have_linux = 1 ] && { echo 'linux: heap ok'; echo 'linux: float=3.142'; echo 'linux: read back: written by a linux program'; echo 'linux: argv[1]=from-deb'; }
     [ $have_windows = 1 ] && cat <<'EOF'
 windows: squares 0 1 4 9

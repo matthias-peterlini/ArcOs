@@ -205,6 +205,9 @@ pub fn for_file(path: &str) -> Opener {
         // A Windows program with a window of its own needs no terminal.
         "exe" if windowed_exe(path) => Opener::Spawn(String::from(path)),
         "exe" | "as" | "arc" | "" => Opener::Run(quoted),
+        // Android apps get a window; Java programs (DEX) a terminal.
+        "apk" => Opener::Spawn(String::from(path)),
+        "dex" | "jar" => Opener::Run(quoted),
         // Anything else that is a program (by its first bytes) runs too.
         _ => {
             let mut magic = [0u8; 4];

@@ -31,7 +31,9 @@ di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
   volume, luminosità, account) e il centro notifiche con il calendario. A
   schermo intero (F11) la barra si aggancia in alto e porta con sé il nome
   dell'app e i suoi pulsanti. Il carattere è Google Sans Flex; icone,
-  sfondi, suoni e musica sono creati per arcOS.
+  suoni e musica sono creati per arcOS; tra gli sfondi ci sono foto delle
+  Dolomiti da Wikimedia Commons (autori e licenze in
+  `rootfs/system/gui/wallpapers/CREDITS.txt`).
 - **Doppio clic e via**: un programma parte, un pacchetto (`.deb`,
   `.tar.gz`, `.zip`, `.pkg` di macOS…) si installa da solo.
 - **Le app di ogni giorno**: File, Editor di testo, Note, Promemoria,
@@ -45,10 +47,13 @@ di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
   le loro finestre.
 - **I driver si installano da soli**: dischi SATA e NVMe, USB 1/2/3,
   schede di rete Intel e Realtek, lettori di schede SD, audio HD e AC'97,
-  schede video delle macchine virtuali con cambio di risoluzione.
-- **Esegue programmi Linux e Windows** x86-64 senza modificarli, accanto
-  ai suoi (Linux statici, Windows da console). Le app macOS e Android non
-  possono girare: il perché è in [compatibilità](docs/compat.md#cosa-non-può-girare).
+  schede video delle macchine virtuali con cambio di risoluzione, e lo
+  schermo su ogni altra scheda (Intel, AMD, NVIDIA).
+- **Esegue programmi Linux, Windows e Android** senza modificarli, accanto
+  ai suoi: Linux x86-64 statici, Windows x64 da console e con finestre,
+  programmi Java e app Android (`.apk`, `.dex`) che costruiscono
+  l'interfaccia nel codice. Le app macOS non possono girare; i limiti sono
+  in [compatibilità](docs/compat.md#cosa-non-può-girare).
 - **Ha il suo linguaggio**, ArcScript, con compilatore e macchina virtuale
   che girano su arcOS.
 - **Scritto da zero**: niente codice di Linux, Unix, DOS o Windows, nessuna
@@ -117,7 +122,7 @@ memoria e `arcos.iso` nel lettore CD.
 | **Interfaccia** | splash, configurazione guidata, scrivania con dock, Launchpad, notifiche e animazioni; quindici app di sistema | [gui](docs/gui.md) |
 | **Programmi** | in modalità utente, ognuno nel suo spazio di indirizzi, a riga di comando o con finestre proprie (`arcui`) | [programmi](docs/programmi.md) |
 | **Negozio** | 2048, Campo minato, Serpente, Sudoku, Tris, Disegno; BusyBox e Lua per il Terminale | [gui](docs/gui.md#il-negozio-e-le-app-installabili) |
-| **Compatibilità** | eseguibili ELF statici Linux e `.exe` Windows x64 da console; installazione di `.deb`, `.tar.gz`, `.zip` e `.pkg` con un doppio clic | [compatibilità](docs/compat.md) |
+| **Compatibilità** | eseguibili ELF statici Linux, `.exe` Windows x64 (console e finestre), programmi Java e app Android (`.dex`, `.apk`); installazione di `.deb`, `.tar.gz`, `.zip` e `.pkg` con un doppio clic | [compatibilità](docs/compat.md) |
 | **ArcScript** | il linguaggio di arcOS: `arcc` compila ed esegue `.as` e pacchetti `.arc` | [ArcScript](docs/arcscript.md) |
 | **Rete** | ARP, IPv4, ICMP, UDP, TCP, DHCP, DNS; TLS 1.3 con certificati verificati e HTTP(S) | |
 | **Web** | `arcweb`: HTML, CSS (flexbox, grid, tabelle, media query), PNG, JPEG e GIF, per il ticly browser | [gui](docs/gui.md#il-motore-web) |
@@ -132,11 +137,11 @@ memoria e `arcos.iso` nel lettore CD.
 | Schede SD | lettori standard (SD Host Controller): schede SD, SDHC, SDXC, MMC |
 | Rete | Intel PRO/1000 (e1000, 82574, I217–I219), Intel 82576, I210/I211, I350 e I225/I226 (2,5 Gbit), Realtek RTL8139, RTL8169/8111/8168 e RTL8125 (2,5 Gbit), AMD PCnet, virtio |
 | Audio | Intel HD Audio (quasi ogni PC dal 2005), AC'97 |
-| Video | il framebuffer del firmware su qualunque scheda; cambio di risoluzione con le schede di QEMU, VirtualBox (VBoxVGA, VMSVGA), VMware e virtio-gpu |
+| Video | qualunque scheda (Intel, AMD, NVIDIA, Hyper-V) con il framebuffer del firmware; cambio di risoluzione con le schede di QEMU (VGA, Cirrus, QXL), VirtualBox (VBoxVGA, VMSVGA), VMware e virtio-gpu |
 | Input | tastiera e mouse PS/2 e USB, pulsante di accensione (ACPI) |
 
-Mancano ancora il Wi-Fi, i driver per le schede video vere (Intel, AMD,
-nVidia) e la batteria dei portatili. Lo stato
+Mancano ancora il Wi-Fi, l'accelerazione e il cambio di risoluzione sulle
+schede video vere e la batteria dei portatili. Lo stato
 di ogni driver, provato o no, è in [docs/driver.md](docs/driver.md#hardware-supportato).
 
 ## Compilare
@@ -159,7 +164,7 @@ make test-drivers   # un avvio per ogni disco, scheda di rete, controller USB e 
 make test-audio     # suoni su ogni scheda audio emulata, registrati e controllati
 make test-display   # cambio di risoluzione su ogni scheda video emulata
 make test-acpi      # il pulsante di accensione spegne arcOS
-make test-compat    # un programma Linux e uno Windows
+make test-compat    # programmi Linux, Windows (anche con finestre), Java e Android
 make test-arcscript # programmi ArcScript
 make shots          # usa l'interfaccia (ogni app, il Negozio) e salva le schermate
 make check          # test delle librerie e dello strumento host
@@ -178,8 +183,8 @@ essere la chiavetta stessa.
 Da sapere prima di provarlo:
 
 - il kernel usa un solo processore;
-- lo schermo resta nella risoluzione scelta dal firmware (le schede video
-  vere non hanno ancora un driver);
+- sulle schede video vere lo schermo resta nella risoluzione scelta dal
+  firmware (il loader UEFI ne sceglie una grande);
 - molti driver sono scritti dalla documentazione dei chip e provati in
   QEMU, non ancora su hardware vero.
 
@@ -207,9 +212,9 @@ shutdown / restart
 | `boot/bios/`, `boot/uefi/` | ArcBoot per BIOS e per UEFI |
 | `system/kernel/` | il kernel, con l'interfaccia grafica (`src/gui`) |
 | `system/drivers/` | i driver, uno per cartella, ognuno con il suo `driver.manifest` |
-| `system/apps/` | i programmi, tra cui `winrun` (programmi Windows) e `arcc` (ArcScript) |
+| `system/apps/` | i programmi, tra cui `winrun` (programmi Windows), `dalvik` (Java e Android) e `arcc` (ArcScript) |
 | `system/store/` | le app del Negozio (giochi e Disegno), con icona e scheda |
-| `system/libs/` | le librerie: ABI dei driver (`arcdk`, `arcdrv`), programmi (`arcrt`), finestre (`arcui`), disegno (`arcgfx`), ArcFS, USB, virtio, ArcScript, TLS (`arctls`), web (`arcweb`) |
+| `system/libs/` | le librerie: ABI dei driver (`arcdk`, `arcdrv`), programmi (`arcrt`), finestre (`arcui`), disegno (`arcgfx`), ArcFS, USB, virtio, ArcScript, TLS (`arctls`), web (`arcweb`), Dalvik (`arcdex`) |
 | `tools/arctool/` | strumento host: crea pacchetti, immagini e CD, legge e scrive volumi ArcFS |
 | `tools/assets/` | i generatori di caratteri, icone, sfondi, suoni e musica |
 | `tools/qemu/` | modelli per QEMU di dispositivi che QEMU non ha (Realtek RTL8169, RTL8168, RTL8125) |

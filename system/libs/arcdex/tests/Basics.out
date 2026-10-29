@@ -1,0 +1,41 @@
+Ciao da Java! args=0
+3 2 -3 -2 136 -9 15
+1099511627776 2432902008176640000 9223372036854775807 -2147483648
+2.5 0.3333333333333333 1.0E10 1.0E-4 100.0 0.1 3 -3
+1.4142135623730951 1024.0 7 9 3 -2 -2.0
+c 90 true Q
+101010 ffffffff -123 77 2500.0
+610 16 [0, 1, 4, 9, 16]
+0.30000000000000004
+2.5
+3 TRE CIME 14 Tre D30
+spazi|a+b+c|-1|2|a/b
+3 a#b#c# true
+[0,1,2,3,4] ]4,3,2,1,0[ hash=1178490239
+frutta verdura boh
+|   42|ab   |003.1|ff|z|true|1,234,567|1.235e+04|
+null? null true
+[cerchio(3.14), quadrato(4.00), rettangolo(6.00)] made=3
+cerchio false true
+[cerchio(3.14), quadrato(4.00), rettangolo(6.00)]
+{la=3, neve=2, roccia=1} la 2 false
+totale 6
+2 true
+[1, 3, 5] max=5 2
+ba1
+[abete, larice, pino] abete
+[1, 2, 5, 8] [[0, 0, 0], [0, 0, 7]] 3
+LUN:0:inizio MAR:1:altro MER:2:metà MAR
+finally 10/2
+5
+errore: / by zero
+finally 1/0
+-1
+cast fallito
+indice: Index 5 out of bounds for length 2
+java.lang.NumberFormatException: For input string: "abc"
+IllegalStateException stato
+NPE presa
+30 63 -1360544799 false 0.30871945533265976
+true true 5 1.5
+fine

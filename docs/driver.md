@@ -350,18 +350,22 @@ della scheda non funzionano.
 | `sdhci` | lettori di schede SD/MMC standard (per classe PCI): Intel, O2 Micro, Ricoh, AMD | provato con ADMA2, SDMA e senza DMA, schede SD e SDHC |
 | `hda` | audio HD Intel (per classe PCI), codec Realtek, Conexant, IDT, VIA, Cirrus | provato con uscita di linea e altoparlante; sui codec veri non verificato |
 | `ac97` | audio AC'97 Intel ICH, SiS, nVidia, AMD | provato (82801AA) |
-| `bochsvga` | schermo di QEMU (VGA standard, bochs-display), Bochs, VirtualBox VBoxVGA | provato in QEMU |
+| `bochsvga` | schermo di QEMU (VGA standard, bochs-display), Bochs, VirtualBox VBoxVGA, QXL | provato in QEMU |
 | `vmsvga` | VMware SVGA II: VMware, VirtualBox VMSVGA | provato in QEMU |
 | `virtiogpu` | virtio GPU (2D) | provato |
+| `cirrus` | Cirrus Logic GD5446 (QEMU `-vga cirrus`), 640x480 e 800x600 | provato in QEMU |
+| `fbgeneric` | qualunque altra scheda (Intel, AMD, NVIDIA, Hyper-V, ATI di QEMU…): usa il framebuffer del firmware (GOP o VESA) | provato in QEMU (`ati-vga`) |
 
-Senza un driver video lo schermo resta nel modo scelto dal firmware
-(VBE o GOP), che funziona su quasi ogni scheda ma non cambia risoluzione.
+`fbgeneric` non cambia risoluzione: tiene il modo scelto dal firmware. Il
+loader UEFI sceglie un modo grande del GOP (non più 1024x768 fisso), così
+anche sulle schede vere lo schermo è nitido.
 
 Il pulsante di accensione non ha un driver: lo gestisce il kernel (ACPI,
 `make test-acpi`), e premerlo spegne il computer in modo pulito.
 
-Mancano ancora i driver per: Wi-Fi, schede video vere (Intel, AMD,
-nVidia: si usa il framebuffer del firmware), lettori di schede Realtek e Genesys su PCIe, batteria
+Mancano ancora i driver per: Wi-Fi, l'accelerazione e il cambio di
+risoluzione delle schede video vere (Intel, AMD, NVIDIA: hanno lo schermo
+tramite `fbgeneric`), lettori di schede Realtek e Genesys su PCIe, batteria
 dei portatili.
 
 ### Il pacchetto

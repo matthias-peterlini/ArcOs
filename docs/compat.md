@@ -1,7 +1,8 @@
-# Programmi Linux e Windows su arcOS
+# Programmi Linux, Windows e Android su arcOS
 
 arcOS esegue, oltre ai suoi programmi nativi e a quelli ArcScript, anche
-programmi **Linux** e **Windows** per x86-64, senza modificarli. Non c'è una
+programmi **Linux** e **Windows** per x86-64 e app **Android** e programmi
+Java (vedi [più sotto](#programmi-java-e-app-android)), senza modificarli. Non c'è una
 macchina virtuale: il programma gira nello stesso modo degli altri, in ring 3
 e nel suo spazio di indirizzi; quando chiede qualcosa al sistema, arcOS traduce
 la richiesta nelle proprie chiamate.
@@ -66,20 +67,68 @@ hello.exe                  arcOS vede che è un programma Windows e lo avvia
 winrun hello.exe alpha     lo stesso, scritto per esteso
 ```
 
-Sono gestiti i **programmi da console per x64** costruiti con
-[MinGW-w64](https://www.mingw-w64.org/) (`x86_64-w64-mingw32-gcc`). Di
-`kernel32`/`msvcrt` è implementato ciò che serve a questi programmi: i tre
-flussi standard, la famiglia `printf` (con un motore di formattazione scritto
-in `winrun`), la memoria (`malloc`/`HeapAlloc`/`VirtualAlloc`), gli argomenti
-(`__getmainargs`), l'avvio del runtime C (`_initterm`) e stub innocui per il
-resto. Manca tutto il resto di Windows: niente interfaccia grafica, registro,
-processi o thread veri.
+Sono gestiti i **programmi x64** costruiti con
+[MinGW-w64](https://www.mingw-w64.org/) (`x86_64-w64-mingw32-gcc`), da console
+e con finestre:
 
-I programmi a 32 bit e quelli che usano la grafica non sono ancora gestiti:
-l'obiettivo è partire dalla console a 64 bit e crescere da lì.
+| Area | Su arcOS |
+|---|---|
+| console | i tre flussi standard, `printf`/`scanf` e famiglia, `fgets(stdin)`, `getchar`, `ReadConsole` |
+| file | `fopen`/`fread`/`fgets`/`fscanf`/`fseek` e `CreateFile`/`ReadFile`/`WriteFile`; i percorsi Windows (`C:\x`) diventano percorsi di arcOS |
+| runtime C | memoria (`malloc`, `HeapAlloc`, `VirtualAlloc`), stringhe, `ctype`, `strtol`/`strtod`, `qsort`/`bsearch`, `rand`, `time`/`localtime`, matematica |
+| finestre (`user32`) | classi di finestra, `CreateWindowEx`, il ciclo dei messaggi (`GetMessage`, `PeekMessage`, `DispatchMessage`), timer, messaggi di mouse e tastiera, `WM_PAINT`, `MessageBox` |
+| disegno (`gdi32`) | penne, pennelli e caratteri, rettangoli, ellissi, linee, poligoni, testo e `DrawText`, DC in memoria con `BitBlt` |
 
-Com'è fatto: `system/apps/winrun/src/pe.rs` (il caricatore) e
-`system/apps/winrun/src/win.rs` (le funzioni di Windows e il `printf`).
+Un `.exe` con finestre (sottosistema GUI) si apre con un doppio clic senza
+Terminale: le sue finestre sono finestre di arcOS. Una funzione importata che
+`winrun` non conosce non ferma più il programma: lo stub lo dice una volta e
+restituisce 0.
+
+Mancano il registro, i processi e i thread veri, i controlli comuni
+(`comctl32`), DirectX e i programmi a 32 bit.
+
+Com'è fatto: `system/apps/winrun/src/pe.rs` (il caricatore),
+`system/apps/winrun/src/win.rs` (`kernel32`), `crt.rs` (il runtime C) e
+`gui.rs` (`user32` e `gdi32`).
+
+## Programmi Java e app Android
+
+Le app Android e i programmi Java compilati per Android sono bytecode
+**Dalvik** (file `.dex`, da soli o dentro un `.apk` o un `.jar`). Li esegue
+`dalvik` (`system/apps/dalvik`), un interprete scritto da zero
+(`system/libs/arcdex`): legge il file DEX, esegue le istruzioni Dalvik e
+fornisce la parte della libreria Java e del framework Android che serve.
+
+```
+Basics.dex                 un programma Java con main(): scrive nel Terminale
+dalvik Input.dex           lo stesso, scritto per esteso
+SelfTest.apk               un'app Android: si apre nella sua finestra
+```
+
+Un doppio clic su un `.apk` apre l'app nella sua finestra; un `.dex` o un
+`.jar` parte nel Terminale. arcOS riconosce il formato dai primi byte
+(`dex\n` o un archivio zip con `classes.dex`).
+
+| Area | Su arcOS |
+|---|---|
+| linguaggio | tutte le istruzioni Dalvik: classi, interfacce, eccezioni con `try`/`catch`, array multidimensionali, `switch`, enum, classi interne e anonime |
+| `java.lang` | `String`, `StringBuilder`, i tipi incapsulati, `Math`, `System`, `Character`, `Thread` (eseguito subito, non in parallelo), le eccezioni con lo stesso messaggio della JVM |
+| `java.util` | liste, insiemi, mappe (anche ordinate), code, `Stack`, `Arrays`, `Collections`, `Random` (gli stessi numeri della JVM), `Scanner`, `Objects` |
+| testo | `String.format`, espressioni regolari (`matches`, `split`, `replaceAll`), `BufferedReader` sulla tastiera |
+| Android | `Activity` (anche `AppCompatActivity`) con il ciclo di vita, `TextView`, `Button`, `EditText`, `CheckBox`, `ProgressBar`, `ImageView`, `LinearLayout` e altri gruppi, `Toast`, `Handler`, `Log`, `Color` |
+
+Le finestre delle app seguono lo stile Material chiaro: la barra con il
+titolo, pulsanti a pillola, campi di testo con la riga sotto. Esc torna
+indietro (`onBackPressed`), Tab passa da un campo all'altro. Se l'app si
+ferma con un'eccezione, compare la scheda "*app* si è arrestata".
+
+Il test `basics_print_what_java_prints` controlla che un programma di prova
+scriva esattamente quello che scrive una JVM vera.
+
+Com'è fatto: `system/libs/arcdex/src/dex.rs` (il formato DEX),
+`interp.rs` (le istruzioni), `java.rs` (la libreria Java), `text.rs` (numeri,
+`format` ed espressioni regolari), `android.rs` (le viste e le attività) e
+`system/apps/dalvik/src/screen.rs` (il disegno delle finestre).
 
 ## Installare programmi
 
@@ -124,18 +173,25 @@ anche senza estensione) lo avvia nel Terminale.
 - **macOS**: i programmi sono in formato Mach-O e usano le librerie di
   sistema di Apple (Cocoa, Metal…), che non si possono ridistribuire: un
   `.pkg` si scompatta, ma il programma non parte. Lo stesso vale per i `.dmg`.
-- **Android**: le app (`.apk`) sono bytecode Dalvik per il runtime ART e
-  dipendono da tutto il framework Android (Binder, SurfaceFlinger,
-  i servizi di sistema); farle girare vuol dire portare Android intero.
-- **Linux con librerie condivise** e **Windows con finestre o a 32 bit**: non
-  ancora (vedi sopra).
+- **Gran parte delle app Android del Play Store**: girano le app che
+  costruiscono l'interfaccia nel codice. Mancano i layout XML e le risorse
+  (`R.layout`, `R.string`: `setContentView(R.layout.x)` si ferma con un
+  messaggio chiaro), le viste personalizzate con `Canvas`, i `Fragment`, la
+  rete, i servizi di Google Play, il codice nativo (`.so`) e le lambda
+  compilate con `invokedynamic` (quelle trasformate da `d8` vanno bene). I
+  thread girano uno dopo l'altro.
+- **Linux con librerie condivise** e **Windows a 32 bit**: non ancora (vedi
+  sopra).
 
 ## Provarlo
 
 `make test-compat` compila al volo un piccolo programma Linux (con `musl-gcc`) e
-uno Windows (con `x86_64-w64-mingw32-gcc`), li mette su una copia dell'immagine
-insieme ai programmi del negozio, avvia arcOS e controlla che funzionino. Se uno
-dei due compilatori non c'è, quella metà viene saltata (e segnalata).
+alcuni Windows (con `x86_64-w64-mingw32-gcc`: console, file, tastiera e una
+finestra), li mette su una copia dell'immagine insieme ai programmi del
+negozio e ai programmi Java e Android di prova, avvia arcOS e controlla che
+funzionino. Se uno dei due compilatori non c'è, quella parte viene saltata (e
+segnalata). I file `.dex` e `.apk` di prova sono già nel repository
+(`system/libs/arcdex/tests`); `build.sh` li ricrea con un JDK e `dx`.
 
 Per compilare a mano un programma da provare:
 
