@@ -6,10 +6,11 @@
 //! of the matching function or variable; the loader writes that address into
 //! the program's import address table.
 //!
-//! The set is small on purpose: the standard streams, the C formatting
-//! functions (`vfprintf` and friends), memory, a handful of `kernel32` calls
-//! and benign stubs for the rest. It is enough for console programs built with
-//! MinGW-w64.
+//! This file has the process itself (start-up, exit, memory, the standard
+//! streams and `printf`); [`crate::crt`] the rest of the C runtime (files,
+//! the keyboard, strings, maths) and [`crate::gui`] windows and drawing. A
+//! function none of them has gets a stub that says so once and returns 0
+//! (see `pe.rs`).
 
 #![allow(non_snake_case, static_mut_refs)]
 
@@ -32,30 +33,42 @@ static mut INITENV: u64 = 0;
 /// A `struct lconv` whose `decimal_point` points at ".", which `printf` reads.
 static mut LCONV: [u8; 128] = [0; 128];
 static DOT: &[u8] = b".\0";
+static mut LAST_ERROR: u32 = 0;
+static mut IMAGE_BASE: u64 = 0;
+
+/// `_acmdln`: the command line, which the start-up code of windowed
+/// programs reads to find WinMain's `lpCmdLine`.
+static mut ACMDLN: u64 = 0;
 
 pub fn set_args(argv: &[String]) {
     // SAFETY: called once at start-up before the program runs.
-    unsafe { ARGS = Some(argv.to_vec()) };
-}
-
-fn iob_base() -> u64 {
-    core::ptr::addr_of!(IOB) as u64
-}
-
-/// The console stream a `FILE*` names: 1 = stdout, 2 = stderr (default 1).
-fn stream_fd(file: u64) -> u64 {
-    let base = iob_base();
-    if file >= base && file < base + 48 * 3 {
-        match (file - base) / 48 {
-            2 => 2,
-            _ => 1,
-        }
-    } else {
-        1
+    unsafe {
+        ARGS = Some(argv.to_vec());
+        ACMDLN = GetCommandLineA() as u64;
     }
 }
 
-fn console_write(bytes: &[u8]) {
+/// Where the program's image sits (its module handle).
+pub fn set_image_base(base: u64) {
+    // SAFETY: as above.
+    unsafe { IMAGE_BASE = base };
+}
+
+pub fn set_errno(e: i32) {
+    // SAFETY: single-threaded.
+    unsafe { ERRNO = e };
+}
+
+pub fn set_last_error(e: u32) {
+    // SAFETY: single-threaded.
+    unsafe { LAST_ERROR = e };
+}
+
+pub fn iob_base() -> u64 {
+    core::ptr::addr_of!(IOB) as u64
+}
+
+pub fn console_write(bytes: &[u8]) {
     sys::call(sys::WRITE, sys::CONSOLE, bytes.as_ptr() as u64, bytes.len() as u64, 0, 0);
 }
 
@@ -64,6 +77,10 @@ fn console_write(bytes: &[u8]) {
 
 /// The address of the function or variable `name` exported from `dll`.
 pub fn resolve(dll: &str, name: &str) -> Option<u64> {
+    own(dll, name).or_else(|| crate::crt::resolve(name)).or_else(|| crate::gui::resolve(name))
+}
+
+fn own(dll: &str, name: &str) -> Option<u64> {
     let f: u64 = match (dll, name) {
         // kernel32
         (_, "ExitProcess") => ExitProcess as *const () as u64,
@@ -99,9 +116,13 @@ pub fn resolve(dll: &str, name: &str) -> Option<u64> {
         (_, "HeapAlloc") => HeapAlloc as *const () as u64,
         (_, "HeapFree") => HeapFree as *const () as u64,
         (_, "HeapReAlloc") => HeapReAlloc as *const () as u64,
-        (_, "GetModuleHandleA" | "GetModuleHandleW") => ret0 as *const () as u64,
-        (_, "GetProcAddress") => ret0 as *const () as u64,
+        (_, "GetModuleHandleA" | "GetModuleHandleW") => GetModuleHandle as *const () as u64,
+        (_, "GetModuleFileNameA") => GetModuleFileNameA as *const () as u64,
+        (_, "GetProcAddress") => GetProcAddress as *const () as u64,
+        (_, "LoadLibraryA" | "LoadLibraryW" | "LoadLibraryExA" | "LoadLibraryExW") => ret1 as *const () as u64,
+        (_, "FreeLibrary") => ret1 as *const () as u64,
         (_, "GetCommandLineA") => GetCommandLineA as *const () as u64,
+        (_, "GetCommandLineW") => GetCommandLineW as *const () as u64,
         (_, "GetConsoleMode") => ret0 as *const () as u64,
         (_, "SetConsoleMode") => ret1 as *const () as u64,
         (_, "GetConsoleOutputCP" | "GetACP" | "GetOEMCP") => GetACP as *const () as u64,
@@ -119,6 +140,8 @@ pub fn resolve(dll: &str, name: &str) -> Option<u64> {
         (_, "_fmode") => core::ptr::addr_of!(FMODE) as u64,
         (_, "_commode") => core::ptr::addr_of!(COMMODE) as u64,
         (_, "__initenv") => core::ptr::addr_of!(INITENV) as u64,
+        (_, "_acmdln") => core::ptr::addr_of!(ACMDLN) as u64,
+        (_, "_ismbblead" | "_ismbbtrail") => ret0 as *const () as u64,
 
         // msvcrt — start-up and exit
         (_, "__getmainargs") => __getmainargs as *const () as u64,
@@ -142,17 +165,15 @@ pub fn resolve(dll: &str, name: &str) -> Option<u64> {
         (_, "___mb_cur_max_func") => ___mb_cur_max_func as *const () as u64,
         (_, "localeconv") => localeconv as *const () as u64,
         (_, "strerror") => strerror as *const () as u64,
-        (_, "_strnicmp" | "_stricmp") => ret0 as *const () as u64,
 
         // msvcrt — output
         (_, "vfprintf") => vfprintf_core as *const () as u64,
-        (_, "fprintf" | "printf") => core::ptr::addr_of!(WINRUN_FPRINTF_SHIM) as u64,
+        (_, "fprintf") => core::ptr::addr_of!(WINRUN_FPRINTF_SHIM) as u64,
         (_, "fwrite") => fwrite as *const () as u64,
         (_, "fputc" | "putc") => fputc as *const () as u64,
         (_, "fputs") => fputs as *const () as u64,
         (_, "putchar") => putchar as *const () as u64,
         (_, "puts") => puts as *const () as u64,
-        (_, "fflush") => ret0 as *const () as u64,
 
         // msvcrt — memory and strings
         (_, "malloc") => malloc as *const () as u64,
@@ -180,6 +201,24 @@ pub fn resolve_ordinal(_dll: &str, _ordinal: u16) -> Option<u64> {
 // ----------------------------------------------------------------------------
 // Generic stubs
 
+static mut MISSING: Vec<u64> = Vec::new();
+
+/// Where the stub of a function winrun does not have lands: it says so the
+/// first time and returns 0 (which most Windows functions read as "failed").
+pub extern "win64" fn missing(name: *const u8) -> u64 {
+    // SAFETY: single-threaded; `name` is the stub's own NUL-terminated string.
+    unsafe {
+        if !MISSING.contains(&(name as u64)) {
+            MISSING.push(name as u64);
+            let n = core::slice::from_raw_parts(name, c_len(name));
+            console_write(b"winrun: ");
+            console_write(n);
+            console_write(b" is not available yet: it does nothing\n");
+        }
+    }
+    0
+}
+
 extern "win64" fn ret0() -> u64 {
     0
 }
@@ -195,15 +234,20 @@ extern "win64" fn ExitProcess(code: u32) -> ! {
     arcrt::process::exit(code as i32)
 }
 extern "win64" fn GetLastError() -> u32 {
-    0
+    // SAFETY: single-threaded.
+    unsafe { LAST_ERROR }
 }
-extern "win64" fn SetLastError(_e: u32) {}
+extern "win64" fn SetLastError(e: u32) {
+    set_last_error(e);
+}
 extern "win64" fn Sleep(ms: u32) {
     arcrt::time::sleep_ms(ms as u64);
 }
 extern "win64" fn GetStdHandle(which: u32) -> u64 {
-    // -11 = stdout, -12 = stderr; hand back a small non-null token.
+    // -10 = stdin, -11 = stdout, -12 = stderr: small non-null tokens that
+    // crt::stream knows.
     match which as i32 {
+        -10 => 3,
         -12 => 2,
         _ => 1,
     }
@@ -211,13 +255,42 @@ extern "win64" fn GetStdHandle(which: u32) -> u64 {
 extern "win64" fn WriteFile(handle: u64, buf: *const u8, len: u32, written: *mut u32, _ovl: u64) -> u32 {
     // SAFETY: the program passes a buffer of `len` bytes it owns.
     let data = unsafe { core::slice::from_raw_parts(buf, len as usize) };
-    let _ = handle;
-    console_write(data);
+    let n = crate::crt::write_to(handle, data);
     if !written.is_null() {
         // SAFETY: the caller passes a place for the count (or null).
-        unsafe { *written = len };
+        unsafe { *written = n as u32 };
     }
     1
+}
+extern "win64" fn GetModuleHandle(name: u64) -> u64 {
+    // SAFETY: single-threaded. Other modules ("kernel32.dll") get a token.
+    if name == 0 {
+        unsafe { IMAGE_BASE }
+    } else {
+        1
+    }
+}
+extern "win64" fn GetModuleFileNameA(_module: u64, buf: *mut u8, n: u32) -> u32 {
+    // SAFETY: ARGS was set at start-up.
+    let name = unsafe { ARGS.as_ref().and_then(|a| a.first().cloned()).unwrap_or_default() };
+    if n == 0 || buf.is_null() {
+        return 0;
+    }
+    let k = name.len().min(n as usize - 1);
+    // SAFETY: room for n bytes.
+    unsafe {
+        core::ptr::copy_nonoverlapping(name.as_ptr(), buf, k);
+        *buf.add(k) = 0;
+    }
+    k as u32
+}
+/// Functions looked up at run time: the ones winrun has, by name.
+extern "win64" fn GetProcAddress(_module: u64, name: *const u8) -> u64 {
+    if (name as u64) < 0x10000 {
+        return 0; // by ordinal
+    }
+    let name = crate::crt::cstr(name);
+    resolve("", &name).unwrap_or(0)
 }
 extern "win64" fn WriteConsoleA(_h: u64, buf: *const u8, len: u32, written: *mut u32, _r: u64) -> u32 {
     WriteFile(1, buf, len, written, 0)
@@ -238,6 +311,13 @@ extern "win64" fn GetCommandLineA() -> *const u8 {
         bytes.leak()
     };
     line.as_ptr()
+}
+extern "win64" fn GetCommandLineW() -> *const u16 {
+    // SAFETY: as above.
+    let line = unsafe { ARGS.as_ref().map(|a| a.join(" ")).unwrap_or_default() };
+    let mut wide: Vec<u16> = line.encode_utf16().collect();
+    wide.push(0);
+    wide.leak().as_ptr()
 }
 extern "win64" fn GetACP() -> u32 {
     65001 // UTF-8
@@ -321,7 +401,7 @@ extern "win64" fn VirtualAlloc(_addr: u64, size: u64, _typ: u32, _prot: u32) -> 
     alloc_bytes(size as usize)
 }
 
-fn alloc_bytes(size: usize) -> *mut c_void {
+pub fn alloc_bytes(size: usize) -> *mut c_void {
     let total = size + HDR;
     // SAFETY: a non-zero layout; the global allocator uses the MAP syscall.
     let p = unsafe { alloc::alloc::alloc(layout(total)) };
@@ -374,7 +454,7 @@ extern "win64" fn memcmp(a: *const u8, b: *const u8, n: u64) -> i32 {
     }
     0
 }
-unsafe fn c_len(mut p: *const u8) -> usize {
+pub unsafe fn c_len(mut p: *const u8) -> usize {
     let mut n = 0;
     // SAFETY: the string is NUL-terminated.
     while unsafe { *p } != 0 {
@@ -588,6 +668,10 @@ extern "win64" fn putchar(c: i32) -> i32 {
     console_write(&[c as u8]);
     c
 }
+/// Writes to a `FILE*`: a file, or the console for stdout and stderr.
+fn write_stream(file: u64, data: &[u8]) {
+    crate::crt::write_to(file, data);
+}
 extern "win64" fn fputs(s: *const u8, file: u64) -> i32 {
     // SAFETY: NUL-terminated string.
     let bytes = unsafe { core::slice::from_raw_parts(s, c_len(s)) };
@@ -600,11 +684,6 @@ extern "win64" fn puts(s: *const u8) -> i32 {
     console_write(bytes);
     console_write(b"\n");
     0
-}
-
-fn write_stream(file: u64, data: &[u8]) {
-    let _ = stream_fd(file);
-    console_write(data);
 }
 
 /// `int vfprintf(FILE *f, const char *fmt, va_list va)`. On Windows x64 a
@@ -636,7 +715,7 @@ extern "C" {
 }
 
 /// Formats a C `printf` string against a Windows `va_list`.
-fn format_c(fmt: *const u8, va: *const u64) -> Vec<u8> {
+pub fn format_c(fmt: *const u8, va: *const u64) -> Vec<u8> {
     let mut out = Vec::new();
     let mut i = 0usize;
     let mut arg = 0usize;
@@ -702,12 +781,47 @@ fn format_c(fmt: *const u8, va: *const u64) -> Vec<u8> {
                 prec = Some(p);
             }
         }
-        // Length modifiers (consumed; everything is an 8-byte slot anyway).
-        while matches!(at(i), b'l' | b'h' | b'z' | b'j' | b't' | b'L' | b'q') {
+        // Length modifiers. Every argument is an 8-byte slot, but only the
+        // low 32 bits of an `int` (or a Windows `long`) are meaningful.
+        let mut wide = false;
+        let mut short = 0;
+        loop {
+            match at(i) {
+                b'l' if at(i + 1) == b'l' => {
+                    wide = true;
+                    i += 1;
+                }
+                b'z' | b'j' | b't' | b'q' | b'L' => wide = true,
+                b'I' if at(i + 1) == b'6' && at(i + 2) == b'4' => {
+                    wide = true;
+                    i += 2;
+                }
+                b'I' if at(i + 1) == b'3' && at(i + 2) == b'2' => i += 2,
+                b'I' => wide = true,
+                b'h' => short += 1,
+                b'l' => {}
+                _ => break,
+            }
             i += 1;
         }
         let conv = at(i);
         i += 1;
+        let signed = |v: u64| -> i128 {
+            match (wide, short) {
+                (true, _) => v as i64 as i128,
+                (_, 0) => v as i32 as i128,
+                (_, 1) => v as i16 as i128,
+                _ => v as i8 as i128,
+            }
+        };
+        let unsigned = |v: u64| -> i128 {
+            match (wide, short) {
+                (true, _) => v as i128,
+                (_, 0) => v as u32 as i128,
+                (_, 1) => v as u16 as i128,
+                _ => v as u8 as i128,
+            }
+        };
         let mut s: Vec<u8> = Vec::new();
         match conv {
             b'%' => s.push(b'%'),
@@ -724,17 +838,18 @@ fn format_c(fmt: *const u8, va: *const u64) -> Vec<u8> {
                     s.extend_from_slice(unsafe { core::slice::from_raw_parts(p, len) });
                 }
             }
-            b'd' | b'i' => fmt_int(&mut s, next(&mut arg) as i64 as i128, 10, false, plus, space, prec),
-            b'u' => fmt_int(&mut s, next(&mut arg) as i128, 10, false, false, false, prec),
-            b'x' => fmt_int(&mut s, next(&mut arg) as i128, 16, false, false, false, prec),
-            b'X' => fmt_int(&mut s, next(&mut arg) as i128, 16, true, false, false, prec),
-            b'o' => fmt_int(&mut s, next(&mut arg) as i128, 8, false, false, false, prec),
+            b'd' | b'i' => fmt_int(&mut s, signed(next(&mut arg)), 10, false, plus, space, prec),
+            b'u' => fmt_int(&mut s, unsigned(next(&mut arg)), 10, false, false, false, prec),
+            b'x' => fmt_int(&mut s, unsigned(next(&mut arg)), 16, false, false, false, prec),
+            b'X' => fmt_int(&mut s, unsigned(next(&mut arg)), 16, true, false, false, prec),
+            b'o' => fmt_int(&mut s, unsigned(next(&mut arg)), 8, false, false, false, prec),
             b'p' => {
                 s.extend_from_slice(b"0x");
                 fmt_int(&mut s, next(&mut arg) as i128, 16, false, false, false, None);
             }
             b'f' | b'F' => fmt_float(&mut s, f64::from_bits(next(&mut arg)), prec.unwrap_or(6), plus, space),
-            b'e' | b'E' | b'g' | b'G' => fmt_float(&mut s, f64::from_bits(next(&mut arg)), prec.unwrap_or(6), plus, space),
+            b'g' | b'G' => fmt_general(&mut s, f64::from_bits(next(&mut arg)), prec.unwrap_or(6).max(1), plus, space),
+            b'e' | b'E' => fmt_exp(&mut s, f64::from_bits(next(&mut arg)), prec.unwrap_or(6), plus, space, conv == b'E'),
             other => {
                 s.push(b'%');
                 s.push(other);
@@ -840,4 +955,80 @@ fn fmt_float(out: &mut Vec<u8>, value: f64, prec: usize, plus: bool, space: bool
             frac -= d as f64;
         }
     }
+}
+
+/// Splits a finite, non-zero `v` into a mantissa in [1, 10) and an exponent.
+fn decompose(v: f64) -> (f64, i32) {
+    let mut e = 0i32;
+    let mut m = v.abs();
+    while m >= 10.0 {
+        m /= 10.0;
+        e += 1;
+    }
+    while m < 1.0 {
+        m *= 10.0;
+        e -= 1;
+    }
+    (if v < 0.0 { -m } else { m }, e)
+}
+
+/// `%e`: d.ddde±XX.
+fn fmt_exp(out: &mut Vec<u8>, value: f64, prec: usize, plus: bool, space: bool, upper: bool) {
+    if value == 0.0 || !value.is_finite() {
+        fmt_float(out, value, prec, plus, space);
+        if value == 0.0 {
+            out.extend_from_slice(if upper { b"E+00" } else { b"e+00" });
+        }
+        return;
+    }
+    let (mut m, mut e) = decompose(value);
+    // Rounding may carry into a new digit (9.9996 -> 10.000).
+    let mut probe = Vec::new();
+    fmt_float(&mut probe, m.abs(), prec, false, false);
+    if probe.starts_with(b"10") {
+        m /= 10.0;
+        e += 1;
+    }
+    fmt_float(out, m, prec, plus, space);
+    out.push(if upper { b'E' } else { b'e' });
+    out.push(if e < 0 { b'-' } else { b'+' });
+    if e.abs() < 10 {
+        out.push(b'0');
+    }
+    fmt_int(out, e.abs() as i128, 10, false, false, false, None);
+}
+
+/// `%g`: the shorter of `%f` and `%e`, without trailing zeros.
+fn fmt_general(out: &mut Vec<u8>, value: f64, prec: usize, plus: bool, space: bool) {
+    let e = if value == 0.0 || !value.is_finite() { 0 } else { decompose(value).1 };
+    let mut s = Vec::new();
+    if e < -4 || e >= prec as i32 {
+        fmt_exp(&mut s, value, prec - 1, plus, space, false);
+        // Trim zeros in the mantissa.
+        if let Some(epos) = s.iter().position(|&b| b == b'e') {
+            let (mant, exp) = s.split_at(epos);
+            let mut mant = mant.to_vec();
+            if mant.contains(&b'.') {
+                while mant.last() == Some(&b'0') {
+                    mant.pop();
+                }
+                if mant.last() == Some(&b'.') {
+                    mant.pop();
+                }
+            }
+            mant.extend_from_slice(exp);
+            s = mant;
+        }
+    } else {
+        fmt_float(&mut s, value, (prec as i32 - 1 - e).max(0) as usize, plus, space);
+        if s.contains(&b'.') {
+            while s.last() == Some(&b'0') {
+                s.pop();
+            }
+            if s.last() == Some(&b'.') {
+                s.pop();
+            }
+        }
+    }
+    out.extend_from_slice(&s);
 }

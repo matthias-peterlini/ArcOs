@@ -29,6 +29,7 @@ struct Pe {
 pub fn run(image: &[u8], argv: &[String]) -> Result<i32, String> {
     let pe = load(image)?;
     win::set_args(argv);
+    win::set_image_base(pe.base);
     resolve_imports(image, &pe)?;
     setup_teb()?;
     // SAFETY: `entry` points at mapped, executable code set up above. The
@@ -209,14 +210,17 @@ fn resolve_imports(_image: &[u8], pe: &Pe) -> Result<(), String> {
                 let name = cstr(pe.base + (thunk & 0x7FFF_FFFF) + 2);
                 win::resolve(&dll, &name)
             };
-            let addr = addr.ok_or_else(|| {
-                let what = if thunk & IMAGE_ORDINAL_FLAG != 0 {
-                    format!("{dll}#{}", thunk & 0xFFFF)
-                } else {
-                    format!("{dll}:{}", cstr(pe.base + (thunk & 0x7FFF_FFFF) + 2))
-                };
-                format!("the program needs {what}, which winrun does not provide yet")
-            })?;
+            let addr = match addr {
+                Some(a) => a,
+                None => {
+                    let what = if thunk & IMAGE_ORDINAL_FLAG != 0 {
+                        format!("{dll}#{}", thunk & 0xFFFF)
+                    } else {
+                        format!("{dll}!{}", cstr(pe.base + (thunk & 0x7FFF_FFFF) + 2))
+                    };
+                    missing_stub(what)?
+                }
+            };
             write_u64(target, addr);
             lookup += 8;
             target += 8;
@@ -224,6 +228,40 @@ fn resolve_imports(_image: &[u8], pe: &Pe) -> Result<(), String> {
         desc += 20;
     }
     Ok(())
+}
+
+/// Code for the imports winrun does not have: each stub passes its name to
+/// [`win::missing`] (which says so once and returns 0), so a program that
+/// only touches them on a side path still runs.
+static mut STUBS: (u64, u64) = (0, 0); // (next free byte, end)
+
+fn missing_stub(name: String) -> Result<u64, String> {
+    const SIZE: u64 = 22; // movabs rcx, imm64; movabs rax, imm64; jmp rax
+    // SAFETY: single-threaded; the page is ours.
+    let (at, end) = unsafe { STUBS };
+    let at = if at == 0 || at + SIZE > end {
+        let page = sys::map(0x4000).map_err(|e| format!("out of memory: {}", e.as_str()))?;
+        // SAFETY: as above.
+        unsafe { STUBS = (page, page + 0x4000) };
+        page
+    } else {
+        at
+    };
+    let mut cname = name.into_bytes();
+    cname.push(0);
+    let cname = cname.leak().as_ptr() as u64;
+    let mut code = [0u8; SIZE as usize];
+    code[0..2].copy_from_slice(&[0x48, 0xB9]);
+    code[2..10].copy_from_slice(&cname.to_le_bytes());
+    code[10..12].copy_from_slice(&[0x48, 0xB8]);
+    code[12..20].copy_from_slice(&(win::missing as *const () as u64).to_le_bytes());
+    code[20..22].copy_from_slice(&[0xFF, 0xE0]);
+    // SAFETY: inside the mapped page (user memory is executable).
+    unsafe {
+        core::ptr::copy_nonoverlapping(code.as_ptr(), at as *mut u8, code.len());
+        STUBS.0 = at + 24;
+    }
+    Ok(at)
 }
 
 /// Sets up a minimal thread environment block, which the C runtime and the

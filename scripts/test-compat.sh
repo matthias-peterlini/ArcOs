@@ -1,8 +1,9 @@
 #!/bin/sh
-# Builds a small Linux program and a small Windows program, puts them on a
-# copy of the image together with the store programs, boots arcOS and checks
-# that they run: the Linux ABI, the Windows loader (winrun), `install` and the
-# BusyBox applets.
+# Builds a small Linux program and three Windows programs (scripts/compat:
+# console, files and keyboard, and one with a window), puts them on a copy of
+# the image together with the store programs, boots arcOS and checks that they
+# run: the Linux ABI, the Windows loader (winrun), `install` and the BusyBox
+# applets.
 #
 # Needs musl-gcc (musl-tools) and x86_64-w64-mingw32-gcc (mingw-w64). If either
 # is missing, that half is skipped (and noted), so the script still checks what
@@ -75,8 +76,12 @@ int main(int argc, char **argv) {
     return 0;
 }
 EOF
-    if x86_64-w64-mingw32-gcc -O2 -o "$WORK/whello.exe" "$WORK/whello.c" 2>/dev/null; then
-        "$ARCTOOL" fs "$WORK/arcos.img" put "$WORK/whello.exe" /home/compat/whello.exe >/dev/null && have_windows=1
+    if x86_64-w64-mingw32-gcc -O2 -o "$WORK/whello.exe" "$WORK/whello.c" 2>/dev/null &&
+        x86_64-w64-mingw32-gcc -O2 -o "$WORK/wtest.exe" "$HERE/compat/wtest.c" 2>/dev/null &&
+        x86_64-w64-mingw32-gcc -O2 -mwindows -o "$WORK/wgui.exe" "$HERE/compat/wgui.c" 2>/dev/null; then
+        for p in whello wtest wgui; do
+            "$ARCTOOL" fs "$WORK/arcos.img" put "$WORK/$p.exe" /home/compat/$p.exe >/dev/null || break
+        done && have_windows=1
     fi
 fi
 [ $have_windows = 0 ] && echo "  note: x86_64-w64-mingw32-gcc not available, skipping the Windows program"
@@ -100,7 +105,8 @@ EOF
     echo 'seq 1 3'
     echo 'grep linux t.lua'
     [ $have_linux = 1 ] && { echo './lhello one two'; echo 'install debhello_1.0_amd64.deb'; echo 'debhello from-deb'; }
-    [ $have_windows = 1 ] && echo 'whello.exe alpha beta'
+    # wtest reads a number from the keyboard: the line after it.
+    [ $have_windows = 1 ] && { echo 'whello.exe alpha beta'; echo 'wtest.exe'; echo '21'; echo 'wgui.exe'; echo '@sleep 2'; }
     echo 'lua t.lua'
     echo '@sleep 2'
     echo 'shutdown'
@@ -111,7 +117,26 @@ EOF
     echo 'lua: sum 1..100 = 5050'
     echo 'lua: float=0.333'
     [ $have_linux = 1 ] && { echo 'linux: heap ok'; echo 'linux: float=3.142'; echo 'linux: read back: written by a linux program'; echo 'linux: argv[1]=from-deb'; }
-    [ $have_windows = 1 ] && { echo 'windows: squares 0 1 4 9'; echo 'windows: float=2.718'; }
+    [ $have_windows = 1 ] && cat <<'EOF'
+windows: squares 0 1 4 9
+windows: float=2.718
+wtest: first line 'line one'
+wtest: scanned 42 word 3.50
+wtest: size 22
+wtest: sorted 1 3 5 7 9
+wtest: HELLO, ARCOS 12
+wtest: sqrt2=1.4142 sin1=0.841 pow=1024 neg=-17
+wtest: strtol 31 atoi -250
+wtest: 00042|ab  |ff
+wtest: sscanf 46
+wtest: win32 read 10 'win32 file' size 10
+wtest: missing file error 2
+wtest: you typed 21, doubled 42
+wgui: create
+wgui: user message 42
+wgui: painted 1 pixel 0000ff
+wgui: quit 7
+EOF
 } > "$WORK/expect.txt"
 
 STEP_WAIT=${STEP_WAIT:-2} "$HERE/test.sh" "$WORK/arcos.img" "$WORK/session.txt" > "$WORK/out.txt" 2>&1

@@ -166,6 +166,21 @@ pub enum Opener {
     None,
 }
 
+/// Whether a Windows program is a windowed one (PE subsystem 2, what
+/// `-mwindows` builds) rather than a console one.
+fn windowed_exe(path: &str) -> bool {
+    let Ok(p) = fs::abs(path) else { return false };
+    let mut head = [0u8; 64];
+    if fs::read_at(&p, 0, &mut head).ok() != Some(64) || &head[..2] != b"MZ" {
+        return false;
+    }
+    let pe = u32::from_le_bytes([head[60], head[61], head[62], head[63]]) as u64;
+    // The subsystem: 4 (signature) + 20 (file header) + 68 into the
+    // optional header.
+    let mut sub = [0u8; 2];
+    fs::read_at(&p, pe + 92, &mut sub).ok() == Some(2) && u16::from_le_bytes(sub) == 2
+}
+
 pub fn for_file(path: &str) -> Opener {
     let name = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
     let ext = name.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
@@ -187,6 +202,8 @@ pub fn for_file(path: &str) -> Opener {
                 Opener::Run(quoted)
             }
         }
+        // A Windows program with a window of its own needs no terminal.
+        "exe" if windowed_exe(path) => Opener::Spawn(String::from(path)),
         "exe" | "as" | "arc" | "" => Opener::Run(quoted),
         // Anything else that is a program (by its first bytes) runs too.
         _ => {
