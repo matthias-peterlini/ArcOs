@@ -33,7 +33,7 @@ pub struct Prefs {
 
 impl Prefs {
     pub fn new() -> Prefs {
-        let thumbs = res::WALLPAPERS.iter().map(|(n, _)| res::wallpaper_thumb(n, 140, 88)).collect();
+        let thumbs = res::WALLPAPERS.iter().map(|(n, _)| res::wallpaper_thumb(n, 104, 65)).collect();
         let offered = crate::dev::display::modes();
         let modes =
             COMMON_MODES.iter().map(|&(width, height)| DisplayMode { width, height }).filter(|m| offered.contains(m)).take(9).collect();
@@ -72,12 +72,14 @@ impl Prefs {
         [Rect::new(area.x + 24, area.y + 146, 150, 38), Rect::new(area.x + 184, area.y + 146, 150, 38)]
     }
 
+    /// Four wallpapers to a row.
     fn thumb(area: Rect, i: usize) -> Rect {
-        Rect::new(area.x + 24 + i as i32 * 156, area.y + 238, 140, 88)
+        let i = i as i32;
+        Rect::new(area.x + 24 + (i % 4) * 116, area.y + 238 + (i / 4) * 94, 104, 65)
     }
 
     fn redo_btn(area: Rect) -> Rect {
-        Rect::new(area.x + 24, area.y + 396, 300, 38)
+        Rect::new(area.x + 24, area.y + 466, 300, 38)
     }
 
     fn save_name(&mut self) {
@@ -102,7 +104,7 @@ impl App for Prefs {
     }
 
     fn size(&self) -> (i32, i32) {
-        (880, 460)
+        (880, 530)
     }
 
     fn draw(&mut self, c: &mut Canvas, area: Rect, _blur: &Canvas, _focused: bool) {
@@ -127,10 +129,10 @@ impl App for Prefs {
             text::draw_centered(c, Font::Small, r.x + r.w / 2, r.bottom() + 8, label, TEXT_DIM);
         }
 
-        text::draw(c, Font::Strong, area.x + 24, area.y + 368, "Avvio", TEXT);
+        text::draw(c, Font::Strong, area.x + 24, area.y + 438, "Avvio", TEXT);
         ui::button(c, Self::redo_btn(area), "Rifai la configurazione iniziale", false, false);
         if !self.note.is_empty() {
-            text::draw(c, Font::Small, area.x + 340, area.y + 408, self.note, TEXT_FAINT);
+            text::draw(c, Font::Small, area.x + 340, area.y + 478, self.note, TEXT_FAINT);
         }
 
         // Screen

@@ -1,4 +1,5 @@
-"""A QOI ("Quite OK Image") encoder: https://qoiformat.org/qoi-specification.pdf
+"""A QOI ("Quite OK Image") encoder and decoder:
+https://qoiformat.org/qoi-specification.pdf
 
 The kernel decodes QOI (gui/qoi.rs), a lossless format with a decoder of a
 few dozen lines. Pixels are RGBA.
@@ -47,3 +48,44 @@ def encode(width, height, rgba):
         prev = px
     out += b"\x00" * 7 + b"\x01"
     return bytes(out)
+
+
+def decode(data):
+    """Returns (width, height, rgba bytes)."""
+    if data[:4] != b"qoif":
+        raise ValueError("not a QOI image")
+    width, height = struct.unpack(">II", data[4:12])
+    out = bytearray(width * height * 4)
+    index = [(0, 0, 0, 0)] * 64
+    r, g, b, a = 0, 0, 0, 255
+    p, run = 14, 0
+    for i in range(width * height):
+        if run:
+            run -= 1
+        else:
+            op = data[p]
+            p += 1
+            if op == 0xFE:
+                r, g, b = data[p:p + 3]
+                p += 3
+            elif op == 0xFF:
+                r, g, b, a = data[p:p + 4]
+                p += 4
+            elif op >> 6 == 0:
+                r, g, b, a = index[op]
+            elif op >> 6 == 1:
+                r = (r + (op >> 4 & 3) - 2) % 256
+                g = (g + (op >> 2 & 3) - 2) % 256
+                b = (b + (op & 3) - 2) % 256
+            elif op >> 6 == 2:
+                dg = (op & 0x3F) - 32
+                nxt = data[p]
+                p += 1
+                r = (r + dg + (nxt >> 4) - 8) % 256
+                g = (g + dg) % 256
+                b = (b + dg + (nxt & 15) - 8) % 256
+            else:
+                run = op & 0x3F
+            index[(r * 3 + g * 5 + b * 7 + a * 11) % 64] = (r, g, b, a)
+        out[i * 4:i * 4 + 4] = bytes((r, g, b, a))
+    return width, height, bytes(out)

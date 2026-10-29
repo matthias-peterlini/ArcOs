@@ -223,6 +223,29 @@ unsafe extern "C" fn api_map_framebuffer(phys: u64, size: usize) -> *mut u8 {
     region::map_device(phys, size as u64, paging::WRITE_COMBINE).map(|v| v as *mut u8).unwrap_or(core::ptr::null_mut())
 }
 
+unsafe extern "C" fn api_boot_framebuffer(out: *mut Framebuffer) -> Status {
+    let Some((phys, fb)) = crate::console::boot_framebuffer() else { return E_NODEV };
+    if out.is_null() {
+        return E_INVAL;
+    }
+    let (red, green, blue) = fb.shift;
+    // SAFETY: the driver passes a place for the description.
+    unsafe {
+        *out = Framebuffer {
+            phys,
+            virt: fb.virt,
+            width: fb.width as u32,
+            height: fb.height as u32,
+            pitch: fb.pitch as u32,
+            red,
+            green,
+            blue,
+            _pad: 0,
+        };
+    }
+    OK
+}
+
 pub static KERNEL_API: KernelApi = KernelApi {
     abi_version: ABI_VERSION,
     size: core::mem::size_of::<KernelApi>() as u32,
@@ -255,4 +278,5 @@ pub static KERNEL_API: KernelApi = KernelApi {
     audio_register: api_audio_register,
     display_register: api_display_register,
     map_framebuffer: api_map_framebuffer,
+    boot_framebuffer: api_boot_framebuffer,
 };

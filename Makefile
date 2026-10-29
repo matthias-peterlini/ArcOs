@@ -21,6 +21,7 @@
 #   make test-linux    Linux programs with threads, sockets, poll (C, Rust, Go)
 #   make shots      boot headless, drive the GUI and save screenshots (build/shots)
 #   make assets     regenerate fonts, icons, wallpapers and sounds (Python, Pillow, numpy)
+#   make photos     download the photo wallpapers from Wikimedia Commons
 #   make check      unit tests of the shared libraries and the host tool
 
 PROFILE  ?= release
@@ -51,7 +52,7 @@ ifeq ($(PROFILE),release)
 CARGO_PROFILE := --release
 endif
 
-.PHONY: all uefi system tools root image iso run-iso test-iso run run-q35 run-nvme run-uefi test test-uefi test-drivers test-arcscript test-compat test-audio test-display test-acpi test-net test-linux shots assets check clean $(PACKAGES)
+.PHONY: photos all uefi system tools root image iso run-iso test-iso run run-q35 run-nvme run-uefi test test-uefi test-drivers test-arcscript test-compat test-audio test-display test-acpi test-net test-linux shots assets check clean $(PACKAGES)
 
 all: image
 
@@ -161,7 +162,13 @@ assets:
 	tools/assets/gen_icons.py rootfs/system/gui
 	tools/assets/gen_icons.py --store system/store
 	tools/assets/gen_wallpapers.py rootfs/system/gui/wallpapers
+	tools/assets/gen_thumbs.py rootfs/system/gui/wallpapers
 	tools/assets/gen_sounds.py rootfs/system/sounds rootfs/home/Musica
+
+# The photo wallpapers, downloaded from Wikimedia Commons (needs the network).
+photos:
+	tools/assets/fetch_photos.py rootfs/system/gui/wallpapers
+	tools/assets/gen_thumbs.py rootfs/system/gui/wallpapers
 
 check:
 	cd system && $(CARGO) test --target x86_64-unknown-linux-gnu -p arcdk -p arcfs -p arcgfx -p arctls -p arczip -p arcjson -p arcc-core -p arc-vm -p arcweb

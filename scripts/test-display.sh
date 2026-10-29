@@ -4,17 +4,20 @@
 # have the new size and show the desktop (not a black or stale picture).
 #
 # Usage: scripts/test-display.sh <image> [case...]
-# Cases: std (QEMU VGA), bochs (bochs-display), vmware, virtio.
+# Cases: std (QEMU VGA), bochs (bochs-display), qxl, vmware, virtio, cirrus
+# (800x600 at most in 32-bit colour), ati (no driver of its own: the generic
+# driver keeps the 1024x768 the loader set up).
 set -u
 IMAGE=${1:?usage: test-display.sh <image> [case...]}
 shift
 HERE=$(dirname "$0")
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
-CASES=${*:-std bochs vmware virtio}
-MODE=${MODE:-1280x720}
+CASES=${*:-std bochs qxl vmware virtio cirrus ati}
+DEFAULT_MODE=${MODE:-1280x720}
 
-cat > "$WORK/cmds.txt" <<EOT
+commands() {
+    cat > "$WORK/cmds.txt" <<EOT
 @sleep 4
 display
 display $MODE
@@ -23,6 +26,7 @@ display
 @sleep 2
 shutdown
 EOT
+}
 
 # Takes a screenshot through QMP after $2 seconds.
 cat > "$WORK/shot.py" <<'EOT'
@@ -53,13 +57,18 @@ EOT
 
 FAILED=0
 for c in $CASES; do
+    MODE=$DEFAULT_MODE
     case $c in
         std) ARGS="-vga std" ;;
         bochs) ARGS="-vga none -device bochs-display" ;;
+        qxl) ARGS="-vga qxl" ;;
         vmware) ARGS="-vga vmware" ;;
         virtio) ARGS="-vga virtio" ;;
+        cirrus) ARGS="-vga cirrus"; MODE=800x600 ;;
+        ati) ARGS="-vga none -device ati-vga"; MODE=1024x768 ;;
         *) echo "unknown case: $c" >&2; exit 2 ;;
     esac
+    commands
     rm -f "$WORK/shot.ppm"
     python3 "$WORK/shot.py" "$WORK/qmp.sock" 16 "$WORK/shot.ppm" &
     SHOT=$!

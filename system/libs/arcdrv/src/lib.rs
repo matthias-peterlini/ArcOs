@@ -824,6 +824,13 @@ pub fn map_framebuffer(phys: u64, size: usize) -> Option<*mut u8> {
     (!p.is_null()).then_some(p)
 }
 
+/// The framebuffer the firmware set up before the kernel started.
+pub fn boot_framebuffer() -> Option<Framebuffer> {
+    let mut fb = Framebuffer::default();
+    // SAFETY: kernel call with a valid out pointer.
+    (unsafe { (api().boot_framebuffer)(&mut fb) } == OK).then_some(fb)
+}
+
 /// Copies an ASCII model name into the fixed field of [`BlockDesc`].
 pub fn model_name(name: &str) -> [u8; 40] {
     let mut out = [0u8; 40];

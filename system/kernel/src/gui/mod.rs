@@ -299,10 +299,32 @@ fn apply_saved_mode(d: &mut Display) {
 
 /// Starts the interface thread once the system is up.
 pub fn start() {
-    if !active() {
+    if !active() && !leave_text_mode() {
         return;
     }
     crate::task::spawn("gui", run);
+}
+
+/// The firmware left a text screen (an old VESA BIOS without 32-bit modes),
+/// but a display driver is loaded: switch to a graphics mode with it and
+/// start the interface there. False if there is no driver or no mode.
+fn leave_text_mode() -> bool {
+    if crate::dev::display::controller().is_none() {
+        return false;
+    }
+    // The largest mode up to 1280x800 (modes come largest first).
+    let modes = crate::dev::display::modes();
+    let Some(mode) = modes.iter().copied().find(|m| m.width <= 1280 && m.height <= 800 && m.width >= 800).or(modes.first().copied())
+    else {
+        return false;
+    };
+    if let Err(e) = crate::dev::display::set_mode(mode) {
+        crate::warn!("gui", "no graphics mode: {e}");
+        return false;
+    }
+    crate::console::leave_text_mode();
+    boot_start();
+    true
 }
 
 fn run() {

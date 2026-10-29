@@ -326,8 +326,10 @@ fn mask_channel(mask: u32) -> (u8, u8) {
     }
 }
 
-/// Picks the preferred mode if the display has it, else keeps the current
-/// one. Fills the framebuffer fields of the BootInfo.
+/// Keeps the current mode when it is already large (on a real computer the
+/// firmware starts at the panel's native resolution, which arcOS cannot change
+/// later without a driver for the card); otherwise switches to the preferred
+/// mode if the display has it. Fills the framebuffer fields of the BootInfo.
 fn setup_screen(info: &mut BootInfo) {
     let mut gop: *mut c_void = null_mut();
     // SAFETY: plain firmware call.
@@ -340,7 +342,9 @@ fn setup_screen(info: &mut BootInfo) {
     // SAFETY: the protocol and its mode table are valid during boot services.
     unsafe {
         let max = (*(*gop).mode).max_mode;
-        for n in 0..max {
+        let current = &*(*(*gop).mode).info;
+        let large = usable(current) && current.width >= PREFERRED_MODE.0 && current.height >= PREFERRED_MODE.1;
+        for n in 0..if large { 0 } else { max } {
             let mut size = 0;
             let mut m: *const ModeInfo = core::ptr::null();
             if ((*gop).query_mode)(gop, n, &mut size, &mut m) == SUCCESS

@@ -1,0 +1,9 @@
+# Any graphics card without a driver of its own (Intel, AMD, NVIDIA,
+# Hyper-V, server chips): keeps the firmware's framebuffer at the resolution
+# the loader picked. The lowest score, so a specific driver always wins.
+name        = fbgeneric
+version     = 1.0.0
+class       = display
+description = Any graphics card (firmware framebuffer)
+author      = arcOS
+match       = pci-class 03

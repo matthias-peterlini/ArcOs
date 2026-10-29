@@ -1,5 +1,6 @@
 //! Display driver for the Bochs/QEMU "DISPI" interface: QEMU's standard VGA
-//! and bochs-display, Bochs, and VirtualBox's VBoxVGA.
+//! and bochs-display, QXL (QEMU with SPICE), Bochs, and VirtualBox's VBoxVGA
+//! and VBoxSVGA.
 //!
 //! Its registers (resolution, depth, enable) are reached through the I/O
 //! ports 0x1CE/0x1CF or, on newer QEMU devices, in the second memory BAR.
@@ -19,7 +20,7 @@ use core::ffi::c_void;
 
 arcdrv::driver! {
     name: "bochsvga",
-    version: "1.0.0",
+    version: "1.1.0",
     probe: probe,
 }
 
@@ -144,10 +145,10 @@ fn probe(dev: &DeviceInfo) -> Status {
         return E_NODEV;
     }
     let pci = Pci(dev.id);
-    // QEMU devices have the registers in memory too (BAR 2); the others
-    // only on the VGA ports.
+    // QEMU's VGA and bochs-display have the registers in memory too (BAR 2);
+    // the others only on the VGA ports (on QXL, BAR 2 is its ROM).
     let mmio = dev.resources[2];
-    let regs = if mmio.kind == RES_MEMORY && mmio.base != 0 && mmio.size >= 0x1000 {
+    let regs = if dev.vendor == 0x1234 && mmio.kind == RES_MEMORY && mmio.base != 0 && mmio.size >= 0x1000 {
         pci.enable(true, true, false);
         match Mmio::map(mmio.base, 0x1000) {
             Some(m) => Regs::Mem(m),
@@ -179,6 +180,7 @@ fn probe(dev: &DeviceInfo) -> Status {
     }
     let name = match dev.vendor {
         0x80EE => "VirtualBox display",
+        0x1B36 => "QXL display",
         _ if matches!(d.regs, Regs::Mem(_)) => "QEMU display",
         _ => "Bochs display",
     };

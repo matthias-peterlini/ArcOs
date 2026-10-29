@@ -63,8 +63,9 @@ impl Setup {
                 options.push(Rect::new(cx + 8, card.y + 222, 228, 74));
             }
             3 => {
-                for i in 0..3 {
-                    options.push(Rect::new(cx - 258 + i * 176, card.y + 150, 164, 104));
+                // Four to a row.
+                for i in 0..res::WALLPAPERS.len() as i32 {
+                    options.push(Rect::new(cx - 263 + (i % 4) * 134, card.y + 128 + (i / 4) * 116, 124, 78));
                 }
             }
             _ => {}
@@ -164,7 +165,7 @@ impl View for Setup {
                 Key::Left if self.step == 2 => self.layout = Layout::It,
                 Key::Right if self.step == 2 => self.layout = Layout::Us,
                 Key::Left if self.step == 3 && self.wall > 0 => self.set_wallpaper(self.wall - 1),
-                Key::Right if self.step == 3 && self.wall < 2 => self.set_wallpaper(self.wall + 1),
+                Key::Right if self.step == 3 && self.wall + 1 < res::WALLPAPERS.len() => self.set_wallpaper(self.wall + 1),
                 _ if self.step == 1 => {
                     ui::edit_text(&mut self.name, &k, 32);
                 }
@@ -302,7 +303,7 @@ pub fn run(d: &mut Display) {
     let s = settings::get();
     let wall = res::WALLPAPERS.iter().position(|(n, _)| *n == s.wallpaper).unwrap_or(0);
     let (sharp, blur) = res::wallpaper(res::WALLPAPERS[wall].0, w, h);
-    let thumbs = res::WALLPAPERS.iter().map(|(n, _)| res::wallpaper_thumb(n, 164, 104)).collect();
+    let thumbs = res::WALLPAPERS.iter().map(|(n, _)| res::wallpaper_thumb(n, 124, 78)).collect();
     let mut setup =
         Setup { step: 0, name: s.name.clone(), layout: s.layout, wall, w, h, sharp, blur, thumbs, mouse: (-1, -1), done: false };
     let mut l = Looper::new(d);

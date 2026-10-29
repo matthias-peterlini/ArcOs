@@ -28,7 +28,7 @@ impl Default for Settings {
         Settings {
             name: String::new(),
             layout: Layout::It,
-            wallpaper: String::from("dolomiti"),
+            wallpaper: String::from("tre-cime"),
             setup_done: false,
             resolution: None,
             volume: 70,

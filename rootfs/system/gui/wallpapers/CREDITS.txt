@@ -1,0 +1,21 @@
+Photo wallpapers (from Wikimedia Commons), cropped and scaled.
+
+tre-cime.qoi: Tre Cime di Lavaredo
+  Wolfgang Moroder, CC BY-SA 3.0
+  https://commons.wikimedia.org/wiki/File:Drei_Zinnen_Tre_Cime_di_Lavaredo_Dolomites.jpg
+  https://creativecommons.org/licenses/by-sa/3.0
+
+sassolungo.qoi: Sassolungo dal passo Sella
+  Wolfgang Moroder, CC BY-SA 3.0
+  https://commons.wikimedia.org/wiki/File:Langkofel_group_from_the_Sella_pass_2016.jpg
+  https://creativecommons.org/licenses/by-sa/3.0
+
+seceda.qoi: Odle dal Seceda
+  Wolfgang Moroder, CC BY-SA 3.0
+  https://commons.wikimedia.org/wiki/File:Odles_da_Sec%C3%ABda_Gherd%C3%ABina.jpg
+  https://creativecommons.org/licenses/by-sa/3.0
+
+montanaia.qoi: Campanile di Val Montanaia
+  Scosse, CC BY-SA 4.0
+  https://commons.wikimedia.org/wiki/File:Val_Montanaia.jpg
+  https://creativecommons.org/licenses/by-sa/4.0

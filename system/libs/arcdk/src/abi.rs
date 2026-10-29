@@ -443,6 +443,9 @@ pub struct KernelApi {
     pub display_register: unsafe extern "C" fn(device: u32, desc: *const DisplayDesc) -> Status,
     /// Maps device memory write-combined (a framebuffer).
     pub map_framebuffer: unsafe extern "C" fn(phys: u64, size: usize) -> *mut u8,
+    /// The framebuffer the firmware set up before the kernel started (UEFI
+    /// GOP or VESA), already mapped: [`OK`], or [`E_NODEV`] without one.
+    pub boot_framebuffer: unsafe extern "C" fn(out: *mut Framebuffer) -> Status,
 }
 
 /// What a module tells the kernel about itself.

@@ -102,6 +102,9 @@ pub struct FbInfo {
 }
 
 static FB_INFO: IrqLock<Option<FbInfo>> = IrqLock::new(None);
+/// The framebuffer the firmware set up (physical address and mapping), kept
+/// for the generic display driver.
+static BOOT_FB: IrqLock<Option<(u64, FbInfo)>> = IrqLock::new(None);
 /// The text surface kept aside while the GUI runs, to show a fatal error.
 static PANIC_FB: IrqLock<Option<fb::FbSurface>> = IrqLock::new(None);
 /// Bumped whenever the terminal's cells or cursor change.
@@ -522,13 +525,15 @@ pub fn init_screen(boot: &BootInfo) {
         // for a full-screen grid is reserved now so that a fatal error can
         // take the screen back without allocating.
         if let Screen::Fb(fbs) = screen {
-            *FB_INFO.lock() = Some(FbInfo {
+            let info = FbInfo {
                 virt: fbs.base() as u64,
                 width: boot.fb_width as usize,
                 height: boot.fb_height as usize,
                 pitch: boot.fb_pitch as usize,
                 shift: (boot.red_pos, boot.green_pos, boot.blue_pos),
-            });
+            };
+            *FB_INFO.lock() = Some(info);
+            *BOOT_FB.lock() = Some((boot.fb_addr, info));
             *PANIC_FB.lock() = Some(fbs);
         }
         t.cols = HEADLESS_COLS;
@@ -559,6 +564,27 @@ pub fn set_framebuffer(fb: FbInfo) {
     let mut t = TERM.lock();
     let need = cells.saturating_sub(t.cells.len());
     t.cells.reserve(need);
+}
+
+/// The firmware left a text screen but a display driver switched to a
+/// graphics mode: the terminal leaves the screen to the interface, as in
+/// `init_screen` for a graphical start.
+pub fn leave_text_mode() {
+    let mut t = TERM.lock();
+    if !matches!(t.surface, Some(Screen::Vga(_))) {
+        return;
+    }
+    t.cols = HEADLESS_COLS;
+    t.rows = HEADLESS_ROWS;
+    t.cells.clear();
+    t.cells.resize(HEADLESS_COLS * HEADLESS_ROWS, BLANK);
+    t.surface = Some(Screen::Headless(Headless { cols: HEADLESS_COLS, rows: HEADLESS_ROWS }));
+    t.cursor = true;
+}
+
+/// The framebuffer the firmware set up: its physical address and mapping.
+pub fn boot_framebuffer() -> Option<(u64, FbInfo)> {
+    *BOOT_FB.lock()
 }
 
 /// The framebuffer, if the graphical interface is to use it.

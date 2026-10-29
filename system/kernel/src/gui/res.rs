@@ -124,9 +124,12 @@ pub fn wallpaper(name: &str, w: i32, h: i32) -> (Canvas, Canvas) {
     (sharp, soft)
 }
 
-/// A small preview of a wallpaper (for the settings and the setup).
+/// A small preview of a wallpaper (for the settings and the setup): from the
+/// ready-made one in `thumbs/` if there is one, else from the full picture.
 pub fn wallpaper_thumb(name: &str, w: i32, h: i32) -> Canvas {
-    let img = read(&alloc::format!("{DIR}/wallpapers/{name}.qoi")).and_then(|d| qoi::decode(&d));
+    let img = read(&alloc::format!("{DIR}/wallpapers/thumbs/{name}.qoi"))
+        .or_else(|| read(&alloc::format!("{DIR}/wallpapers/{name}.qoi")))
+        .and_then(|d| qoi::decode(&d));
     match img {
         Some(img) => img.scaled(w, h),
         None => Canvas::new(w, h, 0xFF55_4466),
@@ -168,4 +171,14 @@ pub fn make_icon(name: &str, color: u32, platform: crate::store::Platform) -> Ve
     super::qoi::encode(&c)
 }
 
-pub const WALLPAPERS: [(&str, &str); 3] = [("dolomiti", "Dolomiti"), ("alba", "Alba"), ("notte", "Notte")];
+/// The photos of the Dolomites (Wikimedia Commons, see CREDITS.txt next to
+/// them) first, then the painted ones.
+pub const WALLPAPERS: [(&str, &str); 7] = [
+    ("tre-cime", "Tre Cime"),
+    ("sassolungo", "Sassolungo"),
+    ("seceda", "Seceda"),
+    ("montanaia", "Val Montanaia"),
+    ("dolomiti", "Tramonto"),
+    ("alba", "Alba"),
+    ("notte", "Notte"),
+];
