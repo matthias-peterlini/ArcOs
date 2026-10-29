@@ -101,6 +101,35 @@ arcOS mette a disposizione quei comandi (`cat`, `grep`, `wc`, `seq`, `sort`,
 `ash`…): digitandone uno, la shell avvia `busybox` passandogli quel nome. I
 comandi propri di arcOS (per esempio `ls`) hanno la precedenza.
 
+### Pacchetti con un doppio clic
+
+Nell'app File un doppio clic su un pacchetto lo installa in `sys:/apps`, in
+sottofondo, con una notifica alla fine (`system/kernel/src/store.rs`,
+`install_file`; i formati sono in `system/libs/arczip`):
+
+| Pacchetto | Cosa succede |
+|---|---|
+| `.deb` (Debian, Ubuntu) | si apre l'archivio `ar`, poi `data.tar.gz` (o `data.tar`); il programma in `usr/bin` (o simile) si installa se è un ELF x86-64 statico. `data.tar.xz` e `.zst` non sono ancora supportati |
+| `.tar.gz`, `.tgz`, `.tar`, `.zip`, `.gz` | il primo programma Linux statico o Windows x64 dentro si installa |
+| `.pkg` (macOS) | si apre l'archivio `xar`, poi il `Payload` (cpio, anche compresso gzip); i file vanno in `sys:/home/Applicazioni macOS/<nome>`. I `Payload` compressi con LZMA (`pbzx`, i più recenti) non sono ancora supportati |
+
+Dal Terminale fa lo stesso `install <file>`, per esempio
+`install sys:/home/Scaricati/ripgrep_14.1.0-1_amd64.deb`.
+
+Un doppio clic su un programma (ELF o `.exe`, riconosciuti dai primi byte
+anche senza estensione) lo avvia nel Terminale.
+
+### Cosa non può girare
+
+- **macOS**: i programmi sono in formato Mach-O e usano le librerie di
+  sistema di Apple (Cocoa, Metal…), che non si possono ridistribuire: un
+  `.pkg` si scompatta, ma il programma non parte. Lo stesso vale per i `.dmg`.
+- **Android**: le app (`.apk`) sono bytecode Dalvik per il runtime ART e
+  dipendono da tutto il framework Android (Binder, SurfaceFlinger,
+  i servizi di sistema); farle girare vuol dire portare Android intero.
+- **Linux con librerie condivise** e **Windows con finestre o a 32 bit**: non
+  ancora (vedi sopra).
+
 ## Provarlo
 
 `make test-compat` compila al volo un piccolo programma Linux (con `musl-gcc`) e

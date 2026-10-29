@@ -722,7 +722,34 @@ fn four(v: &str) -> [String; 4] {
 const SIDES: [&str; 4] = ["top", "right", "bottom", "left"];
 
 /// Shorthands into longhands.
+/// `light-dark(<light>, <dark>)` → `<light>` (pages are shown light).
+fn light_only(v: &str) -> String {
+    let mut s = v.to_string();
+    while let Some(at) = s.to_ascii_lowercase().find("light-dark(") {
+        let open = at + "light-dark(".len();
+        let (mut depth, mut comma, mut close) = (0, None, None);
+        for (i, c) in s[open..].char_indices() {
+            match c {
+                '(' => depth += 1,
+                ')' if depth == 0 => {
+                    close = Some(open + i);
+                    break;
+                }
+                ')' => depth -= 1,
+                ',' if depth == 0 && comma.is_none() => comma = Some(open + i),
+                _ => {}
+            }
+        }
+        let Some(close) = close else { break };
+        let light = s[open..comma.unwrap_or(close)].trim().to_string();
+        s.replace_range(at..=close, &light);
+    }
+    s
+}
+
 fn expand(name: &str, v: &str) -> Vec<(String, String)> {
+    let light = light_only(v);
+    let v = light.as_str();
     let mut out = Vec::new();
     let mut push = |k: &str, v: &str| out.push((k.to_string(), v.to_string()));
     match name {
@@ -1541,6 +1568,19 @@ pub fn parse_color(v: &str, current: u32) -> Option<u32> {
     if v == "currentcolor" || v == "inherit" {
         return Some(current);
     }
+    // Pages are shown in the light scheme: light-dark(<light>, <dark>).
+    if let Some(inner) = v.strip_prefix("light-dark(").and_then(|r| r.strip_suffix(')')) {
+        let mut depth = 0;
+        let split = inner.char_indices().find(|&(_, c)| {
+            match c {
+                '(' => depth += 1,
+                ')' => depth -= 1,
+                _ => {}
+            }
+            c == ',' && depth == 0
+        })?;
+        return parse_color(&inner[..split.0], current);
+    }
     if let Some(h) = v.strip_prefix('#') {
         let hex = |s: &str| u32::from_str_radix(s, 16).ok();
         let d = |c: u8| hex(core::str::from_utf8(&[c, c]).ok()?);
@@ -1641,6 +1681,9 @@ mod tests {
     fn values() {
         assert_eq!(parse_color("#fff", 0), Some(0xFFFF_FFFF));
         assert_eq!(parse_color("rgba(255, 0, 0, .5)", 0), Some(0x7FFF_0000));
+        assert_eq!(parse_color("light-dark(#eee,#222)", 0), Some(0xFFEE_EEEE));
+        assert_eq!(light_only("light-dark(#eee,#222) url(a.png)"), "#eee url(a.png)");
+        assert_eq!(parse_color("light-dark(rgb(1, 2, 3), #222)", 0), Some(0xFF01_0203));
         assert_eq!(parse_color("rgb(0 128 255 / 100%)", 0), Some(0xFF00_80FF));
         assert_eq!(parse_color("hsl(120, 100%, 50%)", 0), Some(0xFF00_FF00));
         assert_eq!(length("2em", 10.0), Some(Len::Px(20.0)));

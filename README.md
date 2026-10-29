@@ -7,9 +7,12 @@
 Boot loader, kernel, file system, driver, interfaccia grafica e linguaggio
 di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
 
-[**Scarica la versione 0.6.0**](https://github.com/matthias-peterlini/ArcOs/releases/latest) ·
+[**Scarica l'ultima versione**](https://github.com/matthias-peterlini/ArcOs/releases/latest) ·
 [Documentazione](docs/) ·
-[Architettura](docs/architettura.md)
+[Architettura](docs/architettura.md) ·
+[Compatibilità](docs/compat.md)
+
+[![Build](https://github.com/matthias-peterlini/ArcOs/actions/workflows/build.yml/badge.svg)](https://github.com/matthias-peterlini/ArcOs/actions/workflows/build.yml)
 
 ![La scrivania di arcOS](docs/screenshots/scrivania.jpg)
 
@@ -22,10 +25,15 @@ di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
 - **Un avvio pulito**: niente righe di testo, solo il logo e una barra di
   caricamento. Al primo avvio una configurazione guidata (nome, tastiera,
   sfondo), poi direttamente la scrivania.
-- **Una scrivania alla macOS**: pannelli in vetro smerigliato, dock che
-  ingrandisce le icone, Launchpad, centro di controllo, notifiche, finestre
-  animate (si aprono, si chiudono, volano nel dock); icone, sfondi, suoni e
-  musica creati per arcOS. Le righe di comando si vedono solo nel Terminale.
+- **Lo stile arc**: una barra flottante in vetro chiaro (logo, ora e data,
+  stato), finestre con il titolo integrato e tre pulsanti tondi, un dock
+  flottante, il centro di controllo (rete, suono, non disturbare, sfondo,
+  volume, luminosità, account) e il centro notifiche con il calendario. A
+  schermo intero (F11) la barra si aggancia in alto e porta con sé il nome
+  dell'app e i suoi pulsanti. Il carattere è Google Sans Flex; icone,
+  sfondi, suoni e musica sono creati per arcOS.
+- **Doppio clic e via**: un programma parte, un pacchetto (`.deb`,
+  `.tar.gz`, `.zip`, `.pkg` di macOS…) si installa da solo.
 - **Le app di ogni giorno**: File, Editor di testo, Note, Promemoria,
   Calendario, Orologio, Calcolatrice, Foto, Musica, Monitor attività.
 - **L'ecosistema ticly**: ticly Do (attività, note, calendario), ticly AI
@@ -39,7 +47,8 @@ di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
   schede di rete Intel e Realtek, lettori di schede SD, audio HD e AC'97,
   schede video delle macchine virtuali con cambio di risoluzione.
 - **Esegue programmi Linux e Windows** x86-64 senza modificarli, accanto
-  ai suoi.
+  ai suoi (Linux statici, Windows da console). Le app macOS e Android non
+  possono girare: il perché è in [compatibilità](docs/compat.md#cosa-non-può-girare).
 - **Ha il suo linguaggio**, ArcScript, con compilatore e macchina virtuale
   che girano su arcOS.
 - **Scritto da zero**: niente codice di Linux, Unix, DOS o Windows, nessuna
@@ -48,6 +57,14 @@ di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
 ## Com'è
 
 <table>
+<tr>
+<td width="50%"><img src="docs/screenshots/centro-controllo.jpg" alt="Centro di controllo"><br><b>Centro di controllo</b>: riquadri, volume, luminosità e account.</td>
+<td width="50%"><img src="docs/screenshots/notifiche.jpg" alt="Centro notifiche"><br><b>Centro notifiche</b>: il calendario e le notifiche ricevute.</td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/schermo-intero.jpg" alt="Schermo intero"><br><b>Schermo intero</b>: la barra si aggancia con il nome dell'app.</td>
+<td><img src="docs/screenshots/browser.jpg" alt="ticly browser"><br><b>ticly browser</b>: Wikipedia con il motore web di arcOS.</td>
+</tr>
 <tr>
 <td width="50%"><img src="docs/screenshots/avvio.jpg" alt="Avvio"><br><b>Avvio</b>: solo il logo e una barra di caricamento.</td>
 <td width="50%"><img src="docs/screenshots/benvenuto.jpg" alt="Primo avvio"><br><b>Primo avvio</b>: la configurazione guidata parte con INIZIA.</td>
@@ -100,7 +117,7 @@ memoria e `arcos.iso` nel lettore CD.
 | **Interfaccia** | splash, configurazione guidata, scrivania con dock, Launchpad, notifiche e animazioni; quindici app di sistema | [gui](docs/gui.md) |
 | **Programmi** | in modalità utente, ognuno nel suo spazio di indirizzi, a riga di comando o con finestre proprie (`arcui`) | [programmi](docs/programmi.md) |
 | **Negozio** | 2048, Campo minato, Serpente, Sudoku, Tris, Disegno; BusyBox e Lua per il Terminale | [gui](docs/gui.md#il-negozio-e-le-app-installabili) |
-| **Compatibilità** | eseguibili ELF statici Linux e `.exe` Windows x64 da console | [compatibilità](docs/compat.md) |
+| **Compatibilità** | eseguibili ELF statici Linux e `.exe` Windows x64 da console; installazione di `.deb`, `.tar.gz`, `.zip` e `.pkg` con un doppio clic | [compatibilità](docs/compat.md) |
 | **ArcScript** | il linguaggio di arcOS: `arcc` compila ed esegue `.as` e pacchetti `.arc` | [ArcScript](docs/arcscript.md) |
 | **Rete** | ARP, IPv4, ICMP, UDP, TCP, DHCP, DNS; TLS 1.3 con certificati verificati e HTTP(S) | |
 | **Web** | `arcweb`: HTML, CSS (flexbox, grid, tabelle, media query), PNG, JPEG e GIF, per il ticly browser | [gui](docs/gui.md#il-motore-web) |
@@ -202,5 +219,6 @@ shutdown / restart
 
 ## Licenza
 
-Proprietaria: vedi [LICENSE](LICENSE). I caratteri Inter e DejaVu Sans
-Mono hanno le loro licenze libere, in `system/kernel/assets/LICENSES.md`.
+Proprietaria: vedi [LICENSE](LICENSE). I caratteri Google Sans Flex e
+DejaVu Sans Mono hanno le loro licenze libere (SIL OFL), in
+`system/kernel/assets/LICENSES.md`.

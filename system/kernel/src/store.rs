@@ -508,13 +508,18 @@ fn install_remote(app: &CatalogApp) -> Result<(), String> {
         return Err(format!("the download failed ({})", r.status));
     }
     set_phase(&app.id, "Installo");
-    let program = unpack(&r.body, &asset_name, &app.file, &app.command, app.platform)?;
+    let (_, program) = unpack(&r.body, &asset_name, &app.file, &app.command, app.platform)?;
+    save(app, &version, &url, &program)
+}
+
+/// Writes an installed program with its `info` and icon into `sys:/apps`.
+fn save(app: &CatalogApp, version: &str, url: &str, program: &[u8]) -> Result<(), String> {
     let file = match app.platform {
         Platform::Windows => format!("{APPS}/{}.exe", app.command),
         _ => format!("{APPS}/{}", app.command),
     };
     let fp = path(&file).map_err(|e| e.to_string())?;
-    fs::write_file(&fp, &program).map_err(|e| format!("{file}: {e}"))?;
+    fs::write_file(&fp, program).map_err(|e| format!("{file}: {e}"))?;
     let info = format!(
         "name={}\ncategory={}\nabout={}\nversion={}\ndeveloper={}\ntype={}\ncommand={}\nprogram={file}\ncolor={:06x}\nsource={url}\nopen={}\n",
         app.name,
@@ -537,9 +542,8 @@ fn install_remote(app: &CatalogApp) -> Result<(), String> {
 pub fn app_from_repo(repo: &GhRepo, platform: Platform) -> CatalogApp {
     let name = repo.full_name.rsplit('/').next().unwrap_or(&repo.full_name).to_string();
     let id = name.to_ascii_lowercase().replace(|c: char| !c.is_ascii_alphanumeric() && c != '-', "-");
-    let hash = name.bytes().fold(7u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32));
-    let palette = [0xFF3B_82F6, 0xFFE0_662E, 0xFF10_B981, 0xFF8B_5CF6, 0xFFEF_4444, 0xFF0E_A5E9, 0xFFF5_9E0B, 0xFFEC_4899];
     CatalogApp {
+        color: color_for(&name),
         command: id.clone(),
         open: format!("{id} --help"),
         id,
@@ -549,24 +553,185 @@ pub fn app_from_repo(repo: &GhRepo, platform: Platform) -> CatalogApp {
         developer: repo.full_name.split('/').next().unwrap_or("").to_string(),
         about: repo.description.clone(),
         github: repo.full_name.clone(),
-        color: palette[(hash % palette.len() as u32) as usize],
         ..Default::default()
     }
 }
 
-/// The program inside a download: unpacks archives and checks the result.
-fn unpack(data: &[u8], name: &str, want: &str, command: &str, platform: Platform) -> Result<Vec<u8>, String> {
+/// A colour for a generated icon, picked from the name.
+fn color_for(name: &str) -> u32 {
+    let hash = name.bytes().fold(7u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32));
+    let palette = [0xFF3B_82F6, 0xFFE0_662E, 0xFF10_B981, 0xFF8B_5CF6, 0xFFEF_4444, 0xFF0E_A5E9, 0xFFF5_9E0B, 0xFFEC_4899];
+    palette[(hash % palette.len() as u32) as usize]
+}
+
+/// Whether a file is a package `install_file` understands (by its name).
+pub fn is_package(name: &str) -> bool {
+    let l = name.to_ascii_lowercase();
+    [".deb", ".pkg", ".mpkg", ".zip", ".tar.gz", ".tgz", ".tar", ".gz"].iter().any(|e| l.ends_with(e))
+}
+
+/// Installs a package file from this computer (double-clicked in Files):
+///
+/// - a Debian `.deb` or a `.tar.gz`/`.tgz`/`.tar`/`.zip`/`.gz` with a static
+///   x86-64 Linux program or a 64-bit Windows program in it: installed into
+///   `sys:/apps` like a store program;
+/// - a macOS installer `.pkg`: its payload is unpacked into
+///   `sys:/home/Applicazioni macOS/<name>`. macOS programs themselves (Mach-O)
+///   cannot run on arcOS; Linux or Windows programs inside are installed.
+///
+/// Returns what to tell the user.
+pub fn install_file(file: &str) -> Result<String, String> {
+    let data = fs::read_file(&path(file).map_err(|e| e.to_string())?).map_err(|e| format!("{file}: {e}"))?;
+    let name = file.rsplit('/').next().unwrap_or(file);
     let lower = name.to_ascii_lowercase();
-    let entries: Vec<(String, Vec<u8>)> = if lower.ends_with(".tar.gz") || lower.ends_with(".tgz") {
+    if lower.ends_with(".pkg") || lower.ends_with(".mpkg") {
+        return install_mac(&data, name);
+    }
+    let entries = entries(&data, name)?;
+    let platform = if entries.iter().any(|(_, d)| d.starts_with(b"\x7fELF")) {
+        Platform::Linux
+    } else if entries.iter().any(|(_, d)| d.starts_with(b"MZ")) {
+        Platform::Windows
+    } else {
+        return Err("non contiene programmi Linux o Windows".to_string());
+    };
+    let stem = package_stem(name);
+    let (program_name, program) = pick(&entries, "", &stem, platform)?;
+    install_program(&program_name, &program, &stem, platform, file)
+}
+
+/// "ripgrep_14.1.0-1_amd64.deb" → "ripgrep"; "tool-1.2-x86_64.tar.gz" → "tool-1.2-x86_64".
+fn package_stem(name: &str) -> String {
+    let mut s = name;
+    for ext in [".deb", ".pkg", ".mpkg", ".zip", ".tgz", ".gz", ".tar"] {
+        if s.to_ascii_lowercase().ends_with(ext) {
+            s = &s[..s.len() - ext.len()];
+        }
+    }
+    if name.to_ascii_lowercase().ends_with(".deb") {
+        s = s.split('_').next().unwrap_or(s);
+    }
+    s.to_ascii_lowercase().replace(|c: char| !c.is_ascii_alphanumeric() && c != '-' && c != '.', "-")
+}
+
+fn install_program(program_name: &str, program: &[u8], id: &str, platform: Platform, source: &str) -> Result<String, String> {
+    let base = program_name.rsplit('/').next().unwrap_or(program_name);
+    let command = base.strip_suffix(".exe").unwrap_or(base).to_string();
+    let app = CatalogApp {
+        id: id.to_string(),
+        name: command.clone(),
+        category: String::from("Installati"),
+        platform,
+        developer: String::new(),
+        about: format!("Installato da {}", source.rsplit('/').next().unwrap_or(source)),
+        open: command.clone(),
+        color: color_for(&command),
+        command: command.clone(),
+        ..Default::default()
+    };
+    save(&app, "", source, program)?;
+    Ok(format!("{command} ({}) è installato: scrivi \"{command}\" nel terminale", platform.name()))
+}
+
+fn install_mac(data: &[u8], name: &str) -> Result<String, String> {
+    let xar = arczip::unxar(data).ok_or("il pacchetto macOS è danneggiato")?;
+    let stem = package_stem(name);
+    let dest = format!("sys:/home/Applicazioni macOS/{stem}");
+    let mut files = 0;
+    let mut native = None;
+    for payload in xar.iter().filter(|e| e.name == "Payload" || e.name.ends_with("/Payload")) {
+        let cpio = if payload.data.starts_with(b"\x1f\x8b") {
+            arczip::gunzip(&payload.data).ok_or("il pacchetto macOS è danneggiato")?
+        } else if payload.data.starts_with(b"pbzx") {
+            return Err("questo pacchetto macOS usa la compressione LZMA (pbzx), non ancora supportata".to_string());
+        } else {
+            payload.data.clone()
+        };
+        for e in arczip::uncpio(&cpio).ok_or("il contenuto del pacchetto macOS è danneggiato")? {
+            if e.link.is_some() {
+                continue;
+            }
+            let target = format!("{dest}/{}", e.name);
+            if e.dir {
+                make_dirs(&target);
+                continue;
+            }
+            if let Some((parent, _)) = target.rsplit_once('/') {
+                make_dirs(parent);
+            }
+            let p = path(&target).map_err(|e| e.to_string())?;
+            fs::write_file(&p, &e.data).map_err(|err| format!("{target}: {err}"))?;
+            files += 1;
+            if native.is_none() && (e.data.starts_with(b"\x7fELF") || e.data.starts_with(b"MZ")) {
+                native = Some((e.name.clone(), e.data));
+            }
+        }
+    }
+    if files == 0 {
+        return Err("il pacchetto macOS non contiene file".to_string());
+    }
+    if let Some((n, d)) = native {
+        let platform = if d.starts_with(b"MZ") { Platform::Windows } else { Platform::Linux };
+        if let Ok((n, d)) = pick(&[(n, d)], "", "", platform) {
+            return install_program(&n, &d, &stem, platform, name);
+        }
+    }
+    Ok(format!("{files} file estratti in {dest}. I programmi macOS non possono girare su arcOS"))
+}
+
+/// Makes a directory and those above it (those that exist are kept).
+fn make_dirs(dir: &str) {
+    let mut at = String::new();
+    for part in dir.split('/') {
+        if !at.is_empty() && !at.ends_with('/') {
+            at.push('/');
+        }
+        at.push_str(part);
+        if part.ends_with(':') || part.is_empty() {
+            continue;
+        }
+        if let Ok(p) = path(&at) {
+            if !fs::exists(&p) {
+                let _ = fs::make_dir(&p);
+            }
+        }
+    }
+}
+
+/// The files of a download or package (archives unpacked).
+fn entries(data: &[u8], name: &str) -> Result<Vec<(String, Vec<u8>)>, String> {
+    let files = |v: Vec<arczip::Entry>| v.into_iter().filter(|e| !e.dir && e.link.is_none()).map(|e| (e.name, e.data)).collect();
+    let lower = name.to_ascii_lowercase();
+    Ok(if lower.ends_with(".tar.gz") || lower.ends_with(".tgz") {
         let tar = arczip::gunzip(data).ok_or("the archive is damaged")?;
-        arczip::untar(&tar).ok_or("the archive is damaged")?.into_iter().filter(|e| !e.dir && e.link.is_none()).map(|e| (e.name, e.data)).collect()
+        files(arczip::untar(&tar).ok_or("the archive is damaged")?)
+    } else if lower.ends_with(".tar") {
+        files(arczip::untar(data).ok_or("the archive is damaged")?)
+    } else if lower.ends_with(".deb") {
+        let ar = arczip::unar(data).ok_or("the package is damaged")?;
+        let member = ar.iter().find(|e| e.name.starts_with("data.tar")).ok_or("the package has no data")?;
+        let tar = match member.name.as_str() {
+            "data.tar" => member.data.clone(),
+            "data.tar.gz" => arczip::gunzip(&member.data).ok_or("the package is damaged")?,
+            other => return Err(format!("{other}: questa compressione non è ancora supportata (solo gzip)")),
+        };
+        files(arczip::untar(&tar).ok_or("the package is damaged")?)
     } else if lower.ends_with(".zip") {
-        arczip::unzip(data).ok_or("the archive is damaged")?.into_iter().filter(|e| !e.dir && e.link.is_none()).map(|e| (e.name, e.data)).collect()
+        files(arczip::unzip(data).ok_or("the archive is damaged")?)
     } else if lower.ends_with(".gz") {
-        alloc::vec![(name.trim_end_matches(".gz").to_string(), arczip::gunzip(data).ok_or("the file is damaged")?)]
+        alloc::vec![(name[..name.len() - 3].to_string(), arczip::gunzip(data).ok_or("the file is damaged")?)]
     } else {
         alloc::vec![(name.to_string(), data.to_vec())]
-    };
+    })
+}
+
+/// The program inside a download: unpacks archives and checks the result.
+fn unpack(data: &[u8], name: &str, want: &str, command: &str, platform: Platform) -> Result<(String, Vec<u8>), String> {
+    pick(&entries(data, name)?, want, command, platform)
+}
+
+/// Picks the program among the files and checks that arcOS can run it.
+fn pick(entries: &[(String, Vec<u8>)], want: &str, command: &str, platform: Platform) -> Result<(String, Vec<u8>), String> {
     let base = |n: &str| n.rsplit('/').next().unwrap_or(n).to_string();
     let is_program = |d: &[u8]| match platform {
         Platform::Windows => d.starts_with(b"MZ"),
@@ -581,6 +746,7 @@ fn unpack(data: &[u8], name: &str, want: &str, command: &str, platform: Platform
         .iter()
         .find(|(n, d)| !want.is_empty() && (names(n).0 == want || names(n).1 == want) && is_program(d))
         .or_else(|| entries.iter().find(|(n, d)| names(n).1 == command && is_program(d)))
+        .or_else(|| entries.iter().find(|(n, d)| is_program(d) && (n.contains("bin/") || n.ends_with(".exe"))))
         .or_else(|| entries.iter().find(|(_, d)| is_program(d)))
         .ok_or("no program for this computer in the download")?;
     let d = &pick.1;
@@ -605,5 +771,5 @@ fn unpack(data: &[u8], name: &str, want: &str, command: &str, platform: Platform
             }
         }
     }
-    Ok(d.clone())
+    Ok(pick.clone())
 }

@@ -878,6 +878,15 @@ impl Shell {
             }
             return;
         };
+        // A package file (.deb, .tar.gz, .zip, .pkg...).
+        if crate::store::is_package(name) {
+            let Some(p) = self.path(name) else { return };
+            match crate::store::install_file(&alloc::format!("{p}")) {
+                Ok(msg) => println!("{msg}"),
+                Err(e) => println!("{ERR}{name}: {e}{RESET}"),
+            }
+            return;
+        }
         if name == "--refresh" {
             match crate::store::refresh_catalog() {
                 Ok(n) => println!("the catalog lists {n} programs"),

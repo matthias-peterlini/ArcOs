@@ -2,13 +2,18 @@ arcOS: un sistema operativo per PC x86-64 scritto da zero, con il linguaggio Arc
 
 ![La scrivania di arcOS](https://raw.githubusercontent.com/matthias-peterlini/ArcOs/main/docs/screenshots/scrivania.jpg)
 
+## Novità
+
+- **Il nuovo stile arc**: barra in alto flottante in vetro chiaro (logo, ora e data al centro, stato a destra), finestre con il titolo integrato e i tre pulsanti tondi, dock flottante, centro di controllo con riquadri, cursori di volume e luminosità e scheda dell'account, centro notifiche con il calendario; a schermo intero la barra si aggancia e mostra il nome dell'app e i pulsanti della finestra. Il carattere è Google Sans Flex.
+- **Doppio clic per installare**: pacchetti Debian `.deb`, archivi `.tar.gz`, `.tgz`, `.tar`, `.zip` e `.gz` con un programma Linux statico o Windows x64 si installano da soli; i pacchetti macOS `.pkg` vengono scompattati (i programmi macOS non possono girare su arcOS). Ogni altro programma (ELF o `.exe`) parte con un doppio clic.
+
 ## Novità della 0.6
 
 - **L'ecosistema ticly**: ticly Do (panoramica, attività, note, calendario per mese, settimana e giorno, profilo), ticly AI (l'interfaccia di ai.ticly.it con le chat salvate; **in anteprima: le risposte non sono ancora collegate**) e il **ticly browser**, con un unico account ticly. Per ora l'account e i dati restano sul computer: nessuna di queste app usa servizi esterni.
 - **Il ticly browser** con un motore web scritto da zero (`arcweb`): HTML, CSS con flexbox, grid, tabelle e media query, immagini PNG, JPEG e GIF; schede, cronologia, ricerca DuckDuckGo, pagina iniziale ticly, trova nella pagina, moduli, cookie e download. JavaScript non c'è.
 - **Rete vera**: TCP, TLS 1.3 con certificati verificati, HTTP e HTTPS.
 - **Il Negozio scarica app vere**, con la ricerca: programmi Linux e Windows oltre alle app di arcOS.
-- **Lo stile arc**: il logo ARC, il carattere Plus Jakarta Sans, pannelli ticly in vetro con bagliore ruggine, nuovi sfondi; le app a schermo intero (F11) non hanno barre in alto.
+- **Lo stile arc**: il logo ARC, pannelli ticly in vetro con bagliore ruggine, nuovi sfondi; le app a schermo intero (F11) non hanno barre in alto.
 - **Più compatibilità Linux**: thread, futex, mmap, poll e socket.
 
 ![Il Negozio](https://raw.githubusercontent.com/matthias-peterlini/ArcOs/main/docs/screenshots/negozio.jpg)

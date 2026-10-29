@@ -36,3 +36,35 @@ fn zip() {
     assert_eq!(&z[1].data[..], &TEXT[..5000]);
     assert!(z[2].dir);
 }
+
+#[test]
+fn ar() {
+    let a = unar(include_bytes!("../tests/data/pkg.deb")).unwrap();
+    let names: alloc::vec::Vec<&str> = a.iter().map(|e| e.name.as_str()).collect();
+    assert_eq!(names, ["debian-binary", "control.tar.gz", "data.tar.gz"]);
+    assert_eq!(&a[2].data[..], &TEXT[..1001]);
+    assert!(unar(b"not an archive").is_none());
+}
+
+#[test]
+fn cpio() {
+    for data in [&include_bytes!("../tests/data/payload.newc")[..], &include_bytes!("../tests/data/payload.odc")[..]] {
+        let c = uncpio(data).unwrap();
+        assert_eq!(c.len(), 3);
+        assert!(c[0].dir && c[0].name == "Applications");
+        assert_eq!(c[1].name, "Applications/tool");
+        assert_eq!(&c[1].data[..], &TEXT[..999]);
+        assert_eq!(c[1].mode, 0o755);
+        assert_eq!(c[2].link.as_deref(), Some("tool"));
+    }
+}
+
+#[test]
+fn xar() {
+    let x = unxar(include_bytes!("../tests/data/tool.pkg")).unwrap();
+    let names: alloc::vec::Vec<&str> = x.iter().map(|e| e.name.as_str()).collect();
+    assert_eq!(names, ["tool.pkg/Payload", "tool.pkg/PackageInfo", "tool.pkg"]);
+    assert_eq!(&x[1].data[..], b"<pkg-info/>");
+    assert!(x[2].dir);
+    assert_eq!(uncpio(&x[0].data).unwrap()[1].data.len(), 999);
+}

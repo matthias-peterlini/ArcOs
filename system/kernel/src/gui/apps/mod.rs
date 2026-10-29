@@ -161,6 +161,8 @@ pub enum Opener {
     Spawn(String),
     /// A text program, in the terminal.
     Run(String),
+    /// A package to install (`store::install_file`).
+    Install(String),
     None,
 }
 
@@ -168,6 +170,9 @@ pub fn for_file(path: &str) -> Opener {
     let name = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
     let ext = name.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
     let quoted = if path.contains(' ') { alloc::format!("\"{path}\"") } else { String::from(path) };
+    if crate::store::is_package(&name) {
+        return Opener::Install(String::from(path));
+    }
     match ext {
         "qoi" => Opener::App(Box::new(Viewer::new(path))),
         "wav" => Opener::App(Box::new(music::Music::with_file(path))),
@@ -183,6 +188,15 @@ pub fn for_file(path: &str) -> Opener {
             }
         }
         "exe" | "as" | "arc" | "" => Opener::Run(quoted),
-        _ => Opener::None,
+        // Anything else that is a program (by its first bytes) runs too.
+        _ => {
+            let mut magic = [0u8; 4];
+            let n = fs::abs(path).ok().and_then(|p| fs::read_at(&p, 0, &mut magic).ok()).unwrap_or(0);
+            if n == 4 && (magic == *b"\x7fELF" || magic.starts_with(b"MZ")) {
+                Opener::Run(quoted)
+            } else {
+                Opener::None
+            }
+        }
     }
 }

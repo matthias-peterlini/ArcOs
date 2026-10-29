@@ -358,5 +358,163 @@ pub fn unzip(data: &[u8]) -> Option<Vec<Entry>> {
     Some(out)
 }
 
+/// The members of an `ar` archive (the outer layer of a Debian `.deb`).
+pub fn unar(data: &[u8]) -> Option<Vec<Entry>> {
+    if !data.starts_with(b"!<arch>\n") {
+        return None;
+    }
+    let mut out = Vec::new();
+    let mut i = 8;
+    while i + 60 <= data.len() {
+        let h = &data[i..i + 60];
+        let name: String = String::from_utf8_lossy(&h[..16]).trim_end().trim_end_matches('/').into();
+        let size: usize = core::str::from_utf8(&h[48..58]).ok()?.trim().parse().ok()?;
+        let body = data.get(i + 60..i + 60 + size)?;
+        out.push(Entry { name, data: body.to_vec(), dir: false, mode: 0o644, link: None });
+        i += 60 + size + (size & 1);
+    }
+    Some(out)
+}
+
+/// The files of a `cpio` archive, in the "odc" (`070707`) or "newc"
+/// (`070701`, `070702`) format: the payload of a macOS installer package.
+pub fn uncpio(data: &[u8]) -> Option<Vec<Entry>> {
+    let num = |b: &[u8], radix: u32| -> Option<usize> { usize::from_str_radix(core::str::from_utf8(b).ok()?, radix).ok() };
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i + 6 <= data.len() {
+        let magic = &data[i..i + 6];
+        let (mode, namesize, filesize, header, align) = if magic == b"070707" {
+            let h = data.get(i..i + 76)?;
+            (num(&h[18..24], 8)?, num(&h[59..65], 8)?, num(&h[65..76], 8)?, 76, 1)
+        } else if magic == b"070701" || magic == b"070702" {
+            let h = data.get(i..i + 110)?;
+            (num(&h[14..22], 16)?, num(&h[94..102], 16)?, num(&h[54..62], 16)?, 110, 4)
+        } else {
+            return None;
+        };
+        let pad = |n: usize| n.div_ceil(align) * align;
+        let name_at = i + header;
+        let name: String = String::from_utf8_lossy(data.get(name_at..name_at + namesize)?).trim_end_matches('\0').into();
+        let body_at = i + pad(header + namesize);
+        if name == "TRAILER!!!" {
+            break;
+        }
+        let body = data.get(body_at..body_at + filesize)?;
+        i = pad(body_at + filesize);
+        let kind = mode & 0o170000;
+        let name = String::from(name.trim_start_matches("./"));
+        if name.is_empty() || name == "." {
+            continue;
+        }
+        out.push(Entry {
+            name,
+            data: if kind == 0o100000 { body.to_vec() } else { Vec::new() },
+            dir: kind == 0o040000,
+            mode: (mode & 0o7777) as u32,
+            link: (kind == 0o120000).then(|| String::from_utf8_lossy(body).into()),
+        });
+    }
+    Some(out)
+}
+
+/// The files of a `xar` archive (a macOS `.pkg`): the table of contents is
+/// zlib-compressed XML; each file's data is stored or zlib-compressed in the
+/// heap after it. Paths join the names of nested `<file>` elements.
+pub fn unxar(data: &[u8]) -> Option<Vec<Entry>> {
+    if !data.starts_with(b"xar!") || data.len() < 28 {
+        return None;
+    }
+    let header = u16::from_be_bytes([data[4], data[5]]) as usize;
+    let toc_len = u64::from_be_bytes(data[8..16].try_into().ok()?) as usize;
+    let toc = zlib(data.get(header..header + toc_len)?)?;
+    let heap = header + toc_len;
+    let xml = String::from_utf8_lossy(&toc);
+
+    struct Frame {
+        name: String,
+        dir: bool,
+        offset: Option<usize>,
+        length: Option<usize>,
+        size: Option<usize>,
+        encoding: String,
+    }
+    let mut stack: Vec<Frame> = Vec::new();
+    let mut out = Vec::new();
+    // Inside <data> of the current file, and inside an <ea> (whose fields
+    // describe extended attributes, not the file).
+    let mut in_data = false;
+    let mut in_ea = 0;
+    let mut rest: &str = &xml;
+    while let Some(lt) = rest.find('<') {
+        let text = &rest[..lt];
+        rest = &rest[lt + 1..];
+        let gt = rest.find('>')?;
+        let tag = &rest[..gt];
+        rest = &rest[gt + 1..];
+        let _ = text;
+        let closing = tag.starts_with('/');
+        let name = tag.trim_start_matches('/').split(|c: char| c.is_whitespace() || c == '/').next().unwrap_or("");
+        let self_closing = tag.ends_with('/');
+        // The text up to the next tag is this element's value.
+        let value = rest.split('<').next().unwrap_or("").trim();
+        match (name, closing) {
+            ("file", false) => {
+                stack.push(Frame { name: String::new(), dir: false, offset: None, length: None, size: None, encoding: String::new() });
+            }
+            ("file", true) => {
+                let f = stack.pop()?;
+                let path: Vec<&str> = stack.iter().map(|f| f.name.as_str()).chain(core::iter::once(f.name.as_str())).collect();
+                let path = path.join("/");
+                let body = match (f.offset, f.length) {
+                    (Some(o), Some(l)) => {
+                        let raw = data.get(heap + o..heap + o + l)?;
+                        if f.encoding.contains("gzip") || f.encoding.contains("zlib") {
+                            zlib(raw)?
+                        } else if f.encoding.is_empty() || f.encoding.contains("octet-stream") {
+                            raw.to_vec()
+                        } else {
+                            // bzip2 and lzma are not supported: an empty file.
+                            Vec::new()
+                        }
+                    }
+                    _ => Vec::new(),
+                };
+                if let Some(sz) = f.size {
+                    if !f.dir && body.len() != sz && !body.is_empty() {
+                        return None;
+                    }
+                }
+                out.push(Entry { name: path, data: body, dir: f.dir, mode: 0o644, link: None });
+            }
+            ("ea", false) if !self_closing => in_ea += 1,
+            ("ea", true) => in_ea -= 1,
+            ("data", false) if !self_closing => in_data = true,
+            ("data", true) => in_data = false,
+            _ if closing || in_ea > 0 => {}
+            ("name", _) if !in_data => {
+                if let Some(f) = stack.last_mut() {
+                    f.name = String::from(value);
+                }
+            }
+            ("type", _) => {
+                if let Some(f) = stack.last_mut() {
+                    f.dir = value == "directory";
+                }
+            }
+            ("offset", _) if in_data => stack.last_mut()?.offset = value.parse().ok(),
+            ("length", _) if in_data => stack.last_mut()?.length = value.parse().ok(),
+            ("size", _) if in_data => stack.last_mut()?.size = value.parse().ok(),
+            ("encoding", _) if in_data => {
+                if let Some(s) = tag.split("style=\"").nth(1) {
+                    stack.last_mut()?.encoding = String::from(s.split('"').next().unwrap_or(""));
+                }
+            }
+            _ => {}
+        }
+    }
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests;

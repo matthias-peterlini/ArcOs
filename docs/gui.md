@@ -113,8 +113,8 @@ bisogno per mostrare il contenuto restano parziali.
 
 Ogni pagina si carica su un thread suo (pagina, fogli di stile, poi le
 immagini quattro alla volta) e viene impaginata di nuovo quando arrivano le
-immagini o la finestra cambia misura; i caratteri delle pagine (Plus Jakarta
-Sans in varie misure, normale e grassetto, e DejaVu Sans Mono) sono in
+immagini o la finestra cambia misura; i caratteri delle pagine (Google Sans
+Flex in varie misure, normale e grassetto, e DejaVu Sans Mono) sono in
 `sys:/system/webfonts.bin`. Per provarlo sull'host:
 
 ```sh

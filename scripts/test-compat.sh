@@ -49,6 +49,13 @@ EOF
     if musl-gcc -static -Os -o "$WORK/lhello" "$WORK/hello.c" 2>/dev/null; then
         strip "$WORK/lhello" 2>/dev/null
         "$ARCTOOL" fs "$WORK/arcos.img" put "$WORK/lhello" /home/compat/lhello >/dev/null && have_linux=1
+        # The same program in a Debian package, for `install <file>.deb`.
+        mkdir -p "$WORK/deb/usr/bin" && cp "$WORK/lhello" "$WORK/deb/usr/bin/debhello"
+        printf '2.0\n' > "$WORK/debian-binary"
+        tar -czf "$WORK/control.tar.gz" -C "$WORK" debian-binary
+        tar -czf "$WORK/data.tar.gz" -C "$WORK/deb" ./usr
+        (cd "$WORK" && ar rc debhello_1.0_amd64.deb debian-binary control.tar.gz data.tar.gz) &&
+            "$ARCTOOL" fs "$WORK/arcos.img" put "$WORK/debhello_1.0_amd64.deb" /home/compat/debhello_1.0_amd64.deb >/dev/null
     fi
 fi
 [ $have_linux = 0 ] && echo "  note: musl-gcc not available, skipping the Linux program"
@@ -92,7 +99,7 @@ EOF
     echo 'echo busybox-echo-works'
     echo 'seq 1 3'
     echo 'grep linux t.lua'
-    [ $have_linux = 1 ] && echo './lhello one two'
+    [ $have_linux = 1 ] && { echo './lhello one two'; echo 'install debhello_1.0_amd64.deb'; echo 'debhello from-deb'; }
     [ $have_windows = 1 ] && echo 'whello.exe alpha beta'
     echo 'lua t.lua'
     echo '@sleep 2'
@@ -103,7 +110,7 @@ EOF
     echo 'busybox-echo-works'
     echo 'lua: sum 1..100 = 5050'
     echo 'lua: float=0.333'
-    [ $have_linux = 1 ] && { echo 'linux: heap ok'; echo 'linux: float=3.142'; echo 'linux: read back: written by a linux program'; }
+    [ $have_linux = 1 ] && { echo 'linux: heap ok'; echo 'linux: float=3.142'; echo 'linux: read back: written by a linux program'; echo 'linux: argv[1]=from-deb'; }
     [ $have_windows = 1 ] && { echo 'windows: squares 0 1 4 9'; echo 'windows: float=2.718'; }
 } > "$WORK/expect.txt"
 
