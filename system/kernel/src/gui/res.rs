@@ -84,6 +84,14 @@ pub fn draw_icon_faded(c: &mut Canvas, name: &str, size: i32, x: i32, y: i32, op
     }
 }
 
+/// Draws a glyph icon (white in the atlas) in `color`: its alpha is the mask.
+pub fn draw_icon_tinted(c: &mut Canvas, name: &str, size: i32, x: i32, y: i32, color: u32) {
+    let mask = with_icon(name, size, |img| (img.w, img.h, img.px.iter().map(|p| (p >> 24) as u8).collect::<Vec<u8>>()));
+    if let Some((w, h, m)) = mask {
+        c.draw_mask(&m, w, h, x, y, color);
+    }
+}
+
 /// A wallpaper scaled to cover `w` x `h`, and a blurred copy of it for the
 /// frosted-glass panels. A gradient if the file is missing.
 pub fn wallpaper(name: &str, w: i32, h: i32) -> (Canvas, Canvas) {

@@ -1,22 +1,23 @@
-//! Windows: a floating title pill above a glass card, as in the arc design,
-//! with buttons to minimise, maximise and close. Their content is an [`App`].
+//! Windows, as in the arc design: a frame of light frosted glass with the
+//! app's name at the top left and three round dark buttons (minimise,
+//! maximise, close) on a pill at the top right; the content sits on a darker
+//! pane inside the frame. Their content is an [`App`].
 //!
-//! An app with a sidebar gets two cards side by side, as in ticly Do: the
-//! sidebar and the content, with a gap of wallpaper between them. A
-//! maximised window fills the screen without its title pill (and the desktop
-//! hides its bar and dock); the pill slides in when the pointer touches the
-//! top edge.
+//! An app with a sidebar gets two panes side by side, with a gap of frame
+//! between them. A maximised window fills the screen under the bar, which
+//! then carries the app's name and the window's buttons.
 
 use super::gfx::{Canvas, Rect};
-use super::res;
 use super::text::{self, Font};
 use super::ui::{self, TEXT};
 use crate::dev::input::KeyEvent;
 use alloc::boxed::Box;
 use alloc::string::String;
 
-pub const TITLE_H: i32 = 42;
+pub const TITLE_H: i32 = 44;
+/// The frame around the content pane, and the gap between panes.
 pub const GAP: i32 = 8;
+const KNOB: i32 = 24;
 /// The corner that resizes a window.
 const GRIP: i32 = 18;
 
@@ -115,8 +116,9 @@ pub struct Window {
     pub restore: Option<Rect>,
     /// The title button under the pointer.
     pub hover: Option<usize>,
-    /// Maximised and the pointer at the top: show the title pill.
-    pub reveal: bool,
+    /// Maximised: the part of the desktop's bar where its buttons go (they
+    /// end at its right edge).
+    pub bar: Rect,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -132,20 +134,24 @@ pub enum Hit {
 impl Window {
     pub fn new(id: u32, app: Box<dyn App>, x: i32, y: i32) -> Window {
         let (w, h) = app.size();
-        Window { id, app, rect: Rect::new(x, y, w, h + TITLE_H + GAP), minimized: false, restore: None, hover: None, reveal: false }
+        let rect = Rect::new(x, y, w + 2 * GAP, h + TITLE_H + GAP);
+        Window { id, app, rect, minimized: false, restore: None, hover: None, bar: Rect::EMPTY }
     }
 
-    /// Filling the screen, without a title pill.
+    /// The whole window for a content area of `w` x `h`.
+    pub fn outer_size(w: i32, h: i32) -> (i32, i32) {
+        (w + 2 * GAP, h + TITLE_H + GAP)
+    }
+
+    /// Filling the screen under the bar, without a frame.
     pub fn full(&self) -> bool {
         self.restore.is_some()
     }
 
-    /// The title pill; when maximised, a short one in the middle of the top
-    /// edge, shown over the content.
+    /// The title row; when maximised, the desktop's bar.
     pub fn title_rect(&self) -> Rect {
         if self.full() {
-            let w = (text::width(Font::Strong, &self.app.title()) + 190).clamp(300, self.rect.w / 2);
-            return Rect::new(self.rect.x + (self.rect.w - w) / 2, self.rect.y + 10, w, TITLE_H);
+            return self.bar;
         }
         Rect::new(self.rect.x, self.rect.y, self.rect.w, TITLE_H)
     }
@@ -154,21 +160,22 @@ impl Window {
         if self.full() {
             return self.rect;
         }
-        Rect::new(self.rect.x, self.rect.y + TITLE_H + GAP, self.rect.w, self.rect.h - TITLE_H - GAP)
+        Rect::new(self.rect.x + GAP, self.rect.y + TITLE_H, self.rect.w - 2 * GAP, self.rect.h - TITLE_H - GAP)
     }
 
-    /// Is the title pill on the screen?
-    pub fn has_title(&self) -> bool {
-        !self.full() || self.reveal
-    }
-
-    /// Minimise, maximise and close, right to left at the end of the title.
+    /// Minimise, maximise and close, at the right end of the title row.
     pub fn buttons(&self) -> [Rect; 3] {
         let t = self.title_rect();
-        let s = 26;
-        let y = t.y + (TITLE_H - s) / 2;
+        let s = KNOB;
+        let y = t.y + (t.h - s) / 2;
         let x = t.right() - 12 - s;
-        [Rect::new(x - 2 * (s + 8), y, s, s), Rect::new(x - (s + 8), y, s, s), Rect::new(x, y, s, s)]
+        [Rect::new(x - 2 * (s + 6), y, s, s), Rect::new(x - (s + 6), y, s, s), Rect::new(x, y, s, s)]
+    }
+
+    /// The pill behind the buttons.
+    pub fn knob_pill(&self) -> Rect {
+        let [a, _, c] = self.buttons();
+        Rect::new(a.x - 6, a.y - 5, c.right() - a.x + 12, a.h + 10)
     }
 
     fn grip(&self) -> Rect {
@@ -182,17 +189,15 @@ impl Window {
     }
 
     pub fn hit(&self, x: i32, y: i32) -> Option<Hit> {
-        if self.has_title() {
-            let [min, max, close] = self.buttons();
-            if close.contains(x, y) {
-                return Some(Hit::Close);
-            } else if max.contains(x, y) {
-                return Some(Hit::Maximize);
-            } else if min.contains(x, y) {
-                return Some(Hit::Minimize);
-            } else if self.title_rect().contains(x, y) {
-                return Some(Hit::Title);
-            }
+        let [min, max, close] = self.buttons();
+        if close.contains(x, y) {
+            return Some(Hit::Close);
+        } else if max.contains(x, y) {
+            return Some(Hit::Maximize);
+        } else if min.contains(x, y) {
+            return Some(Hit::Minimize);
+        } else if self.title_rect().contains(x, y) {
+            return Some(Hit::Title);
         }
         if self.app.resizable() && !self.full() && self.grip().contains(x, y) {
             Some(Hit::Resize)
@@ -206,17 +211,36 @@ impl Window {
 
     pub fn draw(&mut self, c: &mut Canvas, blur: &Canvas, focused: bool, clip: Rect) {
         let body = self.body();
+        let full = self.full();
+        if !full && clip.overlaps(&ui::with_shadow(self.rect)) {
+            // The frame, with the title row.
+            let frame = self.rect;
+            c.shadow(frame, 24, 22, if focused { 95 } else { 60 });
+            c.blit_round(blur, frame, 24, if focused { ui::GLASS_LIGHT_STRONG } else { ui::GLASS_LIGHT });
+            c.stroke_round(frame, 24, 1, 0x59FF_FFFF);
+            let t = self.title_rect();
+            let ink = ui::wants_ink(blur, t);
+            let (fg, dim) = if ink { (ui::INK, ui::INK_DIM) } else { (TEXT, ui::TEXT_DIM) };
+            let (lh, _) = text::metrics(Font::Body);
+            let pill = self.knob_pill();
+            let name = text::fit(Font::Body, &self.app.title(), pill.x - t.x - 40);
+            text::draw(c, Font::Body, t.x + 20, t.y + (TITLE_H - lh) / 2 + 1, &name, if focused { fg } else { dim });
+            ui::window_knobs(c, pill, &self.buttons(), self.hover);
+        }
         if clip.overlaps(&ui::with_shadow(body)) {
-            let tint = if focused { ui::GLASS } else { 0xA61A_1414 };
-            let rad = 22;
+            let tint = if focused { ui::GLASS } else { 0xA83A_383F };
+            let rad = if full { 0 } else { 18 };
             let side = self.app.sidebar();
             if side > 0 {
                 let sb = Rect::new(body.x, body.y, side, body.h);
                 let main = Rect::new(body.x + side + GAP, body.y, body.w - side - GAP, body.h);
-                ui::card(c, blur, sb, rad, tint);
-                ui::card(c, blur, main, rad, tint);
+                if full {
+                    c.blit_round(blur, body, 0, ui::GLASS_LIGHT_STRONG);
+                }
+                c.blit_round(blur, sb, rad.max(14), tint);
+                c.blit_round(blur, main, rad.max(14), tint);
             } else {
-                ui::card(c, blur, body, rad, tint);
+                c.blit_round(blur, body, rad, tint);
             }
             let saved = c.clip();
             c.set_clip(saved.intersect(&body));
@@ -229,28 +253,6 @@ impl Window {
                 }
             }
             c.set_clip(saved);
-        }
-        let title = self.title_rect();
-        if self.has_title() && clip.overlaps(&ui::with_shadow(title)) {
-            let tint = if self.full() { ui::GLASS_STRONG } else if focused { 0xC01A_1414 } else { 0x9C1A_1414 };
-            ui::glass(c, blur, title, TITLE_H / 2, tint);
-            res::draw_icon(c, self.app.icon(), 22, title.x + 12, title.y + (TITLE_H - 22) / 2);
-            let (lh, _) = text::metrics(Font::Strong);
-            let name = text::fit(Font::Strong, &self.app.title(), title.w - 160);
-            text::draw(c, Font::Strong, title.x + 42, title.y + (TITLE_H - lh) / 2, &name, if focused { TEXT } else { ui::TEXT_DIM });
-            for (i, (b, glyph)) in self.buttons().iter().zip(["g-down", "g-max", "g-close"]).enumerate() {
-                let hover = self.hover == Some(i);
-                let (bg, edge) = match (i, hover) {
-                    (2, true) => (0xFFE0_662E, 0),
-                    (_, true) => (0x33FF_FFFF, 0x40FF_FFFF),
-                    _ => (0x0FFF_FFFF, 0x26FF_FFFF),
-                };
-                c.fill_circle(b.x + b.w / 2, b.y + b.h / 2, b.w / 2, bg);
-                if edge != 0 {
-                    c.stroke_round(*b, b.w / 2, 1, edge);
-                }
-                res::draw_icon(c, glyph, 14, b.x + (b.w - 14) / 2, b.y + (b.h - 14) / 2);
-            }
         }
     }
 
@@ -268,13 +270,14 @@ impl Window {
         (layer, b)
     }
 
-    pub fn toggle_maximize(&mut self, screen: Rect) {
-        self.reveal = false;
+    /// Maximises into `screen` (the buttons go into `bar`), or goes back.
+    pub fn toggle_maximize(&mut self, screen: Rect, bar: Rect) {
         match self.restore.take() {
             Some(r) => self.rect = r,
             None => {
                 self.restore = Some(self.rect);
                 self.rect = screen;
+                self.bar = bar;
             }
         }
     }
@@ -283,9 +286,9 @@ impl Window {
     pub fn min_size(&self) -> (i32, i32) {
         let (w, h) = self.app.size();
         if self.app.resizable() {
-            ((w * 3 / 5).max(320), (h * 3 / 5).max(200) + TITLE_H + GAP)
+            Window::outer_size((w * 3 / 5).max(320), (h * 3 / 5).max(200))
         } else {
-            (w, h + TITLE_H + GAP)
+            Window::outer_size(w, h)
         }
     }
 }

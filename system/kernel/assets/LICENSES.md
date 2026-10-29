@@ -3,10 +3,10 @@
 `fonts.bin` contiene glifi rasterizzati (da `tools/assets/gen_fonts.py`) da due
 famiglie di caratteri liberi. Le loro licenze seguono.
 
-## Plus Jakarta Sans
+## Google Sans Flex
 
-https://github.com/tokotype/PlusJakartaSans — Copyright 2020 The Plus Jakarta
-Sans Project Authors. SIL Open Font License 1.1 (testo completo in
+https://github.com/googlefonts/googlesans-flex — Copyright 2015 The Google
+Sans Flex Authors. SIL Open Font License 1.1 (testo completo in
 `tools/assets/fonts/OFL.txt`, riportato qui sotto).
 
 ```

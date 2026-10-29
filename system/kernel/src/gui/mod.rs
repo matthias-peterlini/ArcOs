@@ -55,11 +55,22 @@ impl Display {
         if r.is_empty() {
             return;
         }
-        let fast = self.fb.shift == (16, 8, 0);
+        let level = brightness();
+        let fast = self.fb.shift == (16, 8, 0) && level >= 100;
         for y in r.y..r.bottom() {
             let src = &self.scene.px[(y * self.scene.w + r.x) as usize..(y * self.scene.w + r.right()) as usize];
             let dst = (self.fb.virt + y as u64 * self.fb.pitch as u64 + r.x as u64 * 4) as *mut u32;
-            if fast {
+            if level < 100 {
+                // Software brightness: every channel scaled down.
+                let k = level * 256 / 100;
+                for (i, &p) in src.iter().enumerate() {
+                    let (r, g, b) = ((p >> 16) & 0xFF, (p >> 8) & 0xFF, p & 0xFF);
+                    let p = ((r * k) >> 8) << 16 | ((g * k) >> 8) << 8 | (b * k) >> 8;
+                    let v = self.convert(p);
+                    // SAFETY: as below.
+                    unsafe { dst.add(i).write_volatile(v) };
+                }
+            } else if fast {
                 // SAFETY: row y, columns r.x..r.right() lie inside the mapped
                 // framebuffer (r is clipped to the screen).
                 unsafe { core::ptr::copy_nonoverlapping(src.as_ptr(), dst, src.len()) };
@@ -248,6 +259,17 @@ pub fn change_resolution(mode: arcdk::DisplayMode) -> Result<(), &'static str> {
     settings::update(|s| s.resolution = Some((mode.width, mode.height)));
     request_mode(mode);
     Ok(())
+}
+
+/// The screen's brightness, 20..=100 (applied in software).
+static BRIGHTNESS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(100);
+
+pub fn brightness() -> u32 {
+    BRIGHTNESS.load(core::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn set_brightness(level: u32) {
+    BRIGHTNESS.store(level.clamp(20, 100), core::sync::atomic::Ordering::Relaxed);
 }
 
 /// Sets the volume and remembers it.

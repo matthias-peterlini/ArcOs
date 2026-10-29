@@ -14,7 +14,7 @@ use super::settings;
 use super::splash::draw_logo;
 use super::text::{self, Font};
 use super::ui::{self, Anim, Event, Glide, Looper, View, TEXT, TEXT_DIM, TEXT_FAINT};
-use super::wm::{Action, App, Hit, Window, GAP, TITLE_H};
+use super::wm::{Action, App, Hit, Window};
 use super::Display;
 use crate::dev::input::{self, Key, KeyEvent};
 use crate::fs;
@@ -50,6 +50,17 @@ const MAGNIFY: i32 = 30;
 const DOCK_GAP: i32 = 10;
 const DOCK_PAD: i32 = 11;
 const SEP_W: i32 = 19;
+/// The bar's height when attached to the top edge.
+const BAR_FULL_H: i32 = 48;
+
+/// "16:02" and "gio 13 ott".
+fn clock_strings() -> (String, String) {
+    let d = now();
+    (
+        format!("{:02}:{:02}", d.hour, d.min),
+        format!("{} {} {}", WEEKDAYS_SHORT[d.weekday as usize % 7], d.day, MONTHS_SHORT[(d.month as usize + 11) % 12]),
+    )
+}
 
 /// One icon in the dock.
 #[derive(Clone)]
@@ -81,8 +92,31 @@ enum MenuAct {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum PopupKind {
     Menu,
-    /// The control centre: volume and status.
+    /// The control centre: quick switches, volume, brightness, the account.
     Control,
+    /// The calendar and the notifications, under the clock.
+    Notices,
+}
+
+/// The switches of the control centre.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Tile {
+    Network,
+    Sound,
+    Quiet,
+    Wallpaper,
+}
+
+/// What can be pressed in the control centre.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ControlHit {
+    Tile(Tile),
+    Volume,
+    Brightness,
+    Settings,
+    Restart,
+    PowerOff,
+    Widgets,
 }
 
 struct Popup {
@@ -224,6 +258,7 @@ enum Drag {
     /// A press on a window's content: moves go to the app.
     Body(u32),
     Volume,
+    Brightness,
 }
 
 struct Launcher {
@@ -287,6 +322,11 @@ struct Desktop {
     was_full: bool,
     /// Full screen, pointer at the bottom edge: the dock is shown.
     dock_reveal: bool,
+    /// The notifications shown so far (newest last), for the notification
+    /// centre: title, text, icon, "hh:mm".
+    history: Vec<(String, String, String, String)>,
+    /// Do not disturb: notifications go to the centre without a banner.
+    quiet: bool,
 }
 
 fn now() -> DateTime {
@@ -294,28 +334,49 @@ fn now() -> DateTime {
 }
 
 impl Desktop {
+    /// The bar: floating glass at the top, or attached to the edge (and
+    /// carrying the window's name and buttons) when a window is maximised.
     fn topbar(&self) -> Rect {
-        Rect::new(14, 10, self.w - 28, 40)
+        if self.full_screen() {
+            Rect::new(0, 0, self.w, BAR_FULL_H)
+        } else {
+            Rect::new(16, 12, self.w - 32, 46)
+        }
     }
 
     fn logo_btn(&self) -> Rect {
         let t = self.topbar();
-        Rect::new(t.x + 6, t.y + 4, 58, 32)
+        Rect::new(t.x + 10, t.y + (t.h - 32) / 2, 62, 32)
     }
 
-    fn power_btn(&self) -> Rect {
+    /// The status icons at the right (arc, network, sound): they open the
+    /// control centre.
+    fn status_btn(&self) -> Rect {
         let t = self.topbar();
-        Rect::new(t.right() - 40, t.y + 6, 28, 28)
+        Rect::new(t.right() - 112, t.y + (t.h - 32) / 2, 100, 32)
     }
 
-    fn control_btn(&self) -> Rect {
-        let p = self.power_btn();
-        Rect::new(p.x - 70, p.y, 62, 28)
+    /// The clock and the date in the middle: they open the notifications.
+    fn clock_btn(&self) -> Rect {
+        let t = self.topbar();
+        let w = self.clock_width() + 24;
+        Rect::new(t.x + (t.w - w) / 2, t.y + (t.h - 34) / 2, w, 34)
+    }
+
+    fn clock_width(&self) -> i32 {
+        let (clock, date) = clock_strings();
+        text::width(Font::Heading, &clock) + 14 + text::width(Font::Heading, &date)
+    }
+
+    /// Where a maximised window's buttons go: the bar, up to the status icons.
+    fn full_bar(&self) -> Rect {
+        Rect::new(0, 0, self.w - 120, BAR_FULL_H)
     }
 
     fn widgets(&self) -> [Rect; 3] {
         let w = 300;
-        [Rect::new(18, 66, w, 150), Rect::new(18, 228, w, 222), Rect::new(18, 462, w, 120)]
+        let y = self.topbar().bottom() + 14;
+        [Rect::new(16, y, w, 150), Rect::new(16, y + 162, w, 222), Rect::new(16, y + 396, w, 120)]
     }
 
     fn show_widgets(&self) -> usize {
@@ -463,10 +524,9 @@ impl Desktop {
         Rect::new(0, 0, self.w, self.h)
     }
 
-    /// Where a maximised window goes: the whole screen, with a thin margin
-    /// of wallpaper around the card.
+    /// Where a maximised window goes: the whole screen under the bar.
     fn full_area(&self) -> Rect {
-        Rect::new(10, 10, self.w - 20, self.h - 20)
+        Rect::new(0, BAR_FULL_H, self.w, self.h - BAR_FULL_H)
     }
 
     /// Is a full-screen window in front? Then the bar and the dock hide.
@@ -543,9 +603,8 @@ impl Desktop {
             }
         }
         let area = self.work_area();
-        let (aw, ah) = app.size();
-        let (aw, ah) = (aw.min(area.w), ah.min(area.h - TITLE_H - GAP));
-        let full_h = ah + TITLE_H + GAP;
+        let (aw, ah) = Window::outer_size(app.size().0, app.size().1);
+        let (aw, full_h) = (aw.min(area.w), ah.min(area.h));
         let x = (area.x + (area.w - aw) / 2 + 120 + self.cascade * 26).min(area.right() - aw).max(area.x);
         let y = (area.y + 14 + self.cascade * 24).min(area.bottom() - full_h).max(area.y);
         self.cascade = (self.cascade + 1) % 6;
@@ -608,9 +667,10 @@ impl Desktop {
 
     fn zoom(&mut self, l: &mut Looper, id: u32) {
         let screen = self.full_area();
+        let bar = self.full_bar();
         let Some(win) = self.window_mut(id) else { return };
         let before = win.bounds();
-        win.toggle_maximize(screen);
+        win.toggle_maximize(screen, bar);
         l.damage(before);
         let after = win.bounds();
         l.damage(after);
@@ -628,6 +688,19 @@ impl Desktop {
     }
 
     fn notify(&mut self, l: &mut Looper, title: String, body: String, icon: String) {
+        let (clock, _) = clock_strings();
+        if self.history.len() >= 30 {
+            self.history.remove(0);
+        }
+        self.history.push((title.clone(), body.clone(), icon.clone(), clock));
+        if let Some(p) = &self.popup {
+            if p.kind == PopupKind::Notices {
+                l.damage(ui::with_shadow(p.rect));
+            }
+        }
+        if self.quiet {
+            return;
+        }
         self.notes.retain(|n| !n.gone());
         if self.notes.len() >= 3 {
             self.notes.remove(0);
@@ -693,6 +766,20 @@ impl Desktop {
             }
             apps::Opener::Spawn(p) => self.spawn(l, &p),
             apps::Opener::Run(cmd) => self.run(l, &cmd),
+            apps::Opener::Install(file) => {
+                let name = String::from(file.rsplit('/').next().unwrap_or(&file));
+                self.notify(l, name, String::from("Installazione in corso…"), String::from("store"));
+                let spawned = crate::task::spawn("install", move || {
+                    let name = file.rsplit('/').next().unwrap_or(&file);
+                    match crate::store::install_file(&file) {
+                        Ok(msg) => crate::gui::notify(name, &msg, "store"),
+                        Err(e) => crate::gui::notify(name, &format!("Non installato: {e}"), "store"),
+                    }
+                });
+                if spawned.is_none() {
+                    self.notify(l, String::from("Installazione"), String::from("Memoria insufficiente."), String::from("store"));
+                }
+            }
             apps::Opener::None => {
                 let name = String::from(path.rsplit('/').next().unwrap_or(path));
                 self.notify(l, name, String::from("Nessuna app può aprire questo tipo di file."), String::from("file"));
@@ -808,26 +895,148 @@ impl Desktop {
         }
     }
 
+    // The control centre, as in the arc design: a card of switches and
+    // sliders, a card with the account and the power buttons, and a pill to
+    // change the widgets.
+
     fn control_rect(&self) -> Rect {
         let t = self.topbar();
-        Rect::new(t.right() - 320, t.bottom() + 8, 310, 236)
+        Rect::new(t.right() - 356, t.bottom() + 10, 356, 512)
     }
 
-    fn volume_slider(&self) -> Rect {
+    fn control_cards(&self) -> (Rect, Rect) {
         let r = self.control_rect();
-        Rect::new(r.x + 58, r.y + 52, r.w - 84, 24)
+        (Rect::new(r.x, r.y, r.w, 276), Rect::new(r.x, r.y + 286, r.w, 180))
     }
 
-    fn control_settings_btn(&self) -> Rect {
+    fn control_tiles(&self) -> [(Tile, Rect); 4] {
+        let (a, _) = self.control_cards();
+        let w = (a.w - 34) / 2;
+        let at = |col: i32, row: i32| Rect::new(a.x + 12 + col * (w + 10), a.y + 12 + row * 70, w, 60);
+        [(Tile::Network, at(0, 0)), (Tile::Sound, at(1, 0)), (Tile::Quiet, at(0, 1)), (Tile::Wallpaper, at(1, 1))]
+    }
+
+    /// The slider rows: volume and brightness.
+    fn control_rows(&self) -> [Rect; 2] {
+        let (a, _) = self.control_cards();
+        [Rect::new(a.x + 12, a.y + 152, a.w - 24, 52), Rect::new(a.x + 12, a.y + 212, a.w - 24, 52)]
+    }
+
+    fn row_slider(row: Rect) -> Rect {
+        Rect::new(row.x + 58, row.y + (row.h - 24) / 2, row.w - 84, 24)
+    }
+
+    fn control_buttons(&self) -> [Rect; 3] {
+        let (_, b) = self.control_cards();
+        let y = b.y + 112;
+        let small = 56;
+        [
+            Rect::new(b.x + 12, y, b.w - 24 - 2 * (small + 10), 56),
+            Rect::new(b.right() - 12 - 2 * small - 10, y, small, 56),
+            Rect::new(b.right() - 12 - small, y, small, 56),
+        ]
+    }
+
+    fn widgets_btn(&self) -> Rect {
         let r = self.control_rect();
-        Rect::new(r.x + 16, r.bottom() - 52, r.w - 32, 36)
+        Rect::new(r.x + (r.w - 170) / 2, r.bottom() - 34, 170, 32)
+    }
+
+    fn control_hit(&self, x: i32, y: i32) -> Option<ControlHit> {
+        if let Some((t, _)) = self.control_tiles().iter().find(|(_, r)| r.contains(x, y)) {
+            return Some(ControlHit::Tile(*t));
+        }
+        let [vol, bri] = self.control_rows();
+        if vol.contains(x, y) {
+            return Some(ControlHit::Volume);
+        }
+        if bri.contains(x, y) {
+            return Some(ControlHit::Brightness);
+        }
+        let [s, re, off] = self.control_buttons();
+        if s.contains(x, y) {
+            Some(ControlHit::Settings)
+        } else if re.contains(x, y) {
+            Some(ControlHit::Restart)
+        } else if off.contains(x, y) {
+            Some(ControlHit::PowerOff)
+        } else if self.widgets_btn().contains(x, y) {
+            Some(ControlHit::Widgets)
+        } else {
+            None
+        }
+    }
+
+    fn control_press(&mut self, l: &mut Looper, hit: ControlHit, x: i32) {
+        match hit {
+            ControlHit::Volume => {
+                self.drag = Some(Drag::Volume);
+                self.set_volume_at(l, x);
+            }
+            ControlHit::Brightness => {
+                self.drag = Some(Drag::Brightness);
+                self.set_brightness_at(l, x);
+            }
+            ControlHit::Tile(Tile::Network) => {
+                self.close_popup(l);
+                self.open_id(l, "settings");
+            }
+            ControlHit::Tile(Tile::Sound) => {
+                let v = if crate::dev::audio::volume() == 0 { 60 } else { 0 };
+                super::change_volume(v);
+                l.damage(ui::with_shadow(self.control_rect()));
+                l.damage(ui::with_shadow(self.topbar()));
+            }
+            ControlHit::Tile(Tile::Quiet) => {
+                self.quiet = !self.quiet;
+                l.damage(ui::with_shadow(self.control_rect()));
+            }
+            ControlHit::Tile(Tile::Wallpaper) => self.menu_act(l, MenuAct::NextWallpaper),
+            ControlHit::Settings | ControlHit::Widgets => {
+                self.close_popup(l);
+                self.open_id(l, "settings");
+            }
+            ControlHit::Restart => {
+                self.close_popup(l);
+                self.end(l, Ending::Restart);
+            }
+            ControlHit::PowerOff => {
+                self.close_popup(l);
+                self.end(l, Ending::PowerOff);
+            }
+        }
     }
 
     fn set_volume_at(&mut self, l: &mut Looper, x: i32) {
-        let v = ui::slider_value(self.volume_slider(), x) / 10;
+        let v = ui::slider_value(Self::row_slider(self.control_rows()[0]), x) / 10;
         super::change_volume(v);
         l.damage(ui::with_shadow(self.control_rect()));
         l.damage(ui::with_shadow(self.topbar()));
+    }
+
+    fn set_brightness_at(&mut self, l: &mut Looper, x: i32) {
+        let v = ui::slider_value(Self::row_slider(self.control_rows()[1]), x) / 10;
+        super::set_brightness(v.max(20));
+        l.damage(self.screen());
+    }
+
+    // The notification centre: the month, and the notifications.
+
+    fn notices_rect(&self) -> Rect {
+        let t = self.topbar();
+        let w = 640.min(self.w - 32);
+        Rect::new((self.w - w) / 2, t.bottom() + 10, w, 450.min(self.h - t.bottom() - 120))
+    }
+
+    fn notices_parts(&self) -> (Rect, Rect) {
+        let r = self.notices_rect();
+        let half = (r.w - 10) / 2;
+        (Rect::new(r.x, r.y, half, r.h), Rect::new(r.x + half + 10, r.y, r.w - half - 10, r.h))
+    }
+
+    fn clear_btn(&self) -> Rect {
+        let (_, n) = self.notices_parts();
+        Rect::new(n.x + (n.w - 150) / 2, n.bottom() - 46, 150, 32)
     }
 
     // ------------------------------------------------------------------
@@ -849,12 +1058,18 @@ impl Desktop {
         }
         if let Some(p) = &self.popup {
             if p.kind == PopupKind::Control && p.rect.contains(x, y) {
-                if self.volume_slider().grow(8).contains(x, y) {
-                    self.drag = Some(Drag::Volume);
-                    self.set_volume_at(l, x);
-                } else if self.control_settings_btn().contains(x, y) {
+                if let Some(hit) = self.control_hit(x, y) {
+                    self.control_press(l, hit, x);
+                }
+                return;
+            }
+            if p.kind == PopupKind::Notices && p.rect.contains(x, y) {
+                if !self.history.is_empty() && self.clear_btn().contains(x, y) {
+                    self.history.clear();
+                    l.damage(ui::with_shadow(p.rect));
+                } else if self.notices_parts().0.contains(x, y) {
                     self.close_popup(l);
-                    self.open_id(l, "settings");
+                    self.open_id(l, "calendar");
                 }
                 return;
             }
@@ -879,8 +1094,7 @@ impl Desktop {
             }
             return;
         }
-        let bar = !self.full_screen();
-        if bar && self.logo_btn().contains(x, y) {
+        if self.logo_btn().contains(x, y) {
             let b = self.logo_btn();
             let p = Popup::menu(
                 b.x,
@@ -900,19 +1114,13 @@ impl Desktop {
             self.show_popup(l, p);
             return;
         }
-        if bar && self.power_btn().contains(x, y) {
-            let t = self.topbar();
-            let p = Popup::menu(
-                t.right() - 230,
-                t.bottom() + 8,
-                alloc::vec![("Riavvia", Some(MenuAct::Restart)), ("Spegni", Some(MenuAct::PowerOff))],
-                self.w,
-            );
+        if self.status_btn().contains(x, y) {
+            let p = Popup { kind: PopupKind::Control, rect: self.control_rect(), items: Vec::new(), anim: Anim::new(180) };
             self.show_popup(l, p);
             return;
         }
-        if bar && self.control_btn().contains(x, y) {
-            let p = Popup { kind: PopupKind::Control, rect: self.control_rect(), items: Vec::new(), anim: Anim::new(160) };
+        if self.clock_btn().contains(x, y) {
+            let p = Popup { kind: PopupKind::Notices, rect: self.notices_rect(), items: Vec::new(), anim: Anim::new(180) };
             self.show_popup(l, p);
             return;
         }
@@ -1049,6 +1257,11 @@ impl Desktop {
     }
 
     fn moved(&mut self, l: &mut Looper, x: i32, y: i32, held: bool) {
+        // The bar's buttons light up under the pointer.
+        let bar = self.topbar();
+        if bar.contains(self.mouse.0, self.mouse.1) || bar.contains(x, y) {
+            l.damage(ui::with_shadow(bar));
+        }
         self.mouse = (x, y);
         if held {
             match self.drag {
@@ -1061,8 +1274,9 @@ impl Desktop {
                         if win.restore.take().is_some() {
                             // Dragging a maximised window: back to its size,
                             // under the pointer.
-                            let (w, h) = (win.rect.w, win.rect.h);
-                            let (ow, oh) = (win.app.size().0.min(w), win.app.size().1 + TITLE_H + GAP);
+                            let (w, h) = (win.rect.w, win.rect.h + BAR_FULL_H);
+                            let (ow, oh) = Window::outer_size(win.app.size().0, win.app.size().1);
+                            let ow = ow.min(w);
                             win.rect = Rect::new(x - ow / 2, y - 20, ow, oh.min(h));
                             new_drag = Some(Drag::Move(id, ow / 2, 20));
                         } else {
@@ -1102,6 +1316,10 @@ impl Desktop {
                     self.set_volume_at(l, x);
                     return;
                 }
+                Some(Drag::Brightness) => {
+                    self.set_brightness_at(l, x);
+                    return;
+                }
                 None => {}
             }
         }
@@ -1123,14 +1341,14 @@ impl Desktop {
                 self.dock_reveal = dock_reveal;
                 l.damage(dock_zone);
             }
+            // The window's buttons in the bar light up.
+            let bar = self.topbar();
             if let Some(id) = self.focused() {
                 if let Some(win) = self.window_mut(id) {
-                    let pill = win.title_rect();
-                    let reveal = y < 6 || (win.reveal && pill.grow(16).contains(x, y));
-                    if reveal != win.reveal {
-                        win.reveal = reveal;
-                        win.hover = None;
-                        l.damage(win.bounds());
+                    let btn = win.buttons().iter().position(|b| b.contains(x, y));
+                    if btn != win.hover {
+                        win.hover = btn;
+                        l.damage(ui::with_shadow(bar));
                     }
                 }
             }
@@ -1201,41 +1419,55 @@ impl Desktop {
 
     fn draw_topbar(&self, c: &mut Canvas) {
         let t = self.topbar();
-        ui::glass(c, &self.blur, t, 16, ui::GLASS);
-        let lb = self.logo_btn();
-        if lb.contains(self.mouse.0, self.mouse.1) || self.popup.as_ref().is_some_and(|p| p.rect.x < lb.right() && p.kind == PopupKind::Menu) {
-            c.fill_round(lb, 10, 0x26FF_FFFF);
-        }
-        draw_logo(c, lb.x + lb.w / 2, lb.y + lb.h / 2, 14, 0xFFFF_FFFF);
-        // The app in front, as macOS shows it.
-        let app = self
-            .focused()
-            .and_then(|id| self.window(id))
-            .map(|w| apps::app_name(w.app.kind(), &w.app.title()))
-            .unwrap_or_else(|| String::from("Scrivania"));
-        text::draw(c, Font::Strong, lb.right() + 8, t.y + 11, &text::fit(Font::Strong, &app, 200), TEXT);
-        let d = now();
-        let clock = format!("{:02}:{:02}", d.hour, d.min);
-        let date = format!("{} {} {}", WEEKDAYS_SHORT[d.weekday as usize % 7], d.day, MONTHS_SHORT[(d.month as usize + 11) % 12]);
-        let cw = text::width(Font::Strong, &clock) + 10 + text::width(Font::Body, &date);
-        let x = t.x + (t.w - cw) / 2;
-        let w = text::draw(c, Font::Strong, x, t.y + 11, &clock, TEXT);
-        text::draw(c, Font::Body, x + w + 10, t.y + 11, &date, TEXT_DIM);
-        // Status: the control centre (volume, network), then the power button.
-        let cb = self.control_btn();
-        if cb.contains(self.mouse.0, self.mouse.1) || self.popup.as_ref().is_some_and(|p| p.kind == PopupKind::Control) {
-            c.fill_round(cb, 12, 0x26FF_FFFF);
-        }
-        let vol = if crate::dev::audio::volume() == 0 { "g-mute" } else { "g-volume" };
-        res::draw_icon(c, vol, 18, cb.x + 8, cb.y + 5);
-        if crate::net::online() {
-            res::draw_icon(c, "g-wifi", 18, cb.x + 36, cb.y + 5);
+        let full = self.full_screen();
+        if full {
+            // Attached to the edge: solid light glass across the screen.
+            c.blit_round(&self.blur, t, 0, ui::GLASS_LIGHT_STRONG);
+            c.fill(Rect::new(t.x, t.bottom() - 1, t.w, 1), 0x33FF_FFFF);
         } else {
-            res::draw_icon_faded(c, "g-wifi", 18, cb.x + 36, cb.y + 5, 90);
+            ui::light_glass(c, &self.blur, t, 18, true);
         }
-        let p = self.power_btn();
-        c.fill_circle(p.x + 14, p.y + 14, 14, if p.contains(self.mouse.0, self.mouse.1) { 0x40FF_FFFF } else { 0x26FF_FFFF });
-        res::draw_icon(c, "g-power", 16, p.x + 6, p.y + 6);
+        let ink = full || ui::wants_ink(&self.blur, t);
+        let (fg, dim, hover_bg) = if ink { (ui::INK, ui::INK_DIM, 0x1F00_0000) } else { (TEXT, TEXT_DIM, 0x26FF_FFFF) };
+        let lb = self.logo_btn();
+        if lb.contains(self.mouse.0, self.mouse.1) || self.popup.as_ref().is_some_and(|p| p.kind == PopupKind::Menu && p.rect.x < lb.right()) {
+            c.fill_round(lb, 12, hover_bg);
+        }
+        draw_logo(c, lb.x + lb.w / 2, lb.y + lb.h / 2, 16, fg);
+        let (lh, _) = text::metrics(Font::Heading);
+        let ty = t.y + (t.h - lh) / 2;
+        // Maximised: the app's name after the logo, its buttons at the right.
+        let mut left_end = lb.right();
+        if full {
+            if let Some(win) = self.focused().and_then(|id| self.window(id)) {
+                let name = apps::app_name(win.app.kind(), &win.app.title());
+                let (bh, _) = text::metrics(Font::Body);
+                left_end += 14 + text::draw(c, Font::Body, lb.right() + 14, t.y + (t.h - bh) / 2, &text::fit(Font::Body, &name, 240), fg);
+                ui::window_knobs(c, win.knob_pill(), &win.buttons(), win.hover);
+            }
+        }
+        // The clock and the date, in the middle.
+        let cb = self.clock_btn();
+        if cb.x > left_end {
+            if cb.contains(self.mouse.0, self.mouse.1) || self.popup.as_ref().is_some_and(|p| p.kind == PopupKind::Notices) {
+                c.fill_round(cb, 12, hover_bg);
+            }
+            let (clock, date) = clock_strings();
+            let x = cb.x + 12;
+            let w = text::draw(c, Font::Heading, x, ty, &clock, fg);
+            text::draw(c, Font::Heading, x + w + 14, ty, &date, fg);
+        }
+        // Status: arc, network, sound; they open the control centre.
+        let sb = self.status_btn();
+        if sb.contains(self.mouse.0, self.mouse.1) || self.popup.as_ref().is_some_and(|p| p.kind == PopupKind::Control) {
+            c.fill_round(sb, 12, hover_bg);
+        }
+        let gy = sb.y + (sb.h - 20) / 2;
+        ui::draw_hexagon(c, sb.x + 10, gy, 20, fg);
+        let net = if crate::net::online() { fg } else { (fg & 0xFF_FFFF) | 0x6600_0000 };
+        ui::glyph(c, "g-wifi", 20, sb.x + 40, gy, net);
+        let vol = if crate::dev::audio::volume() == 0 { "g-mute" } else { "g-volume" };
+        ui::glyph(c, vol, 20, sb.x + 70, gy, if self.quiet { dim } else { fg });
     }
 
     fn draw_widgets(&self, c: &mut Canvas, r: Rect) {
@@ -1243,9 +1475,19 @@ impl Desktop {
         let ws = self.widgets();
         let d = now();
         let name = settings::get().name;
+        // Light glass; ink or white text, whichever reads on the wallpaper:
+        // (text, dimmed text).
+        let pane = |c: &mut Canvas, g: Rect| -> (u32, u32) {
+            ui::light_glass(c, &self.blur, g, 24, true);
+            if ui::wants_ink(&self.blur, g) {
+                (ui::INK, ui::INK_DIM)
+            } else {
+                (TEXT, TEXT_DIM)
+            }
+        };
         if n > 0 && r.overlaps(&ui::with_shadow(ws[0])) {
             let g = ws[0];
-            ui::card(c, &self.blur, g, 22, ui::GLASS);
+            let (fg, dim) = pane(c, g);
             let hello = match d.hour {
                 5..=11 => "Buongiorno",
                 12..=17 => "Buon pomeriggio",
@@ -1253,57 +1495,36 @@ impl Desktop {
             };
             let line = if name.is_empty() { String::from(hello) } else { format!("{hello}, {name}") };
             let date = format!("{} {} {}", WEEKDAYS[d.weekday as usize % 7], d.day, MONTHS[(d.month as usize + 11) % 12]);
-            ui::caps(c, g.x + 22, g.y + 20, &date, TEXT_FAINT);
-            text::draw(c, Font::Clock, g.x + 18, g.y + 36, &format!("{:02}:{:02}", d.hour, d.min), TEXT);
-            text::draw(c, Font::Heading, g.x + 22, g.y + 112, &text::fit(Font::Heading, &line, g.w - 40), TEXT);
+            ui::caps(c, g.x + 22, g.y + 20, &date, dim);
+            text::draw(c, Font::Clock, g.x + 18, g.y + 36, &format!("{:02}:{:02}", d.hour, d.min), fg);
+            text::draw(c, Font::Heading, g.x + 22, g.y + 112, &text::fit(Font::Heading, &line, g.w - 40), fg);
         }
         if n > 1 && r.overlaps(&ui::with_shadow(ws[1])) {
             let g = ws[1];
-            ui::card(c, &self.blur, g, 22, ui::GLASS);
-            let title = format!("{} {}", capitalize(MONTHS[(d.month as usize + 11) % 12]), d.year);
-            text::draw(c, Font::Heading, g.x + 20, g.y + 14, &title, TEXT);
-            let cell = (g.w - 30) / 7;
-            for (i, h) in ["L", "M", "M", "G", "V", "S", "D"].iter().enumerate() {
-                let w = ui::caps_width(h);
-                ui::caps(c, g.x + 15 + i as i32 * cell + (cell - w) / 2, g.y + 48, h, TEXT_FAINT);
-            }
-            let first = time::from_epoch(time::to_epoch(d.year, d.month, 1, 12, 0, 0)).weekday as i32;
-            let days = time::days_in_month(d.year, d.month) as i32;
-            for day in 1..=days {
-                let slot = first + day - 1;
-                let (col, row) = (slot % 7, slot / 7);
-                let cx = g.x + 15 + col * cell + cell / 2;
-                let cy = g.y + 82 + row * 26;
-                let label = format!("{day}");
-                if day as u64 == d.day {
-                    c.fill_circle(cx, cy, 12, 0xFFFF_FFFF);
-                    text::draw_centered(c, Font::Strong, cx, cy - 9, &label, 0xFF0E_0B0C);
-                } else {
-                    text::draw_centered(c, Font::Body, cx, cy - 9, &label, if col >= 5 { TEXT_DIM } else { TEXT });
-                }
-            }
+            let (fg, dim) = pane(c, g);
+            draw_month(c, g, &d, fg, dim);
         }
         if n > 2 && r.overlaps(&ui::with_shadow(ws[2])) {
             let g = ws[2];
-            ui::card(c, &self.blur, g, 22, ui::GLASS);
-            ui::caps(c, g.x + 20, g.y + 20, "Sistema", TEXT_FAINT);
+            let (fg, dim) = pane(c, g);
+            ui::caps(c, g.x + 20, g.y + 20, "Sistema", dim);
             let (free, total) = crate::mem::frame::stats();
             let used = total.saturating_sub(free);
             let bar = Rect::new(g.x + 20, g.y + 50, g.w - 40, 8);
-            c.fill_round(bar, 4, 0x26FF_FFFF);
+            c.fill_round(bar, 4, (fg & 0xFF_FFFF) | 0x2600_0000);
             let fw = (bar.w as u64 * used).checked_div(total).unwrap_or(0) as i32;
-            c.fill_round(Rect::new(bar.x, bar.y, fw.max(8), bar.h), 4, ui::ACCENT);
-            text::draw(c, Font::Small, g.x + 20, g.y + 66, &format!("Memoria: {} in uso su {}", Size(used), Size(total)), TEXT_DIM);
+            c.fill_round(Rect::new(bar.x, bar.y, fw.max(8), bar.h), 4, fg);
+            text::draw(c, Font::Small, g.x + 20, g.y + 66, &format!("Memoria: {} in uso su {}", Size(used), Size(total)), dim);
             let up = time::uptime_ms() / 60_000;
             let net = if crate::net::online() { "connessa" } else { "assente" };
-            text::draw(c, Font::Small, g.x + 20, g.y + 88, &format!("Acceso da {} h {} min · rete {net}", up / 60, up % 60), TEXT_DIM);
+            text::draw(c, Font::Small, g.x + 20, g.y + 88, &format!("Acceso da {} h {} min · rete {net}", up / 60, up % 60), dim);
         }
     }
 
     fn draw_dock(&self, c: &mut Canvas) {
         let items = self.dock_items();
         let (rects, bg) = self.dock_layout(&items);
-        ui::glass(c, &self.blur, bg, 24, ui::GLASS);
+        ui::light_glass(c, &self.blur, bg, 26, true);
         for (i, it) in items.iter().enumerate() {
             let r = rects[i];
             if it.split && i > 0 {
@@ -1388,9 +1609,9 @@ impl Desktop {
     fn draw_popup(&self, c: &mut Canvas, p: &Popup) {
         let saved = c.clip();
         c.set_clip(saved.intersect(&p.shown()));
-        ui::glass(c, &self.blur, p.rect, 14, ui::GLASS_STRONG);
         match p.kind {
             PopupKind::Menu => {
+                ui::glass(c, &self.blur, p.rect, 16, ui::GLASS_STRONG);
                 let mut y = p.rect.y + 6;
                 for (label, act) in &p.items {
                     if act.is_none() {
@@ -1406,29 +1627,136 @@ impl Desktop {
                     y += 34;
                 }
             }
-            PopupKind::Control => {
-                let r = p.rect;
-                text::draw(c, Font::Strong, r.x + 18, r.y + 16, "Suono", TEXT);
-                let vol = crate::dev::audio::volume();
-                let s = self.volume_slider();
-                res::draw_icon(c, if vol == 0 { "g-mute" } else { "g-volume" }, 20, r.x + 20, s.y + 2);
-                ui::slider(c, s, vol * 10);
-                let card = Rect::new(r.x + 16, r.y + 96, r.w - 32, 68);
-                c.fill_round(card, 14, ui::PANEL);
-                let online = crate::net::online();
-                c.fill_circle(card.x + 30, card.y + 34, 18, if online { ui::ACCENT } else { 0x40FF_FFFF });
-                res::draw_icon(c, "g-wifi", 18, card.x + 21, card.y + 25);
-                text::draw(c, Font::Strong, card.x + 60, card.y + 14, "Rete", TEXT);
-                let line = match crate::net::address() {
-                    Some(a) if online => format!("Connessa · {a}"),
-                    _ => String::from("Nessuna connessione"),
-                };
-                text::draw(c, Font::Small, card.x + 60, card.y + 38, &text::fit(Font::Small, &line, card.w - 72), TEXT_DIM);
-                let b = self.control_settings_btn();
-                ui::button(c, b, "Impostazioni…", false, b.contains(self.mouse.0, self.mouse.1));
-            }
+            PopupKind::Control => self.draw_control(c),
+            PopupKind::Notices => self.draw_notices(c),
         }
         c.set_clip(saved);
+    }
+
+    fn draw_control(&self, c: &mut Canvas) {
+        const PANE: u32 = 0xA66E_6B74;
+        let (a, b) = self.control_cards();
+        let hover = self.control_hit(self.mouse.0, self.mouse.1);
+        ui::card(c, &self.blur, a, 30, PANE);
+        ui::card(c, &self.blur, b, 30, PANE);
+        // The switches: a pill with a round button and a label.
+        let online = crate::net::online();
+        let vol = crate::dev::audio::volume();
+        for (tile, r) in self.control_tiles() {
+            let (on, title, state) = match tile {
+                Tile::Network => match crate::net::address() {
+                    Some(a) if online => (true, "Rete", format!("{a}")),
+                    _ => (false, "Rete", String::from("Assente")),
+                },
+                Tile::Sound => (vol > 0, "Suono", String::from(if vol > 0 { "Attivo" } else { "Muto" })),
+                Tile::Quiet => (self.quiet, "Non disturbare", String::from(if self.quiet { "Attivo" } else { "Spento" })),
+                Tile::Wallpaper => (true, "Sfondo", String::from("Cambia")),
+            };
+            let lit = hover == Some(ControlHit::Tile(tile));
+            c.fill_round(r, r.h / 2, if lit { 0x40FF_FFFF } else { 0x29FF_FFFF });
+            c.stroke_round(r, r.h / 2, 1, 0x33FF_FFFF);
+            let (cx, cy, rad) = (r.x + 8 + 22, r.y + r.h / 2, 22);
+            let knob = if on { 0xFFEE_EDF1 } else { 0xFF77_747D };
+            let ink = if on { ui::INK } else { TEXT };
+            c.fill_circle(cx, cy, rad, knob);
+            match tile {
+                Tile::Network => ui::glyph(c, "g-wifi", 20, cx - 10, cy - 10, ink),
+                Tile::Sound => ui::glyph(c, if vol > 0 { "g-volume" } else { "g-mute" }, 20, cx - 10, cy - 10, ink),
+                Tile::Quiet => ui::draw_moon(c, cx - 10, cy - 10, 20, ink, knob),
+                Tile::Wallpaper => ui::glyph(c, "g-reload", 20, cx - 10, cy - 10, ink),
+            }
+            let tx = cx + rad + 10;
+            let tw = r.right() - tx - 10;
+            text::draw(c, Font::Strong, tx, r.y + 12, &text::fit(Font::Strong, title, tw), TEXT);
+            text::draw(c, Font::Small, tx, r.y + 32, &text::fit(Font::Small, &state, tw), TEXT_DIM);
+        }
+        // Volume and brightness.
+        let [vr, br] = self.control_rows();
+        for (i, row) in [vr, br].iter().enumerate() {
+            c.fill_round(*row, row.h / 2, 0x29FF_FFFF);
+            c.stroke_round(*row, row.h / 2, 1, 0x33FF_FFFF);
+            let (gx, gy) = (row.x + 18, row.y + (row.h - 22) / 2);
+            if i == 0 {
+                ui::glyph(c, if vol == 0 { "g-mute" } else { "g-volume" }, 22, gx, gy, TEXT);
+                ui::slider(c, Self::row_slider(*row), vol * 10);
+            } else {
+                ui::draw_sun(c, gx, gy, 22, TEXT);
+                ui::slider(c, Self::row_slider(*row), super::brightness() * 10);
+            }
+        }
+        // The account.
+        let account = crate::ticly::account();
+        let (name, mail, initials) = match &account {
+            Some(a) => (if a.name.is_empty() { a.email.clone() } else { a.name.clone() }, a.email.clone(), a.initials()),
+            None => {
+                let n = settings::get().name;
+                let n = if n.is_empty() { String::from("Utente") } else { n };
+                let i: String = n.chars().take(1).flat_map(|ch| ch.to_uppercase()).collect();
+                (n, String::from("Nessun account ticly"), i)
+            }
+        };
+        let (acx, acy, ar) = (b.x + 16 + 40, b.y + 16 + 40, 40);
+        c.fill_circle(acx, acy, ar, 0xFFEE_EDF1);
+        let (lh, _) = text::metrics(Font::Title);
+        text::draw_centered(c, Font::Title, acx, acy - lh / 2, &initials, ui::INK);
+        let tx = acx + ar + 18;
+        text::draw(c, Font::Heading, tx, b.y + 34, &text::fit(Font::Heading, &name, b.right() - tx - 16), TEXT);
+        text::draw(c, Font::Small, tx, b.y + 60, &text::fit(Font::Small, &mail, b.right() - tx - 16), TEXT_DIM);
+        let [sb, rb, pb] = self.control_buttons();
+        let lit = |h: ControlHit| hover == Some(h);
+        c.fill_round(sb, sb.h / 2, if lit(ControlHit::Settings) { 0x40FF_FFFF } else { 0x29FF_FFFF });
+        c.stroke_round(sb, sb.h / 2, 1, 0x33FF_FFFF);
+        c.fill_circle(sb.x + 8 + 20, sb.y + sb.h / 2, 20, 0xFFEE_EDF1);
+        res::draw_icon(c, "settings", 28, sb.x + 14, sb.y + sb.h / 2 - 14);
+        let (sh, _) = text::metrics(Font::Strong);
+        text::draw(c, Font::Strong, sb.x + 58, sb.y + (sb.h - sh) / 2, &text::fit(Font::Strong, "Impostazioni", sb.w - 66), TEXT);
+        for (r, h, which) in [(rb, ControlHit::Restart, 0), (pb, ControlHit::PowerOff, 1)] {
+            c.fill_round(r, r.h / 2, if lit(h) { 0x40FF_FFFF } else { 0x29FF_FFFF });
+            c.stroke_round(r, r.h / 2, 1, 0x33FF_FFFF);
+            let g = if which == 0 { "g-reload" } else { "g-power" };
+            ui::glyph(c, g, 22, r.x + (r.w - 22) / 2, r.y + (r.h - 22) / 2, if which == 1 && lit(h) { ui::RED } else { TEXT });
+        }
+        let wb = self.widgets_btn();
+        ui::glass(c, &self.blur, wb, wb.h / 2, if lit(ControlHit::Widgets) { 0xCC5A_5860 } else { 0xA64A_4850 });
+        let (bh, _) = text::metrics(Font::Body);
+        text::draw_centered(c, Font::Body, wb.x + wb.w / 2, wb.y + (wb.h - bh) / 2, "Modifica widget", TEXT);
+    }
+
+    fn draw_notices(&self, c: &mut Canvas) {
+        const PANE: u32 = 0xA66E_6B74;
+        let (cal, list) = self.notices_parts();
+        ui::card(c, &self.blur, cal, 30, PANE);
+        ui::card(c, &self.blur, list, 30, PANE);
+        draw_month(c, Rect::new(cal.x + 6, cal.y + 8, cal.w - 12, cal.h - 16), &now(), TEXT, TEXT_DIM);
+        if self.history.is_empty() {
+            let (lh, _) = text::metrics(Font::Body);
+            text::draw_centered(c, Font::Body, list.x + list.w / 2, list.y + list.h / 2 - lh, "Nessuna notifica", TEXT_DIM);
+            return;
+        }
+        let saved = c.clip();
+        c.set_clip(saved.intersect(&Rect::new(list.x, list.y + 8, list.w, list.h - 64)));
+        let mut y = list.y + 10;
+        for (title, body, icon, at) in self.history.iter().rev() {
+            if y > list.bottom() - 64 {
+                break;
+            }
+            let r = Rect::new(list.x + 10, y, list.w - 20, 84);
+            c.fill_round(r, 26, 0x29FF_FFFF);
+            c.stroke_round(r, 26, 1, 0x33FF_FFFF);
+            res::draw_icon(c, icon, 52, r.x + 14, r.y + 16);
+            let tx = r.x + 78;
+            let tw = r.right() - tx - 14;
+            let tw_title = tw - text::width(Font::Small, at) - 8;
+            text::draw(c, Font::Heading, tx, r.y + 16, &text::fit(Font::Heading, title, tw_title), TEXT);
+            text::draw_right(c, Font::Small, r.right() - 16, r.y + 20, at, TEXT_DIM);
+            if let Some(line) = text::wrap(Font::Small, body, tw).first() {
+                text::draw(c, Font::Small, tx, r.y + 46, line, TEXT_DIM);
+            }
+            y += 92;
+        }
+        c.set_clip(saved);
+        let cb = self.clear_btn();
+        ui::button(c, cb, "Cancella tutto", false, cb.contains(self.mouse.0, self.mouse.1));
     }
 
     fn draw_notes(&self, c: &mut Canvas) {
@@ -1437,7 +1765,7 @@ impl Desktop {
             if r.x >= self.w {
                 continue;
             }
-            ui::glass(c, &self.blur, r, 18, ui::GLASS_STRONG);
+            ui::card(c, &self.blur, r, 24, 0xCC5E_5B64);
             res::draw_icon(c, &n.icon, 40, r.x + 14, r.y + 18);
             text::draw(c, Font::Strong, r.x + 66, r.y + 14, &text::fit(Font::Strong, &n.title, r.w - 84), TEXT);
             let lines = text::wrap(Font::Small, &n.body, r.w - 84);
@@ -1462,6 +1790,35 @@ fn capitalize(s: &str) -> String {
     ch.next().map(|f| f.to_uppercase().chain(ch).collect()).unwrap_or_default()
 }
 
+/// The month of `d` in `g`: its name, the weekdays and the days, today in a
+/// filled circle.
+fn draw_month(c: &mut Canvas, g: Rect, d: &DateTime, fg: u32, dim: u32) {
+    let title = format!("{} {}", capitalize(MONTHS[(d.month as usize + 11) % 12]), d.year);
+    text::draw(c, Font::Heading, g.x + 20, g.y + 14, &title, fg);
+    let cell = (g.w - 30) / 7;
+    for (i, h) in ["L", "M", "M", "G", "V", "S", "D"].iter().enumerate() {
+        let w = ui::caps_width(h);
+        ui::caps(c, g.x + 15 + i as i32 * cell + (cell - w) / 2, g.y + 48, h, dim);
+    }
+    let first = time::from_epoch(time::to_epoch(d.year, d.month, 1, 12, 0, 0)).weekday as i32;
+    let days = time::days_in_month(d.year, d.month) as i32;
+    let row_h = ((g.h - 90) / 6).clamp(24, 52);
+    for day in 1..=days {
+        let slot = first + day - 1;
+        let (col, row) = (slot % 7, slot / 7);
+        let cx = g.x + 15 + col * cell + cell / 2;
+        let cy = g.y + 82 + row * row_h;
+        let label = format!("{day}");
+        if day as u64 == d.day {
+            c.fill_circle(cx, cy, 12, fg);
+            let on = if fg == TEXT { ui::INK } else { TEXT };
+            text::draw_centered(c, Font::Strong, cx, cy - 9, &label, on);
+        } else {
+            text::draw_centered(c, Font::Body, cx, cy - 9, &label, if col >= 5 { dim } else { fg });
+        }
+    }
+}
+
 use crate::fs::Path;
 
 impl View for Desktop {
@@ -1475,9 +1832,11 @@ impl View for Desktop {
         self.fx.clear();
         let area = self.work_area();
         let full = self.full_area();
+        let bar = self.full_bar();
         for win in self.windows.iter_mut() {
             if win.restore.is_some() {
                 win.rect = full; // maximised: fill the new screen
+                win.bar = bar;
             } else {
                 win.rect.w = win.rect.w.min(area.w);
                 win.rect.h = win.rect.h.min(area.h);
@@ -1704,7 +2063,7 @@ impl Desktop {
         if self.dock_shown() && r.overlaps(&self.dock_zone()) {
             self.draw_dock(c);
         }
-        if !self.full_screen() && r.overlaps(&ui::with_shadow(self.topbar())) {
+        if r.overlaps(&ui::with_shadow(self.topbar())) {
             self.draw_topbar(c);
         }
         if let Some(p) = &self.popup {
@@ -1750,6 +2109,8 @@ pub fn run(d: &mut Display) {
         ending: None,
         was_full: false,
         dock_reveal: false,
+        history: Vec::new(),
+        quiet: false,
     };
     let mut l = Looper::new(d);
     l.damage_all(d);

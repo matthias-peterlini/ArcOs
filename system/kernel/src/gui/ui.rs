@@ -7,15 +7,24 @@ use super::text::{self, Font};
 use super::Display;
 use crate::dev::input::{self, KeyEvent};
 
-// The ticly palette (login.ticly.it, do.ticly.it, ai.ticly.it): warm dark
-// glass with a rust glow, white text, muted warm greys, white pills.
+// The arc palette: frosted glass in neutral greys over the wallpaper, light
+// panes for the bar and the frames, darker panes for content, white text on
+// the dark ones and ink on the light ones, light grey and white pills.
 pub const TEXT: u32 = 0xFFFF_FFFF;
-pub const TEXT_DIM: u32 = 0xFFB8_ACA7;
-pub const TEXT_FAINT: u32 = 0xFF84_7875;
-/// The tint of the dark glass cards.
-pub const GLASS: u32 = 0xB81A_1414;
-pub const GLASS_STRONG: u32 = 0xDC14_1011;
-pub const BORDER: u32 = 0x17FF_FFFF;
+pub const TEXT_DIM: u32 = 0xFFC9_C6CE;
+pub const TEXT_FAINT: u32 = 0xFF94_919A;
+/// Text on light glass (the bar, window frames, light buttons).
+pub const INK: u32 = 0xFF1B_1A1F;
+pub const INK_DIM: u32 = 0xFF4A_4850;
+/// The tint of the dark glass panes (window content, menus).
+pub const GLASS: u32 = 0xC23A_383F;
+pub const GLASS_STRONG: u32 = 0xE02C_2B31;
+/// The tint of the light glass (bar, window frames, widgets).
+pub const GLASS_LIGHT: u32 = 0x66DA_D6E2;
+pub const GLASS_LIGHT_STRONG: u32 = 0x99E2_DEE8;
+/// The round dark window buttons.
+pub const KNOB: u32 = 0xFF3B_3A3F;
+pub const BORDER: u32 = 0x29FF_FFFF;
 /// The glow in the corner of a card.
 pub const GLOW: u32 = 0xFF8A_3416;
 /// The highlight colour (text cursor, progress, focus): ticly's ember.
@@ -40,13 +49,98 @@ pub fn glass(c: &mut Canvas, blur: &Canvas, r: Rect, rad: i32, tint: u32) {
     c.stroke_round(r, rad, 1, BORDER);
 }
 
-/// A ticly card: [`glass`] with the rust glow rising from its top-left corner.
+/// A card: [`glass`] with a deeper shadow and a faint sheen at its top.
 pub fn card(c: &mut Canvas, blur: &Canvas, r: Rect, rad: i32, tint: u32) {
-    c.shadow(r, rad, 18, 90);
+    c.shadow(r, rad, 18, 80);
     c.blit_round(blur, r, rad, tint);
     let reach = (r.w.max(r.h) * 3 / 5).clamp(120, 520);
-    c.glow_round(r, rad, r.x + r.w / 6, r.y + r.h / 10, reach, GLOW, 120);
+    c.glow_round(r, rad, r.x + r.w / 3, r.y, reach, 0xFFFF_FFFF, 18);
     c.stroke_round(r, rad, 1, BORDER);
+}
+
+/// Light frosted glass (the bar, window frames, widgets): the blurred
+/// wallpaper lightened, with a bright edge.
+pub fn light_glass(c: &mut Canvas, blur: &Canvas, r: Rect, rad: i32, shadow: bool) {
+    if shadow {
+        c.shadow(r, rad, 16, 55);
+    }
+    c.blit_round(blur, r, rad, GLASS_LIGHT);
+    c.stroke_round(r, rad, 1, 0x4DFF_FFFF);
+}
+
+/// Does text on the blurred wallpaper inside `r` read better dark? (The
+/// glass is light over a bright sky and dark over the woods.)
+pub fn wants_ink(blur: &Canvas, r: Rect) -> bool {
+    let mut sum = 0u64;
+    let mut n = 0u64;
+    let step_x = (r.w / 12).max(1);
+    let step_y = (r.h / 4).max(1);
+    let mut y = r.y + step_y / 2;
+    while y < r.bottom() {
+        let mut x = r.x + step_x / 2;
+        while x < r.right() {
+            let p = blur.get(x, y);
+            let (rr, gg, bb) = ((p >> 16) & 0xFF, (p >> 8) & 0xFF, p & 0xFF);
+            sum += (rr * 299 + gg * 587 + bb * 114) as u64 / 1000;
+            n += 1;
+            x += step_x;
+        }
+        y += step_y;
+    }
+    // The light tint adds about a quarter of white.
+    n == 0 || (sum / n) * 3 / 4 + 0x40 > 128
+}
+
+/// A glyph icon (white in the atlas) drawn in another colour.
+pub fn glyph(c: &mut Canvas, name: &str, size: i32, x: i32, y: i32, color: u32) {
+    super::res::draw_icon_tinted(c, name, size, x, y, color);
+}
+
+/// Simple status glyphs drawn with lines: the arc hexagon, the moon of "do
+/// not disturb" and the sun of brightness, `s` pixels square.
+pub fn draw_hexagon(c: &mut Canvas, x: i32, y: i32, s: i32, color: u32) {
+    let (cx, cy, r) = (x + s / 2, y + s / 2, s * 9 / 20);
+    // Pointy top; 0.866 ~ 13/15.
+    let dx = r * 13 / 15;
+    let pts = [(cx, cy - r), (cx + dx, cy - r / 2), (cx + dx, cy + r / 2), (cx, cy + r), (cx - dx, cy + r / 2), (cx - dx, cy - r / 2)];
+    for i in 0..6 {
+        let (a, b) = (pts[i], pts[(i + 1) % 6]);
+        c.line(a.0, a.1, b.0, b.1, 2, color);
+    }
+}
+
+pub fn draw_moon(c: &mut Canvas, x: i32, y: i32, s: i32, color: u32, bg: u32) {
+    let (cx, cy, r) = (x + s / 2, y + s / 2, s * 2 / 5);
+    c.fill_circle(cx, cy, r, color);
+    c.fill_circle(cx, cy, r - 2, bg);
+    c.fill_circle(cx + r * 2 / 3, cy - r / 2, r * 4 / 5, bg);
+}
+
+pub fn draw_sun(c: &mut Canvas, x: i32, y: i32, s: i32, color: u32) {
+    let (cx, cy) = (x + s / 2, y + s / 2);
+    let r = s / 5;
+    c.fill_circle(cx, cy, r, color);
+    let (a, b) = (s * 3 / 10, s * 9 / 20);
+    // Eight rays: the diagonals at 0.707 ~ 7/10.
+    for (ux, uy) in [(10, 0), (-10, 0), (0, 10), (0, -10), (7, 7), (-7, 7), (7, -7), (-7, -7)] {
+        c.line(cx + a * ux / 10, cy + a * uy / 10, cx + b * ux / 10, cy + b * uy / 10, 2, color);
+    }
+}
+
+/// Three round dark buttons on a light pill: minimise, maximise, close
+/// (`hover`: the one under the pointer). `r` is the pill.
+pub fn window_knobs(c: &mut Canvas, r: Rect, buttons: &[Rect; 3], hover: Option<usize>) {
+    c.fill_round(r, r.h / 2, 0x33FF_FFFF);
+    for (i, (b, glyph_name)) in buttons.iter().zip(["g-down", "g-max", "g-close"]).enumerate() {
+        let bg = match (i, hover == Some(i)) {
+            (2, true) => RED,
+            (_, true) => 0xFF5A_5860,
+            _ => KNOB,
+        };
+        c.fill_circle(b.x + b.w / 2, b.y + b.h / 2, b.w / 2, bg);
+        let g = b.w * 6 / 11;
+        super::res::draw_icon(c, glyph_name, g, b.x + (b.w - g) / 2, b.y + (b.h - g) / 2);
+    }
 }
 
 /// The area a panel's shadow reaches.
@@ -75,9 +169,9 @@ pub fn button(c: &mut Canvas, r: Rect, label: &str, primary: bool, hover: bool) 
         c.shadow(r, r.h / 2, 8, if hover { 70 } else { 45 });
         c.fill_round(r, r.h / 2, if hover { 0xFFFF_FFFF } else { 0xF5FF_FFFF });
     } else {
-        // The outlined pill of ticly's secondary actions.
-        c.fill_round(r, r.h / 2, if hover { 0x1FFF_FFFF } else { 0x0AFF_FFFF });
-        c.stroke_round(r, r.h / 2, 1, if hover { 0x4DFF_FFFF } else { 0x2EFF_FFFF });
+        // The translucent grey pill of the arc design.
+        c.fill_round(r, r.h / 2, if hover { 0x40FF_FFFF } else { 0x29FF_FFFF });
+        c.stroke_round(r, r.h / 2, 1, 0x1FFF_FFFF);
     }
     let fg = if primary { 0xFF0E_0B0C } else { TEXT };
     let (lh, _) = text::metrics(Font::Strong);
