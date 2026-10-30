@@ -156,8 +156,9 @@ fn futex_wait(addr: u64, val: u32, deadline: Option<u64>, bitset: u32) -> i64 {
     let cr3 = cpu::read_cr3();
     let me = task::current_tid();
     {
-        // Compare and queue with interrupts off: no other thread can run in
-        // between on this single CPU, so no wake-up is lost.
+        // Compare and queue with interrupts off: the threads of programs all
+        // run on the first processor, so none runs in between and no
+        // wake-up is lost.
         let mut w = WAITERS.lock();
         let cur = match user_bytes(addr, 4) {
             Ok(b) => u32::from_le_bytes(b[..4].try_into().unwrap()),

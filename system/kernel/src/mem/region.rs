@@ -73,10 +73,12 @@ pub fn alloc_pages(region: &IrqLock<Region>, pages: u64, guard: u64) -> Option<u
 
 /// Undoes [`alloc_pages`]: unmaps the pages and frees their frames.
 pub fn free_pages(region: &IrqLock<Region>, virt: u64, pages: u64, guard: u64) {
-    for i in 0..pages {
-        if let Some(phys) = paging::unmap(virt + i * PAGE_SIZE) {
-            frame::free(phys);
-        }
+    let frames: Vec<u64> = (0..pages).filter_map(|i| paging::unmap(virt + i * PAGE_SIZE)).collect();
+    // No processor may still reach the frames through its TLB once they
+    // are reused.
+    crate::arch::smp::shootdown();
+    for phys in frames {
+        frame::free(phys);
     }
     region.lock().give_back(virt - guard * PAGE_SIZE, pages + guard);
 }

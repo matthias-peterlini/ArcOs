@@ -80,7 +80,10 @@ impl App for About {
                 text::draw(c, Font::Title, x, area.y + 76, "arcOS", TEXT);
                 text::draw(c, Font::Body, x, area.y + 116, &format!("Versione {}", crate::VERSION), TEXT_DIM);
                 let mut brand = [0u8; 48];
-                let cpu = crate::arch::cpu::brand(&mut brand).trim().to_string();
+                let cpu = match crate::arch::smp::count() {
+                    1 => crate::arch::cpu::brand(&mut brand).trim().to_string(),
+                    n => format!("{} · {n} core", crate::arch::cpu::brand(&mut brand).trim()),
+                };
                 let (free, total) = crate::mem::frame::stats();
                 let up = crate::time::uptime_ms() / 1000;
                 let (sw, sh) = crate::console::pixel_size().unwrap_or((0, 0));

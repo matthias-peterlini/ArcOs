@@ -1,10 +1,17 @@
 //! Threads and the scheduler.
 //!
-//! Preemptive round robin on a single CPU: the timer gives every thread a
-//! 10 ms slice. Threads sleep with [`sleep_ms`], wait for events with
-//! [`WaitQueue`], and end with [`exit`] (or by returning). A thread's stack
-//! is freed by the next thread that runs, never by the thread itself.
+//! Preemptive round robin over every processor: one queue of ready threads
+//! that each processor takes from, and a 10 ms slice per thread. Threads
+//! sleep with [`sleep_ms`], wait for events with [`WaitQueue`], and end with
+//! [`exit`] (or by returning). Each processor has an idle thread of its own.
+//!
+//! A thread switched away from is handed to the next thread on the same
+//! processor ([`after_switch`]): only once its registers are saved can it be
+//! queued again, run elsewhere or, when it has ended, have its stack freed.
+//! Threads of user programs stay on the first processor, so their address
+//! spaces are never live anywhere else.
 
+use crate::arch::smp::{self, MAX_CPUS};
 use crate::arch::{cpu, gdt, syscall};
 use crate::mem::{self, region};
 use crate::sync::IrqLock;
@@ -89,37 +96,96 @@ struct Thread {
     gs_base: u64,
     /// x87/SSE registers, while the thread is not running.
     fpu: Box<FpuArea>,
+    /// Running on a processor, or not yet handed over after it stopped:
+    /// its registers are not saved yet.
+    on_cpu: bool,
 }
 
 impl Thread {
+    fn new(tid: Tid, name: &str, state: State) -> Thread {
+        Thread {
+            tid,
+            name: String::from(name),
+            state,
+            rsp: 0,
+            stack: 0,
+            stack_pages: 0,
+            wake_at: 0,
+            cpu_ticks: 0,
+            cr3: 0,
+            pid: 0,
+            fs_base: 0,
+            gs_base: 0,
+            fpu: FpuArea::new(),
+            on_cpu: false,
+        }
+    }
+
     fn stack_top(&self) -> u64 {
         self.stack + self.stack_pages * mem::PAGE_SIZE
     }
+
+    /// Threads of user programs run on the first processor only.
+    fn pinned(&self) -> bool {
+        self.pid != 0 || self.cr3 != 0
+    }
+}
+
+/// What the scheduler keeps for each processor.
+#[derive(Clone, Copy)]
+struct Cpu {
+    current: Tid,
+    idle: Tid,
+    slice: u32,
+    /// The thread just switched away from, and whether it goes back in the
+    /// ready queue (see [`after_switch`]).
+    prev: Option<(Tid, bool)>,
 }
 
 struct Sched {
+    // Boxed: a thread's saved stack pointer must stay put while its
+    // context is being saved into it.
     threads: BTreeMap<Tid, Box<Thread>>,
     ready: VecDeque<Tid>,
     sleepers: Vec<Tid>,
-    current: Tid,
-    idle: Tid,
+    cpus: [Cpu; MAX_CPUS],
     next_tid: Tid,
-    // Boxed: a thread can die while its context is being saved into it.
-    #[allow(clippy::vec_box)]
-    zombies: Vec<Box<Thread>>,
-    slice: u32,
     started: bool,
+}
+
+impl Sched {
+    /// The thread running on this processor (with the lock held, so the
+    /// caller cannot move to another processor).
+    fn current(&self) -> Tid {
+        self.cpus[smp::this_cpu()].current
+    }
+
+    fn runnable_on(&self, tid: Tid, cpu: usize) -> bool {
+        self.threads.get(&tid).is_some_and(|t| t.state == State::Ready && !t.on_cpu && (cpu == 0 || !t.pinned()))
+    }
+
+    /// Takes the next thread `cpu` may run from the ready queue. Threads it
+    /// may not run (yet) stay queued.
+    fn pick(&mut self, cpu: usize) -> Option<Tid> {
+        for _ in 0..self.ready.len() {
+            let tid = self.ready.pop_front()?;
+            if self.runnable_on(tid, cpu) {
+                return Some(tid);
+            }
+            if self.threads.get(&tid).is_some_and(|t| t.state == State::Ready) {
+                self.ready.push_back(tid);
+            }
+        }
+        None
+    }
 }
 
 static SCHED: IrqLock<Sched> = IrqLock::new(Sched {
     threads: BTreeMap::new(),
     ready: VecDeque::new(),
     sleepers: Vec::new(),
-    current: 0,
-    idle: 0,
+    cpus: [Cpu { current: 0, idle: 0, slice: SLICE_TICKS, prev: None }; MAX_CPUS],
     next_tid: 1,
-    zombies: Vec::new(),
-    slice: SLICE_TICKS,
     started: false,
 });
 
@@ -173,31 +239,28 @@ pub fn init() {
     let mut s = SCHED.lock();
     let tid = s.next_tid;
     s.next_tid += 1;
-    s.threads.insert(
-        tid,
-        Box::new(Thread {
-            tid,
-            name: String::from("init"),
-            state: State::Running,
-            rsp: 0,
-            stack: 0,
-            stack_pages: 0,
-            wake_at: 0,
-            cpu_ticks: 0,
-            cr3: 0,
-            pid: 0,
-            fs_base: 0,
-            gs_base: 0,
-            fpu: FpuArea::new(),
-        }),
-    );
-    s.current = tid;
+    let mut init = Thread::new(tid, "init", State::Running);
+    init.on_cpu = true;
+    s.threads.insert(tid, Box::new(init));
+    s.cpus[0].current = tid;
     drop(s);
     let idle = spawn_raw("idle", idle_main, core::ptr::null_mut()).expect("cannot create the idle thread");
     let mut s = SCHED.lock();
     s.ready.retain(|&t| t != idle);
-    s.idle = idle;
+    s.cpus[0].idle = idle;
     s.started = true;
+}
+
+/// Turns the code running on a processor that just started (on `stack`)
+/// into that processor's idle thread.
+pub fn start_cpu(cpu: usize, stack: u64, pages: u64) {
+    let mut s = SCHED.lock();
+    let tid = s.next_tid;
+    s.next_tid += 1;
+    let mut idle = Thread::new(tid, "idle", State::Running);
+    (idle.stack, idle.stack_pages, idle.on_cpu) = (stack, pages, true);
+    s.threads.insert(tid, Box::new(idle));
+    s.cpus[cpu] = Cpu { current: tid, idle: tid, slice: SLICE_TICKS, prev: None };
 }
 
 unsafe extern "C" fn idle_main(_: *mut c_void) {
@@ -235,27 +298,10 @@ fn spawn_sized(name: &str, entry: Entry, arg: *mut c_void, cr3: u64, pid: u32, s
     let mut s = SCHED.lock();
     let tid = s.next_tid;
     s.next_tid += 1;
-    s.threads.insert(
-        tid,
-        Box::new(Thread {
-            tid,
-            name: String::from(name),
-            state: State::Ready,
-            rsp,
-            stack,
-            stack_pages: pages,
-            wake_at: 0,
-            cpu_ticks: 0,
-            cr3,
-            pid,
-            fs_base: 0,
-            gs_base: 0,
-            fpu: FpuArea::new(),
-        }),
-    );
-    if suspended {
-        s.threads.get_mut(&tid).unwrap().state = State::Blocked;
-    } else {
+    let mut t = Thread::new(tid, name, if suspended { State::Blocked } else { State::Ready });
+    (t.rsp, t.stack, t.stack_pages, t.cr3, t.pid) = (rsp, stack, pages, cr3, pid);
+    s.threads.insert(tid, Box::new(t));
+    if !suspended {
         s.ready.push_back(tid);
     }
     Some(tid)
@@ -284,12 +330,28 @@ pub fn spawn_big<F: FnOnce() + Send + 'static>(name: &str, bytes: u64, f: F) -> 
     tid
 }
 
-/// Frees the stacks of threads that have ended (never the running one).
+/// Runs on the thread switched to: hands over the thread switched away
+/// from, whose registers are now saved. It is queued again if it was
+/// preempted, or freed if it has ended.
 fn after_switch() {
-    let zombies = core::mem::take(&mut SCHED.lock().zombies);
-    for z in zombies {
-        if z.stack != 0 {
-            region::free_pages(&region::STACKS, z.stack, z.stack_pages, 1);
+    let dead = {
+        let mut s = SCHED.lock();
+        let me = smp::this_cpu();
+        let Some((prev, requeue)) = s.cpus[me].prev.take() else { return };
+        let Some(t) = s.threads.get_mut(&prev) else { return };
+        t.on_cpu = false;
+        match t.state {
+            State::Dead => s.threads.remove(&prev),
+            State::Ready if requeue => {
+                s.ready.push_back(prev);
+                None
+            }
+            _ => None,
+        }
+    };
+    if let Some(t) = dead {
+        if t.stack != 0 {
+            region::free_pages(&region::STACKS, t.stack, t.stack_pages, 1);
         }
     }
 }
@@ -299,38 +361,38 @@ fn schedule() {
     let irq = cpu::irq_save();
     let switch = {
         let mut s = SCHED.lock();
+        let me = smp::this_cpu();
+        let (cur, idle) = (s.cpus[me].current, s.cpus[me].idle);
+        let state = s.threads.get(&cur).map(|t| t.state);
         if !s.started {
             None
+        } else if state == Some(State::Ready) && cur != idle {
+            // Woken (by another processor) before it got to stop.
+            s.threads.get_mut(&cur).unwrap().state = State::Running;
+            None
         } else {
-            let cur = s.current;
-            let idle = s.idle;
-            let state = s.threads.get(&cur).map(|t| t.state);
+            let requeue = state == Some(State::Running) && cur != idle;
             if state == Some(State::Running) {
                 s.threads.get_mut(&cur).unwrap().state = State::Ready;
-                if cur != idle {
-                    s.ready.push_back(cur);
-                }
             }
-            let next = loop {
-                match s.ready.pop_front() {
-                    Some(t) if s.threads.get(&t).is_some_and(|t| t.state == State::Ready) => break t,
-                    Some(_) => continue,
-                    None => break idle,
-                }
+            let next = match s.pick(me) {
+                Some(t) => t,
+                None if requeue => cur,
+                None => idle,
             };
-            s.slice = SLICE_TICKS;
+            s.cpus[me].slice = SLICE_TICKS;
             let n = s.threads.get_mut(&next).unwrap();
             n.state = State::Running;
+            n.on_cpu = true;
             if next == cur {
                 None
             } else {
                 let (new_rsp, top, cr3, fs, gs, has_stack) = (n.rsp, n.stack_top(), n.cr3, n.fs_base, n.gs_base, n.stack != 0);
                 let new_fpu: *const FpuArea = &*n.fpu;
-                if let Some(c) = s.threads.get_mut(&cur) {
-                    (c.fs_base, c.gs_base) = syscall::user_bases();
-                    // SAFETY: the area is this thread's own aligned buffer.
-                    unsafe { fxsave(&mut *c.fpu) };
-                }
+                let c = s.threads.get_mut(&cur).unwrap();
+                (c.fs_base, c.gs_base) = syscall::user_bases();
+                // SAFETY: the area is this thread's own aligned buffer.
+                unsafe { fxsave(&mut *c.fpu) };
                 // SAFETY: new_fpu is the next thread's aligned buffer; the
                 // kernel is soft-float, so nothing touches SSE before the
                 // switch completes and the new thread resumes.
@@ -344,21 +406,17 @@ fn schedule() {
                     // SAFETY: every address space maps the kernel half.
                     unsafe { cpu::write_cr3(target) };
                 }
-                s.current = next;
-                let old_ptr: *mut u64 = if state == Some(State::Dead) {
-                    let z = s.threads.remove(&cur).unwrap();
-                    s.zombies.push(z);
-                    &mut s.zombies.last_mut().unwrap().rsp
-                } else {
-                    &mut s.threads.get_mut(&cur).unwrap().rsp
-                };
+                s.cpus[me].current = next;
+                s.cpus[me].prev = Some((cur, requeue));
+                let old_ptr: *mut u64 = &mut s.threads.get_mut(&cur).unwrap().rsp;
                 Some((old_ptr, new_rsp))
             }
         }
     };
     if let Some((old, new)) = switch {
-        // SAFETY: interrupts are off; both stacks are valid and the old
-        // thread's Box stays in place until after_switch frees it.
+        // SAFETY: interrupts are off; both stacks are valid. The old thread
+        // is marked on_cpu, so nothing else runs, moves or frees it until
+        // after_switch hands it over.
         unsafe { context_switch(old, new) };
         after_switch();
     }
@@ -378,7 +436,7 @@ pub fn exit() -> ! {
     cpu::disable_irq();
     {
         let mut s = SCHED.lock();
-        let cur = s.current;
+        let cur = s.current();
         if let Some(t) = s.threads.get_mut(&cur) {
             t.state = State::Dead;
         }
@@ -404,7 +462,7 @@ pub fn sleep_ms(ms: u64) {
             }
             return;
         }
-        let cur = s.current;
+        let cur = s.current();
         let t = s.threads.get_mut(&cur).unwrap();
         t.state = State::Sleeping;
         t.wake_at = crate::time::uptime_ms() + ms;
@@ -414,21 +472,33 @@ pub fn sleep_ms(ms: u64) {
     cpu::irq_restore(irq);
 }
 
-/// Called by the timer interrupt.
+/// Called by the system timer interrupt (on the first processor).
 pub fn timer_tick() {
     crate::time::tick();
+    tick(true);
+}
+
+/// Called by the timer interrupt of the other processors.
+pub fn ap_tick() {
+    tick(false);
+}
+
+/// Charges the tick to the running thread, wakes sleepers that are due
+/// (once, on the first processor) and preempts at the end of the slice.
+fn tick(wake_sleepers: bool) {
     let preempt = {
         let mut s = SCHED.lock();
         if !s.started {
             return;
         }
         let now = crate::time::uptime_ms();
-        let cur = s.current;
+        let me = smp::this_cpu();
+        let cur = s.cpus[me].current;
         if let Some(t) = s.threads.get_mut(&cur) {
             t.cpu_ticks += 1;
         }
         let mut i = 0;
-        while i < s.sleepers.len() {
+        while wake_sleepers && i < s.sleepers.len() {
             let tid = s.sleepers[i];
             let due = match s.threads.get(&tid) {
                 Some(t) if t.state == State::Sleeping => t.wake_at <= now,
@@ -445,8 +515,9 @@ pub fn timer_tick() {
                 i += 1;
             }
         }
-        s.slice = s.slice.saturating_sub(1);
-        (s.slice == 0 || cur == s.idle) && !s.ready.is_empty()
+        let c = &mut s.cpus[me];
+        c.slice = c.slice.saturating_sub(1);
+        (c.slice == 0 || cur == c.idle) && s.ready.iter().any(|&t| s.runnable_on(t, me))
     };
     if preempt {
         schedule();
@@ -457,7 +528,7 @@ pub fn timer_tick() {
 /// process is going away).
 pub fn leave_address_space() {
     let mut s = SCHED.lock();
-    let cur = s.current;
+    let cur = s.current();
     if let Some(t) = s.threads.get_mut(&cur) {
         t.cr3 = 0;
     }
@@ -467,7 +538,7 @@ pub fn leave_address_space() {
 
 /// The running thread.
 pub fn current_tid() -> Tid {
-    SCHED.lock().current
+    SCHED.lock().current()
 }
 
 /// Lets a thread made with [`spawn_suspended`] run.
@@ -477,13 +548,13 @@ pub fn wake_new(tid: Tid) {
 
 pub fn current_pid() -> u32 {
     let s = SCHED.lock();
-    s.threads.get(&s.current).map(|t| t.pid).unwrap_or(0)
+    s.threads.get(&s.current()).map(|t| t.pid).unwrap_or(0)
 }
 
 /// Name of the running thread, without allocating (panic path).
 pub fn current_name_lossy() -> &'static str {
     match SCHED.try_lock() {
-        Some(s) => match s.threads.get(&s.current) {
+        Some(s) => match s.threads.get(&s.current()) {
             // SAFETY: thread names live until the thread is reaped; this is
             // only used to print a message right away.
             Some(t) => unsafe { &*(t.name.as_str() as *const str) },
@@ -493,17 +564,30 @@ pub fn current_name_lossy() -> &'static str {
     }
 }
 
-/// Marks the running thread as waiting; returns its id. The caller must
-/// have interrupts disabled and call [`schedule_blocked`] next.
-fn block_current() -> Tid {
+/// Marks the running thread as waiting (until `wake_at`, if given);
+/// returns its id. The caller must have interrupts disabled and call
+/// [`schedule`] or [`unblock_current`] next.
+fn block_current(wake_at: Option<u64>) -> Tid {
     let mut s = SCHED.lock();
-    let cur = s.current;
-    s.threads.get_mut(&cur).unwrap().state = State::Blocked;
+    let cur = s.current();
+    let t = s.threads.get_mut(&cur).unwrap();
+    match wake_at {
+        Some(at) => {
+            t.state = State::Sleeping;
+            t.wake_at = at;
+            s.sleepers.push(cur);
+        }
+        None => t.state = State::Blocked,
+    }
     cur
 }
 
-fn schedule_blocked() {
-    schedule();
+/// Undoes [`block_current`]: what the thread waited for happened already.
+/// A queue entry a waker may have added meanwhile is skipped later.
+fn unblock_current() {
+    let mut s = SCHED.lock();
+    let cur = s.current();
+    s.threads.get_mut(&cur).unwrap().state = State::Running;
 }
 
 /// Makes a waiting thread ready again.
@@ -549,10 +633,26 @@ impl WaitQueue {
                 cpu::disable_irq();
                 continue;
             }
-            let me = block_current();
-            self.waiters.lock().push_back(me);
-            schedule_blocked();
+            if let Some(v) = self.block(None, &mut ready) {
+                cpu::irq_restore(irq);
+                return v;
+            }
         }
+    }
+
+    /// Waits on the queue, unless `ready` holds once the thread is in it:
+    /// another processor may have changed the condition and notified the
+    /// queue just before.
+    fn block<T>(&self, wake_at: Option<u64>, ready: &mut impl FnMut() -> Option<T>) -> Option<T> {
+        let me = block_current(wake_at);
+        self.waiters.lock().push_back(me);
+        if let Some(v) = ready() {
+            unblock_current();
+            self.waiters.lock().retain(|&t| t != me);
+            return Some(v);
+        }
+        schedule();
+        None
     }
 
     /// Like [`wait_for`](Self::wait_for), giving up after `ms` milliseconds.
@@ -568,25 +668,19 @@ impl WaitQueue {
                 cpu::irq_restore(irq);
                 return None;
             }
-            let me = {
-                let mut s = SCHED.lock();
-                if !s.started {
-                    drop(s);
-                    cpu::enable_and_halt();
-                    cpu::disable_irq();
-                    continue;
-                }
-                // Asleep until the deadline, unless notified first.
-                let cur = s.current;
-                let t = s.threads.get_mut(&cur).unwrap();
-                t.state = State::Sleeping;
-                t.wake_at = until;
-                s.sleepers.push(cur);
-                cur
-            };
-            self.waiters.lock().push_back(me);
-            schedule();
+            let started = SCHED.lock().started;
+            if !started {
+                cpu::enable_and_halt();
+                cpu::disable_irq();
+                continue;
+            }
+            // Asleep until the deadline, unless notified first.
+            if let Some(v) = self.block(Some(until), &mut ready) {
+                cpu::irq_restore(irq);
+                return Some(v);
+            }
             // Woken by the timer: do not leave a stale entry behind.
+            let me = current_tid();
             self.waiters.lock().retain(|&t| t != me);
         }
     }

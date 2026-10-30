@@ -130,6 +130,30 @@ pub fn init(rsdp_hint: u64) {
     crate::debug!("acpi", "revision {revision}, tables: {}", names.join(" "));
 }
 
+/// The local APIC ids of the processors that can be started, from the MADT
+/// ("APIC" table): enabled or online-capable local APIC entries (type 0)
+/// and x2APIC entries (type 9) with an id the xAPIC can address.
+pub fn processors() -> Vec<u32> {
+    let phys = ACPI.lock().tables.iter().find(|(s, _)| s == b"APIC").map(|&(_, p)| p);
+    let Some(t) = phys.and_then(table) else { return Vec::new() };
+    let mut ids = Vec::new();
+    let mut at = 44;
+    while at + 2 <= t.len() {
+        let (kind, len) = (t[at], t[at + 1] as usize);
+        if len < 2 || at + len > t.len() {
+            break;
+        }
+        match kind {
+            0 if len >= 8 && le32(t, at + 4) & 3 != 0 => ids.push(t[at + 3] as u32),
+            9 if len >= 16 && le32(t, at + 8) & 3 != 0 && le32(t, at + 4) < 255 => ids.push(le32(t, at + 4)),
+            _ => {}
+        }
+        at += len;
+    }
+    ids.dedup();
+    ids
+}
+
 /// Signatures of the ACPI tables, with the OEM id.
 pub fn summary() -> (String, Vec<String>) {
     let a = ACPI.lock();

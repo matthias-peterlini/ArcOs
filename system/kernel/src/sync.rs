@@ -1,7 +1,8 @@
 //! Locks.
 //!
-//! * [`IrqLock`] masks interrupts while held: for state shared with interrupt
-//!   handlers and for short critical sections. Never block while holding it.
+//! * [`IrqLock`] masks interrupts while held and spins while another
+//!   processor holds it: for state shared with interrupt handlers and for
+//!   short critical sections. Never block while holding it.
 //! * [`Mutex`] leaves interrupts on and yields to other threads while it is
 //!   contended: for long operations such as disk and file system access.
 //!   Never take it from an interrupt handler.
@@ -35,6 +36,9 @@ impl<T: ?Sized> IrqLock<T> {
     pub fn lock(&self) -> IrqGuard<'_, T> {
         let irq = cpu::irq_save();
         while self.locked.compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed).is_err() {
+            // The holder may be another processor waiting for this one to
+            // flush its TLB.
+            crate::arch::smp::service();
             core::hint::spin_loop();
         }
         IrqGuard { lock: self, irq }

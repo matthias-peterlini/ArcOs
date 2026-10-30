@@ -165,6 +165,11 @@ pub fn init() {
         let ist = if v == 8 { gdt::IST_DOUBLE_FAULT } else { 0 };
         set_gate(v as u8, base + v * 16, ist, v == VEC_SYSCALL as u64);
     }
+    load();
+}
+
+/// Makes the processor running this code use the (shared) table.
+pub fn load() {
     let ptr = Pointer { limit: (256 * 16 - 1) as u16, base: IDT.0.get() as u64 };
     // SAFETY: the IDT is static and fully initialised.
     unsafe { core::arch::asm!("lidt [{}]", in(reg) &ptr, options(nostack)) };
@@ -226,6 +231,14 @@ extern "C" fn trap_dispatch(frame: &mut TrapFrame) {
         v if v as u64 == super::syscall::VEC_LINUX => crate::linux::syscall(frame),
         crate::dev::irq::MSI_FIRST..=crate::dev::irq::MSI_LAST => {
             crate::dev::irq::dispatch_msi(vector);
+            super::apic::eoi();
+        }
+        super::smp::VEC_TIMER => {
+            super::apic::eoi();
+            crate::task::ap_tick();
+        }
+        super::smp::VEC_TLB => {
+            super::smp::service();
             super::apic::eoi();
         }
         _ => {}

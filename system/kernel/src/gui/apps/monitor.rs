@@ -47,7 +47,8 @@ impl Monitor {
 
     fn sample(&mut self) {
         let now = time::uptime_ms();
-        let span = now.saturating_sub(self.last_at).max(1);
+        // Processor time available: the interval on every processor.
+        let span = now.saturating_sub(self.last_at).max(1) * crate::arch::smp::count() as u64;
         let threads = crate::task::list();
         let mut busy = 0u64;
         // Group the threads: one row per program, one for the system.

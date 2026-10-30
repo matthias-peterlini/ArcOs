@@ -88,6 +88,7 @@ extern "C" fn kmain(boot_phys: u64) -> ! {
 
     cpu::enable_sse();
     gdt::init();
+    arch::smp::init_bsp();
     idt::init();
     arch::syscall::init();
     pic::init();
@@ -108,6 +109,7 @@ extern "C" fn kmain(boot_phys: u64) -> ! {
     let (free, usable) = mem::frame::stats();
     info!("kernel", "{} of memory, {} free", util::Size(usable), util::Size(free));
     acpi::init(boot.rsdp);
+    arch::smp::start();
     gui::boot_progress(18);
 
     fs::mount_boot_pack(boot.pack_phys, boot.pack_size);

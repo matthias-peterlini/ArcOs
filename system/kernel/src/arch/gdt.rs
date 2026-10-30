@@ -5,6 +5,7 @@
 //! `0x28` TSS.
 
 use core::arch::asm;
+use super::smp::MAX_CPUS;
 use core::cell::UnsafeCell;
 
 pub const KERNEL_CODE: u16 = 0x08;
@@ -32,17 +33,20 @@ struct Tables {
     tss: Tss,
 }
 
+/// One processor's tables (each has its own TSS, so its own GDT).
 struct Global(UnsafeCell<Tables>);
-// SAFETY: written during single-threaded init and by the scheduler with
-// interrupts disabled.
+// SAFETY: each processor only touches its own entry: once while it starts
+// and then from its scheduler with interrupts disabled.
 unsafe impl Sync for Global {}
 
-static TABLES: Global = Global(UnsafeCell::new(Tables {
+const EMPTY: Global = Global(UnsafeCell::new(Tables {
     gdt: [0; 7],
     tss: Tss { _reserved0: 0, rsp: [0; 3], _reserved1: 0, ist: [0; 7], _reserved2: 0, _reserved3: 0, iomap_base: 104 },
 }));
 
-static mut DOUBLE_FAULT_STACK: Stack = Stack([0; 16384]);
+static TABLES: [Global; MAX_CPUS] = [EMPTY; MAX_CPUS];
+
+static mut DOUBLE_FAULT_STACKS: [Stack; MAX_CPUS] = [const { Stack([0; 16384]) }; MAX_CPUS];
 
 /// Interrupt stack table slot used by the double-fault handler.
 pub const IST_DOUBLE_FAULT: u8 = 1;
@@ -53,15 +57,23 @@ struct Pointer {
     base: u64,
 }
 
+/// The first processor's tables.
 pub fn init() {
-    // SAFETY: single-threaded early boot.
-    let t = unsafe { &mut *TABLES.0.get() };
+    init_cpu(0);
+}
+
+/// Loads processor `cpu`'s tables on the processor running this code. It
+/// clears the GS base.
+pub fn init_cpu(cpu: usize) {
+    // SAFETY: only this processor uses its entry, and it is starting.
+    let t = unsafe { &mut *TABLES[cpu].0.get() };
     t.gdt[1] = 0x00AF_9A00_0000_FFFF; // kernel code: present, ring 0, 64-bit
     t.gdt[2] = 0x00CF_9200_0000_FFFF; // kernel data
     t.gdt[3] = 0x00CF_F200_0000_FFFF; // user data: ring 3
     t.gdt[4] = 0x00AF_FA00_0000_FFFF; // user code: ring 3, 64-bit
 
-    let stack_top = core::ptr::addr_of!(DOUBLE_FAULT_STACK) as u64 + 16384;
+    // SAFETY: only the address is taken.
+    let stack_top = unsafe { core::ptr::addr_of!(DOUBLE_FAULT_STACKS[cpu]) } as u64 + 16384;
     t.tss.ist[IST_DOUBLE_FAULT as usize - 1] = stack_top;
 
     let base = core::ptr::addr_of!(t.tss) as u64;
@@ -101,7 +113,8 @@ pub fn init() {
 
 /// Stack the CPU switches to when an interrupt arrives from user mode.
 pub fn set_kernel_stack(top: u64) {
-    // SAFETY: called with interrupts disabled; a plain store.
-    unsafe { (*TABLES.0.get()).tss.rsp[0] = top };
-    super::syscall::set_kernel_stack(top);
+    // SAFETY: called with interrupts disabled; a plain store to this
+    // processor's own TSS.
+    unsafe { (*TABLES[super::smp::this_cpu()].0.get()).tss.rsp[0] = top };
+    super::smp::set_kernel_rsp(top);
 }

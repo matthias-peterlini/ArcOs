@@ -134,12 +134,7 @@ pub fn unmap(virt: u64) -> Option<u64> {
 
 /// Creates the kernel's page tables and switches to them.
 pub fn init() {
-    // PAT entry 1 = write-combining (default: write-through).
-    let pat = cpu::rdmsr(0x277);
-    // SAFETY: only changes the memory type of PWT-only mappings, which the
-    // kernel does not use yet.
-    unsafe { cpu::wrmsr(0x277, (pat & !(0xFF << 8)) | (0x01 << 8)) };
-
+    init_pat();
     let pml4 = frame::alloc().expect("out of memory");
     for e in table(pml4)[256..].iter_mut() {
         *e = frame::alloc().expect("out of memory") | PRESENT | WRITE;
@@ -163,6 +158,16 @@ pub fn init() {
     KERNEL_PML4.store(pml4, Ordering::Relaxed);
     // SAFETY: the new tables map the kernel image, its stack and the direct map.
     unsafe { cpu::write_cr3(pml4) };
+}
+
+/// Sets up the memory types [`WRITE_COMBINE`] relies on, on the processor
+/// running this code (every processor needs the same).
+pub fn init_pat() {
+    // PAT entry 1 = write-combining (default: write-through).
+    let pat = cpu::rdmsr(0x277);
+    // SAFETY: only changes the memory type of PWT-only mappings, which the
+    // kernel does not use yet on this processor.
+    unsafe { cpu::wrmsr(0x277, (pat & !(0xFF << 8)) | (0x01 << 8)) };
 }
 
 /// A new address space sharing the kernel half.

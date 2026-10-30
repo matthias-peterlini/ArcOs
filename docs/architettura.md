@@ -115,8 +115,8 @@ La metà bassa appartiene al programma in esecuzione.
 
 | Parte | File | Cosa fa |
 |---|---|---|
-| CPU | `arch/` | GDT con TSS, IDT, PIC 8259 rimappato a 32–47, PIT a 1 kHz |
-| scheduler | `task.rs` | thread del kernel, round-robin preemptivo (10 ms), code di attesa, sleep |
+| CPU | `arch/` | GDT con TSS per processore, IDT, PIC 8259 rimappato a 32–47, PIT a 1 kHz, avvio degli altri processori (`smp.rs`) |
+| scheduler | `task.rs` | thread del kernel su tutti i processori, round-robin preemptivo (10 ms), code di attesa, sleep |
 | sincronizzazione | `sync.rs` | `IrqLock` (spinlock con interruzioni spente), `Mutex` (cede il processore mentre aspetta) |
 | console | `console/` | terminale con sequenze ANSI su framebuffer, VGA testo e porta seriale; giornale di sistema; con la grafica attiva è una griglia mostrata dalla finestra Terminale |
 | grafica | `gui/` | splash d'avvio, configurazione guidata, scrivania con animazioni, app di sistema, finestre dei programmi, schermata di errore ([gui.md](gui.md)); il disegno è nella libreria `arcgfx` |
@@ -156,6 +156,23 @@ abbiano enumerato i loro dispositivi prima di cercare `sys:`.
 Le interruzioni arrivano dalle 16 linee classiche del PIC 8259, condivise
 tra più dispositivi, o da MSI e MSI-X, che il kernel programma su un
 vettore libero per dispositivo e riceve tramite l'APIC locale.
+
+### Più processori
+
+Il firmware avvia solo il primo processore. Il kernel trova gli altri
+nella tabella ACPI MADT e li sveglia con INIT e SIPI: partono in modo
+reale a `0x8000`, dove un piccolo trampolino passa direttamente al modo a
+64 bit e salta nel kernel. Ognuno ha la sua GDT con TSS, il suo timer
+(l'APIC locale, a 1 kHz) e un thread di inattività; i suoi dati (la pila
+del kernel per `syscall`, il numero del processore) si trovano tramite la
+base di GS.
+
+La coda dei thread pronti è una sola, e ogni processore ci prende il
+prossimo thread. I thread dei programmi restano sul primo processore, così
+il loro spazio di indirizzi non è mai attivo altrove. Quando il kernel
+toglie una pagina della sua metà (la pila di un thread finito), chiede agli
+altri processori di svuotare il TLB con un'interruzione e aspetta che lo
+abbiano fatto prima di riusare la memoria.
 
 ### File system: ArcFS
 

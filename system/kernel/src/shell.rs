@@ -1232,7 +1232,7 @@ impl Shell {
     fn sysinfo(&self) {
         let mut brand = [0u8; 48];
         println!("{BOLD}arcOS{RESET} {}", crate::VERSION);
-        println!("  processor  {}", crate::arch::cpu::brand(&mut brand));
+        println!("  processor  {} ({} running)", crate::arch::cpu::brand(&mut brand), crate::arch::smp::count());
         let (_, usable) = mem::frame::stats();
         println!("  memory     {}", Size(usable));
         if let Some((w, h)) = crate::console::pixel_size() {

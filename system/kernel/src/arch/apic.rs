@@ -1,21 +1,31 @@
-//! The local APIC, used only to receive message-signalled interrupts (MSI):
-//! legacy device lines and the timer stay on the 8259 PIC.
+//! The local APIC: message-signalled interrupts (MSI), the other processors
+//! (start-up and inter-processor interrupts) and their timers. Legacy
+//! device lines and the first processor's timer stay on the 8259 PIC.
 
 use crate::mem::{paging, region};
 use crate::sync::IrqLock;
+use core::sync::atomic::{AtomicU64, Ordering};
 
 const MSR_APIC_BASE: u32 = 0x1B;
 const REG_ID: usize = 0x20;
 const REG_EOI: usize = 0xB0;
 const REG_SVR: usize = 0xF0;
+const REG_ICR_LOW: usize = 0x300;
+const REG_ICR_HIGH: usize = 0x310;
+const REG_TIMER: usize = 0x320;
 const REG_LINT0: usize = 0x350;
 const REG_LINT1: usize = 0x360;
+const REG_TIMER_INIT: usize = 0x380;
+const REG_TIMER_COUNT: usize = 0x390;
+const REG_TIMER_DIV: usize = 0x3E0;
 
 /// Vector the APIC uses for spurious interrupts (ignored, no EOI).
 pub const VEC_SPURIOUS: u8 = 0xFF;
 
 /// (virtual address of the registers, APIC id); 0 until enabled.
 static APIC: IrqLock<(u64, u32)> = IrqLock::new((0, 0));
+/// The register page, for the paths that must not take a lock (EOI, IPIs).
+static BASE: AtomicU64 = AtomicU64::new(0);
 
 fn read(base: u64, reg: usize) -> u32 {
     // SAFETY: inside the mapped register page.
@@ -54,13 +64,86 @@ pub fn enable() -> Option<u32> {
     write(base, REG_SVR, svr | 0x100 | VEC_SPURIOUS as u32);
     let id = read(base, REG_ID) >> 24;
     *a = (base, id);
+    BASE.store(base, Ordering::Release);
     Some(id)
+}
+
+/// Turns on the local APIC of another processor (the registers are at the
+/// same address on every processor) and returns its id. The PIC's line
+/// stays with the first processor: LINT0 is masked here.
+pub fn enable_here() -> u32 {
+    let base = BASE.load(Ordering::Acquire);
+    let msr = super::cpu::rdmsr(MSR_APIC_BASE);
+    if msr & (1 << 11) == 0 {
+        // SAFETY: turns on this processor's APIC at the shared base.
+        unsafe { super::cpu::wrmsr(MSR_APIC_BASE, msr | (1 << 11)) };
+    }
+    write(base, REG_LINT0, 1 << 16);
+    write(base, REG_LINT1, 0x400);
+    write(base, REG_SVR, read(base, REG_SVR) | 0x100 | VEC_SPURIOUS as u32);
+    read(base, REG_ID) >> 24
 }
 
 /// Ends an APIC interrupt.
 pub fn eoi() {
-    let base = APIC.lock().0;
+    let base = BASE.load(Ordering::Acquire);
     if base != 0 {
         write(base, REG_EOI, 0);
     }
+}
+
+fn send(dest: u32, low: u32) {
+    let base = BASE.load(Ordering::Acquire);
+    if base == 0 {
+        return;
+    }
+    // Wait until the previous interrupt has been delivered.
+    while read(base, REG_ICR_LOW) & (1 << 12) != 0 {
+        core::hint::spin_loop();
+    }
+    write(base, REG_ICR_HIGH, dest << 24);
+    write(base, REG_ICR_LOW, low);
+}
+
+/// INIT to a processor: it resets and waits for a start-up IPI.
+pub fn send_init(dest: u32) {
+    send(dest, 0x0000_4500); // INIT, level assert
+}
+
+/// Start-up IPI: the processor begins in real mode at `page * 4096`.
+pub fn send_startup(dest: u32, page: u8) {
+    send(dest, 0x0000_4600 | page as u32);
+}
+
+/// An interrupt with `vector` to every processor but this one.
+pub fn send_others(vector: u8) {
+    send(0, (0b11 << 18) | (1 << 14) | vector as u32);
+}
+
+/// Timer ticks per millisecond, measured against the system tick (with
+/// the divider set to 16). Called on the first processor with interrupts
+/// on.
+pub fn timer_calibrate() -> u32 {
+    let base = BASE.load(Ordering::Acquire);
+    write(base, REG_TIMER_DIV, 0x3);
+    write(base, REG_TIMER, 1 << 16); // masked, one shot
+    let start = crate::time::uptime_ms() + 1;
+    while crate::time::uptime_ms() < start {
+        core::hint::spin_loop();
+    }
+    write(base, REG_TIMER_INIT, u32::MAX);
+    while crate::time::uptime_ms() < start + 20 {
+        core::hint::spin_loop();
+    }
+    let used = u32::MAX - read(base, REG_TIMER_COUNT);
+    write(base, REG_TIMER_INIT, 0);
+    (used / 20).max(1)
+}
+
+/// Starts this processor's timer: `vector` every millisecond.
+pub fn timer_start(vector: u8, per_ms: u32) {
+    let base = BASE.load(Ordering::Acquire);
+    write(base, REG_TIMER_DIV, 0x3);
+    write(base, REG_TIMER, (1 << 17) | vector as u32); // periodic
+    write(base, REG_TIMER_INIT, per_ms);
 }

@@ -185,7 +185,8 @@ essere la chiavetta stessa.
 
 Da sapere prima di provarlo:
 
-- il kernel usa un solo processore;
+- il kernel usa tutti i processori (fino a 16) per i suoi thread, ma i
+  programmi girano ancora tutti sul primo;
 - sulle schede video vere lo schermo resta nella risoluzione scelta dal
   firmware (il loader UEFI ne sceglie una grande);
 - molti driver sono scritti dalla documentazione dei chip e provati in

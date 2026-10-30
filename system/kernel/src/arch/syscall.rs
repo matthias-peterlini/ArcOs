@@ -4,14 +4,14 @@
 //! `syscall` arrives on the user stack with interrupts masked. The entry
 //! switches to the thread's kernel stack, builds the same [`TrapFrame`] an
 //! interrupt would (vector [`VEC_LINUX`]) and joins the common interrupt
-//! path, so it returns with `iretq` like every other trap. There is one CPU,
-//! so the saved user stack pointer can live in a static.
+//! path, so it returns with `iretq` like every other trap. The kernel stack
+//! and the saved user stack pointer live in the processor's own data
+//! ([`super::smp::PerCpu`]), found through the kernel GS base.
 //!
 //! [`TrapFrame`]: super::idt::TrapFrame
 
 use super::{cpu, gdt};
 use core::arch::global_asm;
-use core::sync::atomic::{AtomicU64, Ordering};
 
 /// The vector [`super::idt::TrapFrame::vector`] holds for `syscall`.
 pub const VEC_LINUX: u64 = 0x81;
@@ -25,20 +25,19 @@ pub const MSR_FS_BASE: u32 = 0xC000_0100;
 /// paths run `swapgs`).
 pub const MSR_KERNEL_GS_BASE: u32 = 0xC000_0102;
 
-/// Kernel stack of the running thread (the TSS's rsp0).
-#[no_mangle]
-static SYSCALL_KERNEL_RSP: AtomicU64 = AtomicU64::new(0);
-#[no_mangle]
-static SYSCALL_USER_RSP: AtomicU64 = AtomicU64::new(0);
-
+// gs:[0] is the kernel stack of the running thread, gs:[8] room for the
+// user stack pointer. The `swapgs` back before joining the common path
+// keeps the GS bases as an interrupt from user mode finds them.
 global_asm!(
     r#"
     .global syscall_entry
 syscall_entry:
-    mov [rip + SYSCALL_USER_RSP], rsp
-    mov rsp, [rip + SYSCALL_KERNEL_RSP]
+    swapgs
+    mov gs:[8], rsp
+    mov rsp, gs:[0]
     push {user_data}
-    push qword ptr [rip + SYSCALL_USER_RSP]
+    push qword ptr gs:[8]
+    swapgs
     push r11
     push {user_code}
     push rcx
@@ -65,10 +64,6 @@ pub fn init() {
         // Cleared on entry: TF, IF, DF, NT, AC.
         cpu::wrmsr(MSR_FMASK, 0x0004_4700);
     }
-}
-
-pub fn set_kernel_stack(top: u64) {
-    SYSCALL_KERNEL_RSP.store(top, Ordering::Relaxed);
 }
 
 /// The user FS and GS bases of the running thread.
