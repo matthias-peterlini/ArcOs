@@ -90,6 +90,7 @@ enum MenuAct {
     NextWallpaper,
     Display,
     Activity,
+    Overview,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -305,6 +306,34 @@ impl Launcher {
     }
 }
 
+/// The overview (Mission Control): the desktops at the top, the windows of
+/// this one side by side below.
+struct Overview {
+    anim: Anim,
+    closing: bool,
+    /// A picture of every window shown on some desktop, taken on opening:
+    /// the window, the picture, its bounds and its frame then.
+    snaps: Vec<(u32, Canvas, Rect, Rect)>,
+    /// A window pressed: which, where, and whether it is being dragged.
+    held: Option<(u32, i32, i32, bool)>,
+}
+
+impl Overview {
+    /// How far it has come in, 0..=1000.
+    fn shown(&self) -> u32 {
+        let t = self.anim.out();
+        if self.closing {
+            1000 - t
+        } else {
+            t
+        }
+    }
+}
+
+const MAX_SPACES: usize = 6;
+/// How long the desktop's name stays up after a switch.
+const SPACE_HUD_MS: u64 = 900;
+
 enum Ending {
     PowerOff,
     Restart,
@@ -350,6 +379,12 @@ struct Desktop {
     last_input: u64,
     /// Where the window being dragged would snap if dropped now.
     snap_preview: Option<Rect>,
+    /// The virtual desktop shown, and how many there are.
+    space: usize,
+    spaces: usize,
+    overview: Option<Overview>,
+    /// The desktop's name, shown for a moment after a switch.
+    space_hud: Option<Anim>,
 }
 
 fn now() -> DateTime {
@@ -370,6 +405,13 @@ impl Desktop {
     fn logo_btn(&self) -> Rect {
         let t = self.topbar();
         Rect::new(t.x + 10, t.y + (t.h - 32) / 2, 62, 32)
+    }
+
+    /// A dot for each desktop after the logo, when there is more than one:
+    /// it opens the overview.
+    fn spaces_btn(&self) -> Option<Rect> {
+        let lb = self.logo_btn();
+        (self.spaces > 1 && !self.full_screen()).then(|| Rect::new(lb.right() + 4, lb.y, self.spaces as i32 * 14 + 18, lb.h))
     }
 
     /// The status icons at the right (arc, network, sound): they open the
@@ -574,7 +616,7 @@ impl Desktop {
     }
 
     fn focused(&self) -> Option<u32> {
-        self.windows.iter().rev().find(|w| !w.minimized).map(|w| w.id)
+        self.windows.iter().rev().find(|w| w.shown(self.space)).map(|w| w.id)
     }
 
     fn moving(&self, id: u32) -> bool {
@@ -582,6 +624,10 @@ impl Desktop {
     }
 
     fn raise(&mut self, l: &mut Looper, id: u32) {
+        // A window on another desktop: go there.
+        if let Some(space) = self.window(id).map(|w| w.space).filter(|&s| s != self.space) {
+            self.go_to_space(l, space);
+        }
         if let Some(i) = self.windows.iter().position(|w| w.id == id) {
             let win = self.windows.remove(i);
             let was_min = win.minimized;
@@ -634,6 +680,7 @@ impl Desktop {
         let id = self.next_id;
         self.next_id += 1;
         let mut win = Window::new(id, app, x, y);
+        win.space = self.space;
         win.rect.w = aw;
         win.rect.h = full_h;
         let kind = String::from(win.app.kind());
@@ -682,7 +729,7 @@ impl Desktop {
 
     fn minimize(&mut self, l: &mut Looper, id: u32) {
         self.start_fx(l, id, FxKind::Minimize);
-        if let Some(top) = self.windows.iter().rev().filter(|w| w.id != id && !w.minimized).map(|w| w.bounds()).next() {
+        if let Some(top) = self.windows.iter().rev().filter(|w| w.id != id && w.shown(self.space)).map(|w| w.bounds()).next() {
             l.damage(top);
         }
         l.damage(ui::with_shadow(self.topbar()));
@@ -774,6 +821,200 @@ impl Desktop {
         l.damage(before);
         l.damage(win.bounds());
         self.start_fx(l, id, FxKind::Zoom(before));
+    }
+
+    // ------------------------------------------------------------------
+    // Virtual desktops
+
+    /// Shows desktop `n` (the last one if there are fewer); a window being
+    /// dragged comes along.
+    fn go_to_space(&mut self, l: &mut Looper, n: usize) {
+        let n = n.min(self.spaces - 1);
+        if let Some(Drag::Move(id, ..)) = self.drag {
+            if let Some(w) = self.window_mut(id) {
+                w.space = n;
+            }
+        }
+        if n != self.space {
+            self.space = n;
+            l.damage(self.screen());
+        }
+        if self.overview.is_none() {
+            self.space_hud = Some(Anim::new(SPACE_HUD_MS));
+            l.damage(ui::with_shadow(self.space_hud_rect()));
+        }
+    }
+
+    /// Moves window `id` to desktop `n` (a new one just past the last) and
+    /// follows it there.
+    fn send_to_space(&mut self, l: &mut Looper, id: u32, n: usize) {
+        if n >= self.spaces && self.spaces < MAX_SPACES {
+            self.spaces += 1;
+        }
+        let n = n.min(self.spaces - 1);
+        if let Some(i) = self.windows.iter().position(|w| w.id == id) {
+            let mut w = self.windows.remove(i);
+            w.space = n;
+            self.windows.push(w);
+        }
+        self.go_to_space(l, n);
+    }
+
+    /// Removes desktop `n`: its windows join the one before.
+    fn remove_space(&mut self, l: &mut Looper, n: usize) {
+        if self.spaces <= 1 || n >= self.spaces {
+            return;
+        }
+        let to = n.saturating_sub(1);
+        let shift = |s: usize| match s {
+            s if s == n => to,
+            s if s > n => s - 1,
+            s => s,
+        };
+        for w in self.windows.iter_mut() {
+            w.space = shift(w.space);
+        }
+        self.space = shift(self.space);
+        self.spaces -= 1;
+        l.damage(self.screen());
+    }
+
+    fn space_hud_rect(&self) -> Rect {
+        Rect::new((self.w - 220) / 2, (self.h - 96) / 2, 220, 96)
+    }
+
+    /// Opens the overview: every window is drawn once into a picture, at
+    /// most half the screen wide.
+    fn open_overview(&mut self, l: &mut Looper) {
+        if self.overview.is_some() {
+            return;
+        }
+        self.launcher = None;
+        self.popup = None;
+        self.drag = None;
+        self.snap_preview = None;
+        self.space_hud = None;
+        let focused = self.focused();
+        let mut snaps = Vec::new();
+        for w in self.windows.iter_mut().filter(|w| !w.minimized) {
+            let (pic, at) = w.snapshot(&self.blur, Some(w.id) == focused);
+            snaps.push((w.id, shrink(pic, self.w / 2), at, w.rect));
+        }
+        self.overview = Some(Overview { anim: Anim::new(300), closing: false, snaps, held: None });
+        l.damage(self.screen());
+    }
+
+    fn close_overview(&mut self, l: &mut Looper) {
+        if let Some(o) = &mut self.overview {
+            if !o.closing {
+                o.closing = true;
+                o.anim = Anim::new(240);
+                o.held = None;
+            }
+        }
+        l.damage(self.screen());
+    }
+
+    /// The desktops at the top of the overview, and the button that adds
+    /// one (while there is room).
+    fn space_thumbs(&self) -> (Vec<Rect>, Option<Rect>) {
+        let n = self.spaces as i32;
+        let more = self.spaces < MAX_SPACES;
+        let gap = 20;
+        let tw = 180.min((self.w - 60) / (n + 1) - gap);
+        let th = tw * self.h / self.w.max(1);
+        let pw = if more { th.min(56) } else { 0 };
+        let total = n * tw + (n - 1) * gap + if more { gap + pw } else { 0 };
+        let mut x = (self.w - total) / 2;
+        let y = 24;
+        let mut v = Vec::new();
+        for _ in 0..n {
+            v.push(Rect::new(x, y, tw, th));
+            x += tw + gap;
+        }
+        (v, more.then(|| Rect::new(x, y + (th - pw) / 2, pw, pw)))
+    }
+
+    /// Each window of this desktop in the overview, side by side below the
+    /// desktops: its id and where its frame goes.
+    fn overview_slots(&self) -> Vec<(u32, Rect)> {
+        let Some(o) = &self.overview else { return Vec::new() };
+        let wins: Vec<(u32, Rect)> =
+            o.snaps.iter().filter(|s| self.window(s.0).is_some_and(|w| w.shown(self.space))).map(|s| (s.0, s.3)).collect();
+        let n = wins.len() as i32;
+        if n == 0 {
+            return Vec::new();
+        }
+        let top = self.space_thumbs().0.first().map_or(24, |t| t.bottom()) + 50;
+        let area = Rect::new(40, top, self.w - 80, self.h - top - 50);
+        let cols = (1..=n).find(|c| c * c >= n).unwrap_or(1);
+        let rows = (n + cols - 1) / cols;
+        let (cw, ch) = (area.w / cols, area.h / rows);
+        wins.iter()
+            .enumerate()
+            .map(|(i, &(id, r))| {
+                let (col, row) = (i as i32 % cols, i as i32 / cols);
+                // The last row is centred.
+                let in_row = if row == rows - 1 { n - row * cols } else { cols };
+                let x0 = area.x + (area.w - in_row * cw) / 2;
+                let s = 1000.min((cw - 40) * 1000 / r.w.max(1)).min((ch - 48) * 1000 / r.h.max(1)).max(40);
+                let (w, h) = (r.w * s / 1000, r.h * s / 1000);
+                (id, Rect::new(x0 + col * cw + (cw - w) / 2, area.y + row * ch + (ch - 28 - h) / 2, w, h))
+            })
+            .collect()
+    }
+
+    fn overview_press(&mut self, l: &mut Looper, x: i32, y: i32) {
+        if self.overview.as_ref().is_none_or(|o| o.closing) {
+            return;
+        }
+        let (thumbs, plus) = self.space_thumbs();
+        if self.spaces > 1 {
+            if let Some(i) = thumbs.iter().position(|t| space_close(*t).contains(x, y)) {
+                self.remove_space(l, i);
+                return;
+            }
+        }
+        if let Some(i) = thumbs.iter().position(|t| t.contains(x, y)) {
+            self.go_to_space(l, i);
+            self.close_overview(l);
+            return;
+        }
+        if plus.is_some_and(|p| p.contains(x, y)) {
+            self.spaces += 1;
+            l.damage(self.screen());
+            return;
+        }
+        let hit = self.overview_slots().into_iter().rev().find(|(_, f)| f.contains(x, y)).map(|(id, _)| id);
+        match (hit, &mut self.overview) {
+            (Some(id), Some(o)) => o.held = Some((id, x, y, false)),
+            _ => self.close_overview(l),
+        }
+    }
+
+    /// The end of a press in the overview: a click brings the window to the
+    /// front, a drag onto a desktop moves it there.
+    fn overview_release(&mut self, l: &mut Looper) {
+        let Some((id, _, _, dragging)) = self.overview.as_mut().and_then(|o| o.held.take()) else { return };
+        l.damage(self.screen());
+        if !dragging {
+            self.raise(l, id);
+            self.close_overview(l);
+            return;
+        }
+        let (x, y) = self.mouse;
+        let (thumbs, plus) = self.space_thumbs();
+        let to = match thumbs.iter().position(|t| t.grow(8).contains(x, y)) {
+            Some(i) => i,
+            None if plus.is_some_and(|p| p.grow(8).contains(x, y)) => {
+                self.spaces += 1;
+                self.spaces - 1
+            }
+            None => return,
+        };
+        if let Some(w) = self.window_mut(id) {
+            w.space = to;
+        }
     }
 
     /// Types a command line into the terminal (opening it if needed).
@@ -991,6 +1232,7 @@ impl Desktop {
             MenuAct::Display => self.open_id(l, "settings"),
             MenuAct::Store => self.open_id(l, "store"),
             MenuAct::Activity => self.open_id(l, "monitor"),
+            MenuAct::Overview => self.open_overview(l),
             MenuAct::NextWallpaper => {
                 let cur = settings::get().wallpaper;
                 let i = res::WALLPAPERS.iter().position(|(n, _)| *n == cur).unwrap_or(0);
@@ -1208,6 +1450,10 @@ impl Desktop {
         if self.ending.is_some() {
             return;
         }
+        if self.overview.is_some() {
+            self.overview_press(l, x, y);
+            return;
+        }
         // Notifications go away when clicked.
         for i in (0..self.notes.len()).rev() {
             let r = self.note_rect(i, self.notes[i].slide());
@@ -1270,6 +1516,7 @@ impl Desktop {
                     ("Impostazioni di sistema…", Some(MenuAct::Settings)),
                     ("Negozio…", Some(MenuAct::Store)),
                     ("Monitor attività", Some(MenuAct::Activity)),
+                    ("Desktop e finestre (F3)", Some(MenuAct::Overview)),
                     ("Schermata", Some(MenuAct::Screenshot)),
                     ("", None),
                     ("Blocca schermo", Some(MenuAct::Lock)),
@@ -1279,6 +1526,10 @@ impl Desktop {
                 self.w,
             );
             self.show_popup(l, p);
+            return;
+        }
+        if self.spaces_btn().is_some_and(|b| b.contains(x, y)) {
+            self.open_overview(l);
             return;
         }
         if self.status_btn().contains(x, y) {
@@ -1304,7 +1555,7 @@ impl Desktop {
             .windows
             .iter()
             .rev()
-            .filter(|w| !w.minimized && !self.moving(w.id))
+            .filter(|w| w.shown(self.space) && !self.moving(w.id))
             .find_map(|w| w.hit(x, y).map(|h| (w.id, h)));
         if let Some((id, hit)) = hit {
             if self.focused() != Some(id) {
@@ -1368,6 +1619,16 @@ impl Desktop {
         if self.ending.is_some() {
             return;
         }
+        if self.overview.is_some() {
+            match k.key {
+                Key::Escape | Key::Enter | Key::Overview | Key::F(3) => self.close_overview(l),
+                Key::Left | Key::PrevDesktop => self.go_to_space(l, self.space.saturating_sub(1)),
+                Key::Right | Key::NextDesktop => self.go_to_space(l, self.space + 1),
+                _ => {}
+            }
+            l.damage(self.screen());
+            return;
+        }
         if k.ctrl && k.key == Key::Char(' ') {
             self.toggle_launcher(l);
             return;
@@ -1409,16 +1670,42 @@ impl Desktop {
             }
             return;
         }
-        // Alt+Tab: the next window comes to the front.
+        // The overview, and the desktop beside: with the logo key as in
+        // Windows, F3 as on a Mac, Ctrl+Alt+Page Up/Down.
+        let page = k.ctrl && k.alt && !k.shift;
+        match k.key {
+            Key::Overview | Key::F(3) => return self.open_overview(l),
+            Key::PrevDesktop => return self.go_to_space(l, self.space.saturating_sub(1)),
+            Key::NextDesktop => return self.go_to_space(l, self.space + 1),
+            Key::PageUp if page => return self.go_to_space(l, self.space.saturating_sub(1)),
+            Key::PageDown if page => return self.go_to_space(l, self.space + 1),
+            _ => {}
+        }
+        // Alt+Tab: the next window of this desktop comes to the front.
         if k.alt && k.key == Key::Tab {
-            if let Some(id) = self.windows.iter().find(|w| !self.moving(w.id)).map(|w| w.id) {
-                if self.windows.len() > 1 {
+            let mine = || self.windows.iter().filter(|w| w.space == self.space);
+            if let Some(id) = mine().find(|w| !self.moving(w.id)).map(|w| w.id) {
+                if mine().count() > 1 {
                     self.raise(l, id);
                 }
             }
             return;
         }
         if let Some(id) = self.focused() {
+            // Ctrl+Alt+Shift and Left or Right: the window to the desktop
+            // beside (a new one after the last).
+            if k.ctrl && k.alt && k.shift {
+                match k.key {
+                    Key::Left | Key::PageUp => {
+                        if self.space > 0 {
+                            self.send_to_space(l, id, self.space - 1);
+                        }
+                        return;
+                    }
+                    Key::Right | Key::PageDown => return self.send_to_space(l, id, self.space + 1),
+                    _ => {}
+                }
+            }
             if k.ctrl && matches!(k.key, Key::Char('q') | Key::Char('Q')) {
                 self.close_window(l, id);
                 return;
@@ -1455,6 +1742,15 @@ impl Desktop {
             l.damage(ui::with_shadow(bar));
         }
         self.mouse = (x, y);
+        if let Some(o) = &mut self.overview {
+            if let Some((_, px, py, dragging)) = &mut o.held {
+                if held && ((x - *px).abs() > 6 || (y - *py).abs() > 6) {
+                    *dragging = true;
+                }
+            }
+            l.damage(self.screen());
+            return;
+        }
         if held {
             match self.drag {
                 Some(Drag::Move(id, dx, dy)) => {
@@ -1581,7 +1877,7 @@ impl Desktop {
             .windows
             .iter()
             .rev()
-            .filter(|w| !w.minimized && !self.moving(w.id))
+            .filter(|w| w.shown(self.space) && !self.moving(w.id))
             .find(|w| w.rect.contains(x, y))
             .map(|w| w.id);
         if self.hovered != under {
@@ -1609,6 +1905,10 @@ impl Desktop {
     }
 
     fn released(&mut self, l: &mut Looper) {
+        if self.overview.is_some() {
+            self.overview_release(l);
+            return;
+        }
         match self.drag {
             Some(Drag::Body(id)) => {
                 if let Some(win) = self.window_mut(id) {
@@ -1652,6 +1952,16 @@ impl Desktop {
         let ty = t.y + (t.h - lh) / 2;
         // Maximised: the app's name after the logo, its buttons at the right.
         let mut left_end = lb.right();
+        if let Some(sp) = self.spaces_btn() {
+            if sp.contains(self.mouse.0, self.mouse.1) {
+                c.fill_round(sp, 12, hover_bg);
+            }
+            for i in 0..self.spaces {
+                let col = if i == self.space { fg } else { (fg & 0xFF_FFFF) | 0x5900_0000 };
+                c.fill_circle(sp.x + 16 + i as i32 * 14, sp.y + sp.h / 2, 4, col);
+            }
+            left_end = sp.right();
+        }
         if full {
             if let Some(win) = self.focused().and_then(|id| self.window(id)) {
                 let name = apps::app_name(win.app.kind(), &win.app.title());
@@ -1996,6 +2306,107 @@ impl Desktop {
         ui::button(c, cb, "Cancella tutto", false, cb.contains(self.mouse.0, self.mouse.1));
     }
 
+    fn draw_overview(&self, c: &mut Canvas, o: &Overview) {
+        let t = o.shown();
+        let cl = c.clip();
+        c.blit(&self.sharp, cl.x, cl.y, cl);
+        c.blit_faded(&self.blur, cl.x, cl.y, cl, t * 255 / 1000);
+        c.fill(cl, ((0x66 * t / 1000) << 24) | 0x10_0A16);
+        let alpha = |col: u32| (((col >> 24) * t / 1000) << 24) | (col & 0xFF_FFFF);
+        let fade = t * 255 / 1000;
+        let (mx, my) = self.mouse;
+        let still = t >= 1000 && !o.closing;
+        let dragging = o.held.filter(|h| h.3);
+        // The desktops come down from the top, each with its windows.
+        let drop = (1000 - t as i32) * 60 / 1000;
+        let (thumbs, plus) = self.space_thumbs();
+        let (sh, _) = text::metrics(Font::Small);
+        for (i, th) in thumbs.iter().enumerate() {
+            let th = th.offset(0, -drop);
+            c.draw_scaled(&self.sharp, th, fade);
+            let saved = c.clip();
+            c.set_clip(saved.intersect(&th));
+            for (id, pic, at, r) in &o.snaps {
+                if self.window(*id).is_some_and(|w| w.shown(i)) {
+                    let to = Rect::new(th.x + r.x * th.w / self.w, th.y + r.y * th.h / self.h, r.w * th.w / self.w, r.h * th.h / self.h);
+                    c.draw_scaled(pic, place_snap(*at, *r, to), fade);
+                }
+            }
+            c.set_clip(saved);
+            let target = dragging.is_some() && th.grow(8).contains(mx, my);
+            if target {
+                c.stroke_round(th.grow(3), 8, 3, ui::ACCENT);
+            } else if i == self.space {
+                c.stroke_round(th.grow(3), 8, 3, alpha(0xF0FF_FFFF));
+            } else {
+                c.stroke_round(th, 6, 1, alpha(0x59FF_FFFF));
+            }
+            text::draw_centered(c, Font::Small, th.x + th.w / 2, th.bottom() + 8, &format!("Desktop {}", i + 1), alpha(TEXT));
+            if still && dragging.is_none() && self.spaces > 1 && th.grow(10).contains(mx, my) {
+                let b = space_close(th);
+                c.fill_circle(b.x + b.w / 2, b.y + b.h / 2, b.w / 2, ui::GLASS_STRONG | 0xFF00_0000);
+                c.stroke_round(b, b.w / 2, 1, ui::BORDER);
+                text::draw_centered(c, Font::Small, b.x + b.w / 2, b.y + (b.h - sh) / 2, "×", TEXT);
+            }
+        }
+        if let Some(p) = plus {
+            let p = p.offset(0, -drop);
+            let hot = (still && p.contains(mx, my)) || (dragging.is_some() && p.grow(8).contains(mx, my));
+            c.fill_round(p, 10, alpha(if hot { 0x4DFF_FFFF } else { 0x26FF_FFFF }));
+            c.stroke_round(p, 10, 1, if dragging.is_some() && hot { ui::ACCENT } else { alpha(ui::BORDER) });
+            let (hh, _) = text::metrics(Font::Heading);
+            text::draw_centered(c, Font::Heading, p.x + p.w / 2, p.y + (p.h - hh) / 2, "+", alpha(TEXT));
+        }
+        // This desktop's windows glide from their places to the grid.
+        let slots = self.overview_slots();
+        if slots.is_empty() {
+            text::draw_centered(c, Font::Body, self.w / 2, self.h / 2, "Nessuna finestra su questo desktop", alpha(TEXT_DIM));
+        }
+        let mut lifted = None;
+        for &(id, to) in &slots {
+            let Some((_, pic, at, r)) = o.snaps.iter().find(|s| s.0 == id) else { continue };
+            if dragging.is_some_and(|h| h.0 == id) {
+                lifted = Some((pic, *at, *r, to));
+                continue;
+            }
+            let frame = ui::lerp_rect(*r, to, t);
+            c.draw_scaled(pic, place_snap(*at, *r, frame), 255);
+            if still && dragging.is_none() && to.contains(mx, my) {
+                c.stroke_round(to.grow(4), 16, 3, 0xD9FF_FFFF);
+                let title = self.window(id).map(|w| w.app.title()).unwrap_or_default();
+                let name = text::fit(Font::Strong, &title, to.w.max(180));
+                let w = text::width(Font::Strong, &name) + 24;
+                let tip = Rect::new(to.x + to.w / 2 - w / 2, to.bottom() + 10, w, 28);
+                c.fill_round(tip, 14, ui::GLASS_STRONG);
+                text::draw_centered(c, Font::Strong, tip.x + w / 2, tip.y + 5, &name, TEXT);
+            }
+        }
+        // The window being dragged follows the pointer, on top.
+        if let (Some((pic, at, r, to)), Some((_, px, py, _))) = (lifted, dragging) {
+            let frame = to.offset(mx - px, my - py);
+            c.draw_scaled(pic, place_snap(at, r, frame), 220);
+        }
+        let hint = "Clic su una finestra per sceglierla · trascinala su un desktop per spostarla · Esc per uscire";
+        text::draw_centered(c, Font::Small, self.w / 2, self.h - 30, hint, alpha(TEXT_FAINT));
+    }
+
+    /// "Desktop 2" and a dot for each desktop, for a moment after a switch.
+    fn draw_space_hud(&self, c: &mut Canvas, a: &Anim) {
+        let left = SPACE_HUD_MS.saturating_sub(a.elapsed());
+        let t = if left < 250 { (left * 1000 / 250) as u32 } else { 1000 };
+        let alpha = |col: u32| (((col >> 24) * t / 1000) << 24) | (col & 0xFF_FFFF);
+        let r = self.space_hud_rect();
+        c.fill_round(r, 22, alpha(ui::GLASS_STRONG));
+        c.stroke_round(r, 22, 1, alpha(ui::BORDER));
+        text::draw_centered(c, Font::Heading, r.x + r.w / 2, r.y + 22, &format!("Desktop {}", self.space + 1), alpha(TEXT));
+        let n = self.spaces as i32;
+        let x0 = r.x + r.w / 2 - (n - 1) * 9;
+        for i in 0..n {
+            let col = if i as usize == self.space { 0xFFFF_FFFF } else { 0x59FF_FFFF };
+            c.fill_circle(x0 + i * 18, r.y + 68, 4, alpha(col));
+        }
+    }
+
     fn draw_notes(&self, c: &mut Canvas) {
         for (i, n) in self.notes.iter().enumerate() {
             let r = self.note_rect(i, n.slide());
@@ -2020,6 +2431,30 @@ impl Desktop {
             draw_logo(c, self.w / 2, self.h / 2 - 20, 48, (o << 24) | 0xFF_FFFF);
         }
     }
+}
+
+/// Where a window's picture goes when its frame `r` is drawn at `to` (the
+/// picture covers `at`, shadow included).
+fn place_snap(at: Rect, r: Rect, to: Rect) -> Rect {
+    let sx = |v: i32| (v as i64 * to.w as i64 / r.w.max(1) as i64) as i32;
+    let sy = |v: i32| (v as i64 * to.h as i64 / r.h.max(1) as i64) as i32;
+    Rect::new(to.x + sx(at.x - r.x), to.y + sy(at.y - r.y), sx(at.w), sy(at.h))
+}
+
+/// A picture made at most `max_w` wide.
+fn shrink(pic: Canvas, max_w: i32) -> Canvas {
+    if pic.w <= max_w || pic.w == 0 {
+        return pic;
+    }
+    let mut small = Canvas::new_layer(max_w, (pic.h * max_w / pic.w).max(1));
+    let all = small.bounds();
+    small.draw_scaled(&pic, all, 255);
+    small
+}
+
+/// The button that removes a desktop, on its thumbnail's corner.
+fn space_close(thumb: Rect) -> Rect {
+    Rect::new(thumb.x - 9, thumb.y - 9, 22, 22)
 }
 
 fn capitalize(s: &str) -> String {
@@ -2066,6 +2501,7 @@ impl View for Desktop {
         self.sharp = sharp;
         self.blur = blur;
         self.popup = None;
+        self.overview = None;
         self.fx.clear();
         let area = self.work_area();
         let full = self.full_area();
@@ -2094,7 +2530,9 @@ impl View for Desktop {
             || self.bounce.is_some()
             || self.notes.iter().any(|n| n.moving())
             || self.ending.is_some()
-            || self.windows.iter().any(|w| !w.minimized && w.app.animating())
+            || self.windows.iter().any(|w| w.shown(self.space) && w.app.animating())
+            || self.overview.as_ref().is_some_and(|o| !o.anim.done() || o.closing || o.held.is_some())
+            || self.space_hud.is_some()
     }
 
     fn event(&mut self, l: &mut Looper, ev: Event) -> bool {
@@ -2176,11 +2614,16 @@ impl Desktop {
         match ev {
             Event::Press { x, y, double } => self.press(l, x, y, double),
             Event::Menu { x, y } => {
-                if self.launcher.is_some() || self.ending.is_some() {
+                if self.launcher.is_some() || self.overview.is_some() || self.ending.is_some() {
                     return false;
                 }
-                let on_window =
-                    self.windows.iter().rev().filter(|w| !w.minimized && !self.moving(w.id)).find(|w| w.rect.contains(x, y)).map(|w| w.id);
+                let on_window = self
+                    .windows
+                    .iter()
+                    .rev()
+                    .filter(|w| w.shown(self.space) && !self.moving(w.id))
+                    .find(|w| w.rect.contains(x, y))
+                    .map(|w| w.id);
                 if let Some(id) = on_window {
                     if let Some(win) = self.window_mut(id) {
                         let b = win.body();
@@ -2220,7 +2663,11 @@ impl Desktop {
                     l.damage(self.screen());
                     return false;
                 }
-                if let Some(win) = self.windows.iter_mut().rev().find(|w| !w.minimized && w.rect.contains(x, y)) {
+                if self.overview.is_some() {
+                    return false;
+                }
+                let space = self.space;
+                if let Some(win) = self.windows.iter_mut().rev().find(|w| w.shown(space) && w.rect.contains(x, y)) {
                     if win.body().contains(x, y) && win.app.scroll(lines) {
                         l.damage(win.bounds());
                     }
@@ -2314,9 +2761,25 @@ impl Desktop {
                 if self.notes.iter().any(|n| n.moving()) {
                     l.damage(self.notes_zone());
                 }
+                let space = self.space;
                 for w in self.windows.iter_mut() {
-                    if !w.minimized && w.app.animating() && w.app.frame() {
+                    if w.shown(space) && w.app.animating() && w.app.frame() {
                         l.damage(w.body());
+                    }
+                }
+                if let Some(o) = &self.overview {
+                    if !o.anim.done() || o.closing || o.held.is_some() {
+                        l.damage(self.screen());
+                    }
+                    if o.closing && o.anim.done() {
+                        self.overview = None;
+                        l.damage(self.screen());
+                    }
+                }
+                if let Some(a) = &self.space_hud {
+                    l.damage(ui::with_shadow(self.space_hud_rect()));
+                    if a.elapsed() > SPACE_HUD_MS {
+                        self.space_hud = None;
                     }
                 }
                 if let Some((how, a)) = &self.ending {
@@ -2354,6 +2817,13 @@ impl Desktop {
                 return;
             }
         }
+        if let Some(o) = &self.overview {
+            self.draw_overview(c, o);
+            if !self.notes.is_empty() && r.overlaps(&self.notes_zone()) {
+                self.draw_notes(c);
+            }
+            return;
+        }
         c.blit(&self.sharp, r.x, r.y, r);
         self.draw_widgets(c, r);
         let focused = self.focused();
@@ -2371,7 +2841,7 @@ impl Desktop {
                     c.stroke_round(zone, 22, 2, 0x80FF_FFFF);
                 }
             }
-            if !w.minimized && r.overlaps(&w.bounds()) && !fx.iter().any(|f| f.id == w.id) {
+            if w.shown(self.space) && r.overlaps(&w.bounds()) && !fx.iter().any(|f| f.id == w.id) {
                 let f = Some(w.id) == focused;
                 w.draw(c, blur, f, r);
             }
@@ -2395,6 +2865,11 @@ impl Desktop {
         }
         if !self.notes.is_empty() && r.overlaps(&self.notes_zone()) {
             self.draw_notes(c);
+        }
+        if let Some(a) = &self.space_hud {
+            if r.overlaps(&ui::with_shadow(self.space_hud_rect())) {
+                self.draw_space_hud(c, a);
+            }
         }
         if let Some(la) = &self.launcher {
             self.draw_launcher(c, la);
@@ -2437,6 +2912,10 @@ pub fn run(d: &mut Display) {
         lock: settings::has_password().then(Lock::new),
         last_input: time::uptime_ms(),
         snap_preview: None,
+        space: 0,
+        spaces: 1,
+        overview: None,
+        space_hud: None,
     };
     let mut l = Looper::new(d);
     l.damage_all(d);

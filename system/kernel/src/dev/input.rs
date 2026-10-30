@@ -29,6 +29,11 @@ pub enum Key {
     PrintScreen,
     /// The logo key with L: lock the computer.
     Lock,
+    /// The logo key with Tab: all the windows and desktops at a glance.
+    Overview,
+    /// The logo key with Ctrl and Left or Right: the desktop beside.
+    PrevDesktop,
+    NextDesktop,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -130,7 +135,10 @@ fn key(usage: u32, value: i32) {
             0x28 | 0x58 => Some(Key::Enter),
             0x29 => Some(Key::Escape),
             0x2A => Some(Key::Backspace),
+            0x2B if s.logo => Some(Key::Overview),
             0x2B => Some(Key::Tab),
+            0x50 if s.logo && ctrl => Some(Key::PrevDesktop),
+            0x4F if s.logo && ctrl => Some(Key::NextDesktop),
             0x3A..=0x45 => Some(Key::F(usage - 0x3A + 1)),
             0x46 => Some(Key::PrintScreen),
             0x0F if s.logo => Some(Key::Lock), // L, wherever the layout puts it

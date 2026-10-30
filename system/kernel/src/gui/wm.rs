@@ -116,6 +116,8 @@ pub struct Window {
     pub restore: Option<Rect>,
     /// Snapped to half or a quarter of the screen: where it was before.
     pub snapped: Option<Rect>,
+    /// The virtual desktop it is on.
+    pub space: usize,
     /// The title button under the pointer.
     pub hover: Option<usize>,
     /// Maximised: the part of the desktop's bar where its buttons go (they
@@ -137,7 +139,12 @@ impl Window {
     pub fn new(id: u32, app: Box<dyn App>, x: i32, y: i32) -> Window {
         let (w, h) = app.size();
         let rect = Rect::new(x, y, w + 2 * GAP, h + TITLE_H + GAP);
-        Window { id, app, rect, minimized: false, restore: None, snapped: None, hover: None, bar: Rect::EMPTY }
+        Window { id, app, rect, minimized: false, restore: None, snapped: None, space: 0, hover: None, bar: Rect::EMPTY }
+    }
+
+    /// On the screen when desktop `space` is shown.
+    pub fn shown(&self, space: usize) -> bool {
+        !self.minimized && self.space == space
     }
 
     /// The whole window for a content area of `w` x `h`.

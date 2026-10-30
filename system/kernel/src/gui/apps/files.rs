@@ -1,4 +1,5 @@
-//! File: the file manager. Places on the left, the folder on the right.
+//! File: the file manager. Places on the left, the folder on the right,
+//! with tabs above it when more than one folder is open.
 
 use crate::fs::{self, Path};
 use crate::gui::gfx::{Canvas, Rect};
@@ -14,6 +15,8 @@ const SIDEBAR: i32 = 180;
 const TILE_W: i32 = 104;
 const TILE_H: i32 = 104;
 const HEADER: i32 = 52;
+/// The tab bar's height, when there are tabs.
+const TABS_H: i32 = 38;
 
 const PLACES: [(&str, &str); 9] = [
     ("Home", "sys:/home"),
@@ -40,10 +43,14 @@ enum Do {
     Delete,
     NewFolder,
     EmptyBin,
+    OpenTab,
 }
 
 pub struct Files {
     trash: bool,
+    /// The folder of each tab; the one shown is `dir`.
+    tabs: Vec<Path>,
+    tab: usize,
     dir: Path,
     items: Vec<Item>,
     selected: Option<usize>,
@@ -91,9 +98,12 @@ pub fn icon_for(name: &str, dir: bool) -> &'static str {
 
 impl Files {
     pub fn new(path: &str) -> Files {
+        let dir = fs::abs(path).unwrap_or_else(|_| Path::root("sys"));
         let mut f = Files {
             trash: false,
-            dir: fs::abs(path).unwrap_or_else(|_| Path::root("sys")),
+            tabs: alloc::vec![dir.clone()],
+            tab: 0,
+            dir,
             items: Vec::new(),
             selected: None,
             scroll: 0,
@@ -185,8 +195,75 @@ impl Files {
                 }
                 self.reload();
             }
+            Do::OpenTab => {
+                if let Some((_, name)) = selected {
+                    self.new_tab(self.dir.join(&name));
+                }
+            }
         }
         Action::Redraw
+    }
+
+    /// Opens `path` in a new tab after the others, and shows it.
+    fn new_tab(&mut self, path: Path) {
+        if !fs::is_dir(&path) {
+            return;
+        }
+        self.renaming = None;
+        self.tabs.push(path.clone());
+        self.tab = self.tabs.len() - 1;
+        self.dir = path;
+        self.reload();
+    }
+
+    fn switch_tab(&mut self, i: usize) {
+        if i == self.tab || i >= self.tabs.len() {
+            return;
+        }
+        self.renaming = None;
+        self.tab = i;
+        self.dir = self.tabs[i].clone();
+        self.reload();
+    }
+
+    fn close_tab(&mut self, i: usize) {
+        if self.tabs.len() <= 1 || i >= self.tabs.len() {
+            return;
+        }
+        self.tabs.remove(i);
+        if i < self.tab {
+            self.tab -= 1;
+        } else if i == self.tab {
+            self.tab = i.min(self.tabs.len() - 1);
+            self.dir = self.tabs[self.tab].clone();
+            self.renaming = None;
+            self.reload();
+        }
+    }
+
+    fn tabs_h(&self) -> i32 {
+        if self.tabs.len() > 1 {
+            TABS_H
+        } else {
+            0
+        }
+    }
+
+    /// The tabs, and the button that adds one, above the folder.
+    fn tab_rects(&self, area: Rect) -> (Vec<Rect>, Rect) {
+        let bar = Rect::new(area.x + SIDEBAR + 14, area.y + 7, area.w - SIDEBAR - 22, TABS_H - 8);
+        let plus = Rect::new(bar.right() - 26, bar.y + (bar.h - 26) / 2, 26, 26);
+        let n = self.tabs.len() as i32;
+        let w = ((bar.w - 34 - (n - 1) * 4) / n.max(1)).min(200);
+        let rects = (0..n).map(|i| Rect::new(bar.x + i * (w + 4), bar.y, w, bar.h)).collect();
+        (rects, plus)
+    }
+
+    /// The button that opens a new tab, in the folder's header.
+    fn new_tab_btn(&self, area: Rect) -> Rect {
+        let c = self.content(area);
+        let count = format!("{} elementi", self.items.len());
+        Rect::new(c.right() - text::width(Font::Small, &count) - 16 - 40, c.y + 12, 28, 28)
     }
 
     fn finish_rename(&mut self) {
@@ -209,17 +286,20 @@ impl Files {
 
     fn go(&mut self, path: Path) {
         if fs::is_dir(&path) {
+            self.tabs[self.tab] = path.clone();
             self.dir = path;
             self.reload();
         }
     }
 
-    fn content(area: Rect) -> Rect {
-        Rect::new(area.x + SIDEBAR + 6, area.y, area.w - SIDEBAR - 6, area.h)
+    /// The folder's part of the window, under the tabs.
+    fn content(&self, area: Rect) -> Rect {
+        let t = self.tabs_h();
+        Rect::new(area.x + SIDEBAR + 6, area.y + t, area.w - SIDEBAR - 6, area.h - t)
     }
 
-    fn grid(area: Rect) -> (Rect, i32) {
-        let c = Self::content(area);
+    fn grid(&self, area: Rect) -> (Rect, i32) {
+        let c = self.content(area);
         let g = Rect::new(c.x + 12, c.y + HEADER, c.w - 24, c.h - HEADER - 8);
         let cols = (g.w / TILE_W).max(1);
         (g, cols)
@@ -236,18 +316,37 @@ impl Files {
     }
 
     fn title_of(&self) -> String {
-        match PLACES.iter().find(|(_, p)| fs::abs(p).is_ok_and(|q| q == self.dir)) {
+        Self::name_of(&self.dir)
+    }
+
+    /// A folder's name as shown: the place's name for the places.
+    fn name_of(dir: &Path) -> String {
+        match PLACES.iter().find(|(_, p)| fs::abs(p).is_ok_and(|q| q == *dir)) {
             Some((n, _)) => String::from(*n),
             None => {
-                let n = self.dir.name();
+                let n = dir.name();
                 if n.is_empty() {
-                    format!("{}:", self.dir.volume)
+                    format!("{}:", dir.volume)
                 } else {
                     String::from(n)
                 }
             }
         }
     }
+}
+
+/// The icon of a folder by the name shown for it (places included).
+fn place_icon(name: &str) -> &'static str {
+    match name {
+        "Home" => "folder-home",
+        "Sistema" => "computer",
+        _ => icon_for(name, true),
+    }
+}
+
+/// The button that closes a tab, at its right end.
+fn tab_close(tab: Rect) -> Rect {
+    Rect::new(tab.right() - 24, tab.y + (tab.h - 18) / 2, 18, 18)
 }
 
 impl App for Files {
@@ -291,26 +390,43 @@ impl App for Files {
             if fs::abs(path).is_ok_and(|p| p == self.dir) {
                 c.fill_round(r, 10, crate::gui::ui::SELECTED);
             }
-            let icon = if *name == "Home" {
-                "folder-home"
-            } else if *name == "Sistema" {
-                "computer"
-            } else {
-                icon_for(name, true)
-            };
-            res::draw_icon(c, icon, 20, r.x + 10, r.y + 6);
+            res::draw_icon(c, place_icon(name), 20, r.x + 10, r.y + 6);
             text::draw(c, Font::Body, r.x + 40, r.y + 7, name, TEXT);
         }
+        // The tabs.
+        let (sh, _) = text::metrics(Font::Small);
+        let (hh, _) = text::metrics(Font::Heading);
+        if self.tabs.len() > 1 {
+            let (rects, plus) = self.tab_rects(area);
+            for (i, r) in rects.iter().enumerate() {
+                let on = i == self.tab;
+                c.fill_round(*r, 10, if on { crate::gui::ui::SELECTED } else { 0x14FF_FFFF });
+                let name = Self::name_of(&self.tabs[i]);
+                res::draw_icon(c, place_icon(&name), 16, r.x + 9, r.y + (r.h - 16) / 2);
+                let name = text::fit(Font::Small, &name, r.w - 58);
+                text::draw(c, Font::Small, r.x + 31, r.y + (r.h - sh) / 2, &name, if on { TEXT } else { TEXT_DIM });
+                let x = tab_close(*r);
+                text::draw_centered(c, Font::Small, x.x + x.w / 2, x.y + (x.h - sh) / 2, "×", TEXT_DIM);
+            }
+            c.fill_circle(plus.x + 13, plus.y + 13, 13, 0x1FFF_FFFF);
+            text::draw_centered(c, Font::Heading, plus.x + 13, plus.y + (26 - hh) / 2, "+", TEXT);
+        }
         // The folder.
-        let content = Self::content(area);
+        let content = self.content(area);
         let back = Rect::new(content.x + 12, content.y + 12, 28, 28);
         c.fill_circle(back.x + 14, back.y + 14, 14, 0x26FF_FFFF);
         res::draw_icon(c, "g-back", 14, back.x + 7, back.y + 7);
-        text::draw(c, Font::Heading, content.x + 52, content.y + 14, &self.title_of(), TEXT);
+        let nt = self.new_tab_btn(area);
+        let title = text::fit(Font::Heading, &self.title_of(), nt.x - content.x - 64);
+        text::draw(c, Font::Heading, content.x + 52, content.y + 14, &title, TEXT);
         let count = format!("{} elementi", self.items.len());
         let cw = text::width(Font::Small, &count);
         text::draw(c, Font::Small, content.right() - cw - 16, content.y + 20, &count, TEXT_DIM);
-        let (grid, cols) = Self::grid(area);
+        if !self.trash {
+            c.fill_circle(nt.x + 14, nt.y + 14, 14, 0x26FF_FFFF);
+            text::draw_centered(c, Font::Heading, nt.x + 14, nt.y + (28 - hh) / 2, "+", TEXT);
+        }
+        let (grid, cols) = self.grid(area);
         let saved = c.clip();
         c.set_clip(saved.intersect(&grid));
         if self.items.is_empty() {
@@ -360,7 +476,7 @@ impl App for Files {
     fn menu(&mut self, x: i32, y: i32, area: Rect) -> Action {
         self.finish_rename();
         let (ax, ay) = (area.x + x, area.y + y);
-        let (grid, cols) = Self::grid(area);
+        let (grid, cols) = self.grid(area);
         if !grid.contains(ax, ay) {
             return Action::None;
         }
@@ -371,6 +487,8 @@ impl App for Files {
             self.selected = Some(i);
             if self.trash {
                 alloc::vec![("Elimina definitivamente", Do::Delete)]
+            } else if self.items[i].dir {
+                alloc::vec![("Apri", Do::Open), ("Apri in una nuova scheda", Do::OpenTab), ("Rinomina", Do::Rename), ("Sposta nel Cestino", Do::ToBin)]
             } else {
                 alloc::vec![("Apri", Do::Open), ("Rinomina", Do::Rename), ("Sposta nel Cestino", Do::ToBin)]
             }
@@ -411,6 +529,25 @@ impl App for Files {
             return Action::Redraw;
         }
         self.finish_rename();
+        if self.tabs.len() > 1 {
+            let (rects, plus) = self.tab_rects(area);
+            if let Some(i) = rects.iter().position(|r| tab_close(*r).grow(3).contains(ax, ay)) {
+                self.close_tab(i);
+                return Action::Redraw;
+            }
+            if let Some(i) = rects.iter().position(|r| r.contains(ax, ay)) {
+                self.switch_tab(i);
+                return Action::Redraw;
+            }
+            if plus.contains(ax, ay) {
+                self.new_tab(self.dir.clone());
+                return Action::Redraw;
+            }
+        }
+        if !self.trash && self.new_tab_btn(area).contains(ax, ay) {
+            self.new_tab(self.dir.clone());
+            return Action::Redraw;
+        }
         for (i, (_, path)) in PLACES.iter().enumerate() {
             let r = Rect::new(area.x + 10, area.y + 40 + i as i32 * 36, SIDEBAR - 12, 32);
             if r.contains(ax, ay) {
@@ -423,14 +560,14 @@ impl App for Files {
                 return Action::Redraw;
             }
         }
-        let content = Self::content(area);
+        let content = self.content(area);
         let back = Rect::new(content.x + 12, content.y + 12, 28, 28);
         if back.contains(ax, ay) {
             let parent = Path::parse("..", &self.dir).unwrap_or_else(|_| self.dir.clone());
             self.go(parent);
             return Action::Redraw;
         }
-        let (grid, cols) = Self::grid(area);
+        let (grid, cols) = self.grid(area);
         if grid.contains(ax, ay) {
             let col = (ax - grid.x) / TILE_W;
             let row = (ay - grid.y + self.scroll) / TILE_H;
@@ -464,11 +601,21 @@ impl App for Files {
             return Action::Redraw;
         }
         let n = self.items.len();
-        match ev.key {
-            Key::Delete => {
-                return self.do_action(if self.trash { Do::Delete } else { Do::ToBin });
+        // Tabs: Ctrl+T opens one on this folder, Ctrl+W closes it, Ctrl+Tab
+        // (with Shift backwards) goes to the next.
+        if ev.ctrl && !self.trash {
+            match ev.key {
+                Key::Char('t' | 'T') => self.new_tab(self.dir.clone()),
+                Key::Char('w' | 'W') => self.close_tab(self.tab),
+                Key::Tab if ev.shift => self.switch_tab((self.tab + self.tabs.len() - 1) % self.tabs.len()),
+                Key::Tab => self.switch_tab((self.tab + 1) % self.tabs.len()),
+                _ => return Action::None,
             }
-            Key::F(2) => return self.do_action(Do::Rename),
+            return Action::Redraw;
+        }
+        match ev.key {
+            Key::Delete => self.do_action(if self.trash { Do::Delete } else { Do::ToBin }),
+            Key::F(2) => self.do_action(Do::Rename),
             Key::Enter => match self.selected {
                 Some(i) => self.open_item(i),
                 None => Action::None,

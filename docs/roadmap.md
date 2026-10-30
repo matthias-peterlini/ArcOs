@@ -69,7 +69,7 @@ framebuffer UEFI, tutti senza accelerazione 3D.
 | Centro notifiche con cronologia e *Non disturbare* | ✅ |
 | Ricerca globale (app, file, impostazioni, calcoli) con Ctrl+Spazio | ✅ |
 | Snap delle finestre (metà, quarti, tutto schermo) da mouse e tastiera | ✅ |
-| Desktop virtuali | ⬜ |
+| Desktop virtuali e vista d'insieme (F3) | ✅ fino a sei, con trascinamento delle finestre |
 | Gesti del touchpad | ⬜ (manca un driver touchpad multi-touch) |
 
 **Librerie e interfacce.** `arcgfx` (disegno), `gui/wm.rs` (`App`,
@@ -78,10 +78,8 @@ chiamate `WIN_CREATE`/`WIN_PRESENT`/`WIN_EVENT`.
 
 **Passi.**
 
-1. **Desktop virtuali** (1–2 settimane): un campo `space` in `Window`; la
-   barra mostra i desktop, Ctrl+←/→ e Ctrl+↑ (Mission Control: le finestre
-   rimpicciolite affiancate, con `Window::snapshot` che già esiste per le
-   animazioni).
+1. ~~**Desktop virtuali**~~ fatto: `Window::space`, la vista d'insieme
+   disegna ogni finestra una volta con `Window::snapshot` e la scala.
 2. **HiDPI** (3–4 settimane): un fattore di scala nel desktop; l'atlante dei
    font (`tools/assets/gen_fonts.py`) generato anche a 2×, le icone sono già
    grandi. Le coordinate delle app restano logiche; `WIN_PRESENT` riceve
@@ -184,15 +182,14 @@ dallo stesso interprete (`_BST`, `_TMP`). Stima: 3–4 mesi.
 |---|---|
 | File: risorse, cartelle, apertura con l'app giusta, rinomina, Cestino | ✅ |
 | Anteprime (miniature di immagini) | 🟡 nelle Foto; in File icone per tipo |
-| Schede | ⬜ |
+| Schede | ✅ Ctrl+T, Ctrl+W, Ctrl+Tab |
 | Trascinamento tra finestre | ⬜ |
 | Ricerca globale istantanea | ✅ per nome, per la home |
 | Ricerca nel contenuto dei file | ⬜ |
 
 **Passi.**
 
-1. **Schede in File** (1 settimana): una lista di percorsi con la barra
-   delle schede in alto; Ctrl+T, Ctrl+W.
+1. ~~**Schede in File**~~ fatto.
 2. **Anteprime** (2 settimane): miniature QOI già decodificate dalle Foto
    (`gui/res.rs`), prima pagina dei testi, *Quick Look* con la barra
    spaziatrice.
@@ -240,7 +237,7 @@ usare la fotocamera — Consenti / Non consentire» e ricorda la risposta;
 
 | Fase | Contenuto | Durata indicativa |
 |---|---|---|
-| 1 | IPC a porte, identità delle app, desktop virtuali, schede in File | 2 mesi |
+| 1 | IPC a porte, identità delle app (desktop virtuali e schede in File: fatti) | 2 mesi |
 | 2 | sandbox e permessi, aggiornamenti delle app in background, trascinamento | 2–3 mesi |
 | 3 | interprete AML: sospensione, batteria, temperatura | 3–4 mesi |
 | 4 | aggiornamenti A/B, HiDPI, indice dei file | 2–3 mesi |
