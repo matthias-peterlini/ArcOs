@@ -102,6 +102,8 @@ fn key_bytes(ev: KeyEvent, raw: bool) -> Vec<u8> {
                 _ => Vec::new(),
             };
         }
+        // Taken by the interface, never typed.
+        Key::PrintScreen | Key::Lock => b"",
     };
     s.to_vec()
 }

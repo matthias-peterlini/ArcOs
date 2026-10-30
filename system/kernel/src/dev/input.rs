@@ -25,6 +25,10 @@ pub enum Key {
     PageDown,
     Insert,
     F(u8),
+    /// Print Screen: a picture of the screen.
+    PrintScreen,
+    /// The logo key with L: lock the computer.
+    Lock,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,6 +57,8 @@ struct State {
     rctrl: bool,
     alt: bool,
     altgr: bool,
+    /// The logo key (left or right).
+    logo: bool,
     caps: bool,
     queue: VecDeque<KeyEvent>,
     /// While the graphical interface runs, keyboard keys go here; it passes
@@ -76,6 +82,7 @@ static STATE: IrqLock<State> = IrqLock::new(State {
     rctrl: false,
     alt: false,
     altgr: false,
+    logo: false,
     caps: false,
     queue: VecDeque::new(),
     capture: false,
@@ -110,6 +117,7 @@ fn key(usage: u32, value: i32) {
             0xE5 => s.rshift = pressed,
             0xE2 => s.alt = pressed,
             0xE6 => s.altgr = pressed,
+            0xE3 | 0xE7 => s.logo = pressed,
             0x39 if value == arcdk::KEY_PRESSED => s.caps = !s.caps,
             _ => {}
         }
@@ -124,6 +132,8 @@ fn key(usage: u32, value: i32) {
             0x2A => Some(Key::Backspace),
             0x2B => Some(Key::Tab),
             0x3A..=0x45 => Some(Key::F(usage - 0x3A + 1)),
+            0x46 => Some(Key::PrintScreen),
+            0x0F if s.logo => Some(Key::Lock), // L, wherever the layout puts it
             0x49 => Some(Key::Insert),
             0x4A => Some(Key::Home),
             0x4B => Some(Key::PageUp),

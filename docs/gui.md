@@ -27,7 +27,8 @@ conserva nulla, quindi mostra la configurazione ogni volta.
 Presa a modello da macOS:
 
 - **Barra in alto**: il logo (menu con *Info su arcOS*, *Impostazioni di
-  sistema*, *Negozio*, *Monitor attività*, *Riavvia*, *Spegni*), il nome
+  sistema*, *Negozio*, *Monitor attività*, *Schermata*, *Blocca schermo*,
+  *Riavvia*, *Spegni*), il nome
   dell'app in primo piano, ora e data al centro, il **centro di controllo**
   (volume con un cursore, stato della rete) e il pulsante di spegnimento.
 - **Widget**: saluto con l'orologio, calendario del mese, stato del sistema.
@@ -50,6 +51,18 @@ Presa a modello da macOS:
   ingrandire), molte si ridimensionano dall'angolo in basso a destra.
   **Alt+Tab** passa alla finestra successiva, **Ctrl+Q** chiude quella in
   primo piano.
+- **Schermata**: il tasto **Stamp** (o *Schermata* nel menu del logo) salva
+  lo schermo in `sys:/home/Immagini` come `Schermata <data> alle <ora>.qoi`,
+  che Foto apre subito.
+- **Blocco**: **logo+L** o *Blocca schermo* nel menu del logo coprono tutto
+  con l'ora sullo sfondo sfocato. Con una password (*Impostazioni →
+  Password*) arcOS si avvia bloccato e si blocca da solo dopo 2, 5 o 15
+  minuti senza usarlo; senza password basta Invio. La password non è salvata
+  in chiaro: nelle impostazioni c'è un sale casuale e 20 000 passaggi di
+  SHA-256.
+- **Aggiornamenti**: con la rete, all'avvio arcOS chiede a GitHub l'ultima
+  release e avvisa con una notifica se ce n'è una più nuova; *Info sistema →
+  Cerca aggiornamenti* lo richiede a mano.
 
 ### Le animazioni
 

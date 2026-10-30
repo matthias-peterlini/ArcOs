@@ -29,7 +29,13 @@ pub struct Prefs {
     modes: Vec<DisplayMode>,
     /// The volume slider is being dragged.
     sliding: bool,
+    /// A new password being typed.
+    password: String,
+    editing_password: bool,
 }
+
+/// The choices for locking after a while without input (minutes; 0: never).
+const LOCK_AFTER: [(u32, &str); 4] = [(0, "Mai"), (2, "2 min"), (5, "5 min"), (15, "15 min")];
 
 impl Prefs {
     pub fn new() -> Prefs {
@@ -37,7 +43,7 @@ impl Prefs {
         let offered = crate::dev::display::modes();
         let modes =
             COMMON_MODES.iter().map(|&(width, height)| DisplayMode { width, height }).filter(|m| offered.contains(m)).take(9).collect();
-        Prefs { name: settings::get().name, editing: false, thumbs, note: "", modes, sliding: false }
+        Prefs { name: settings::get().name, editing: false, thumbs, note: "", modes, sliding: false, password: String::new(), editing_password: false }
     }
 
     fn mode_btn(area: Rect, i: usize) -> Rect {
@@ -58,6 +64,30 @@ impl Prefs {
 
     fn set_volume(v: i32) {
         crate::gui::change_volume(v.clamp(0, 100) as u32);
+    }
+
+    fn password_field(area: Rect) -> Rect {
+        Rect::new(area.x + RIGHT, area.y + 396, 230, 44)
+    }
+
+    fn password_btn(area: Rect) -> Rect {
+        Rect::new(area.x + RIGHT + 240, area.y + 399, 124, 38)
+    }
+
+    fn lock_after(area: Rect) -> Rect {
+        Rect::new(area.x + RIGHT + 112, area.y + 454, 252, 32)
+    }
+
+    fn save_password(&mut self) {
+        let removing = self.password.is_empty();
+        if removing && !settings::has_password() {
+            self.editing_password = true; // nothing to remove: type one
+            return;
+        }
+        settings::set_password(&self.password);
+        self.password.clear();
+        self.editing_password = false;
+        self.note = if removing { "Password tolta" } else { "Password impostata" };
     }
 
     fn field(area: Rect) -> Rect {
@@ -166,6 +196,18 @@ impl App for Prefs {
         } else {
             text::draw(c, Font::Small, x, area.y + 264, "Nessuna scheda audio trovata.", TEXT_FAINT);
         }
+
+        // Security
+        text::draw(c, Font::Strong, x, area.y + 368, "Password", TEXT);
+        let has = !s.password.is_empty();
+        let dots: String = self.password.chars().map(|_| '•').collect();
+        ui::text_field(c, Self::password_field(area), &dots, if has { "Nuova password" } else { "Nessuna" }, self.editing_password);
+        let label = if self.editing_password || !has { "Imposta" } else { "Togli" };
+        ui::button(c, Self::password_btn(area), label, self.editing_password, false);
+        text::draw(c, Font::Body, x, area.y + 460, "Blocca dopo", TEXT);
+        let sel = LOCK_AFTER.iter().position(|(m, _)| *m == s.lock_after).unwrap_or(2);
+        let labels: Vec<&str> = LOCK_AFTER.iter().map(|(_, l)| *l).collect();
+        ui::segmented(c, Self::lock_after(area), &labels, sel);
     }
 
     fn press(&mut self, x: i32, y: i32, _double: bool, area: Rect) -> Action {
@@ -180,6 +222,22 @@ impl App for Prefs {
             return Action::Redraw;
         }
         self.editing = false;
+        if Self::password_field(area).contains(ax, ay) {
+            self.editing_password = true;
+            return Action::Redraw;
+        }
+        if Self::password_btn(area).contains(ax, ay) {
+            // "Togli" with an empty field removes the password.
+            self.save_password();
+            return Action::Redraw;
+        }
+        self.editing_password = false;
+        for (i, seg) in ui::segments(Self::lock_after(area), LOCK_AFTER.len()).iter().enumerate() {
+            if seg.contains(ax, ay) {
+                settings::update(|s| s.lock_after = LOCK_AFTER[i].0);
+                return Action::Redraw;
+            }
+        }
         for (i, b) in Self::layout_btns(area).iter().enumerate() {
             if b.contains(ax, ay) {
                 settings::update(|s| s.layout = if i == 0 { Layout::It } else { Layout::Us });
@@ -238,6 +296,14 @@ impl App for Prefs {
     }
 
     fn key(&mut self, ev: KeyEvent) -> Action {
+        if self.editing_password {
+            if ev.key == Key::Enter {
+                self.save_password();
+            } else {
+                ui::edit_text(&mut self.password, &ev, 64);
+            }
+            return Action::Redraw;
+        }
         if !self.editing {
             return Action::None;
         }

@@ -37,6 +37,7 @@ fn extended(code: u8) -> u8 {
         0x1C => 0x58, // keypad Enter
         0x1D => 0xE4, // right Ctrl
         0x35 => 0x54, // keypad /
+        0x37 => 0x46, // Print Screen (after the fake shift E0 2A)
         0x38 => 0xE6, // right Alt (AltGr)
         0x47 => 0x4A, // Home
         0x48 => 0x52, // Up

@@ -21,6 +21,11 @@ pub struct Settings {
     pub volume: u32,
     /// Play a sound when the desktop appears.
     pub startup_sound: bool,
+    /// The password that unlocks the computer, as "salt:hash" in hex
+    /// (empty: no password).
+    pub password: String,
+    /// Lock the screen after this many minutes without input (0: never).
+    pub lock_after: u32,
 }
 
 impl Default for Settings {
@@ -33,6 +38,8 @@ impl Default for Settings {
             resolution: None,
             volume: 70,
             startup_sound: true,
+            password: String::new(),
+            lock_after: 5,
         }
     }
 }
@@ -55,6 +62,8 @@ fn load() -> Settings {
             }
             "volume" => s.volume = v.parse::<u32>().unwrap_or(70).min(100),
             "startup-sound" => s.startup_sound = v != "off",
+            "password" => s.password = String::from(v),
+            "lock-after" => s.lock_after = v.parse().unwrap_or(5),
             _ => {}
         }
     }
@@ -82,14 +91,18 @@ pub fn update(f: impl FnOnce(&mut Settings)) {
     input::set_layout(s.layout);
     crate::dev::audio::set_volume(s.volume);
     let mut text = format!(
-        "name={}\nlayout={}\nwallpaper={}\nsetup={}\nvolume={}\nstartup-sound={}\n",
+        "name={}\nlayout={}\nwallpaper={}\nsetup={}\nvolume={}\nstartup-sound={}\nlock-after={}\n",
         s.name,
         if s.layout == Layout::Us { "us" } else { "it" },
         s.wallpaper,
         if s.setup_done { "done" } else { "no" },
         s.volume,
-        if s.startup_sound { "on" } else { "off" }
+        if s.startup_sound { "on" } else { "off" },
+        s.lock_after
     );
+    if !s.password.is_empty() {
+        text.push_str(&format!("password={}\n", s.password));
+    }
     if let Some((w, h)) = s.resolution {
         text.push_str(&format!("resolution={w}x{h}\n"));
     }
@@ -99,4 +112,54 @@ pub fn update(f: impl FnOnce(&mut Settings)) {
         }
     }
     *CURRENT.lock() = Some(s);
+}
+
+/// Rounds of SHA-256 over the password: slow enough to make guessing
+/// costly, quick enough to unlock without a wait.
+const ROUNDS: u32 = 20_000;
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn stretch(salt: &str, password: &str) -> String {
+    let mut h = arctls::sha2::Sha256::new();
+    h.update(salt.as_bytes());
+    h.update(password.as_bytes());
+    let mut d = h.finish();
+    for _ in 0..ROUNDS {
+        let mut h = arctls::sha2::Sha256::new();
+        h.update(&d);
+        h.update(password.as_bytes());
+        d = h.finish();
+    }
+    hex(&d)
+}
+
+/// Sets the password that unlocks the computer (empty removes it).
+pub fn set_password(password: &str) {
+    let stored = if password.is_empty() {
+        String::new()
+    } else {
+        let mut salt = [0u8; 16];
+        crate::rand::fill(&mut salt);
+        let salt = hex(&salt);
+        let hash = stretch(&salt, password);
+        format!("{salt}:{hash}")
+    };
+    update(|s| s.password = stored);
+}
+
+/// A password is set.
+pub fn has_password() -> bool {
+    !get().password.is_empty()
+}
+
+/// Whether `password` is the one set (true when none is).
+pub fn check_password(password: &str) -> bool {
+    let s = get();
+    let Some((salt, hash)) = s.password.split_once(':') else { return s.password.is_empty() };
+    // Compare every byte, however early they differ.
+    let given = stretch(salt, password);
+    given.len() == hash.len() && given.bytes().zip(hash.bytes()).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
 }

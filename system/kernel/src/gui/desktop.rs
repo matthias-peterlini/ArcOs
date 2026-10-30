@@ -9,6 +9,7 @@
 
 use super::apps::{self, Launch};
 use super::gfx::{Canvas, Rect};
+use super::lock::{Lock, Outcome};
 use super::res;
 use super::settings;
 use super::splash::draw_logo;
@@ -80,6 +81,8 @@ struct DockItem {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum MenuAct {
     About,
+    Lock,
+    Screenshot,
     Settings,
     Store,
     Restart,
@@ -327,6 +330,10 @@ struct Desktop {
     history: Vec<(String, String, String, String)>,
     /// Do not disturb: notifications go to the centre without a banner.
     quiet: bool,
+    /// The lock screen, while the computer is locked.
+    lock: Option<Lock>,
+    /// When the user last pressed a key or moved the pointer (uptime, ms).
+    last_input: u64,
 }
 
 fn now() -> DateTime {
@@ -858,6 +865,8 @@ impl Desktop {
             MenuAct::Restart => self.end(l, Ending::Restart),
             MenuAct::PowerOff => self.end(l, Ending::PowerOff),
             MenuAct::About => self.open_id(l, "about"),
+            MenuAct::Lock => self.lock_screen(l),
+            MenuAct::Screenshot => self.screenshot(l),
             MenuAct::Settings => self.open_id(l, "settings"),
             MenuAct::Display => self.open_id(l, "settings"),
             MenuAct::Store => self.open_id(l, "store"),
@@ -869,6 +878,39 @@ impl Desktop {
                 settings::update(|s| s.wallpaper = String::from(next));
                 self.act(l, None, Action::Wallpaper);
             }
+        }
+    }
+
+    /// Locks the computer: the lock screen covers everything.
+    fn lock_screen(&mut self, l: &mut Looper) {
+        if self.lock.is_none() {
+            self.close_popup(l);
+            if self.launcher.is_some() {
+                self.close_launcher(l, None);
+            }
+            self.drag = None;
+            self.lock = Some(Lock::new());
+            l.damage(self.screen());
+        }
+    }
+
+    /// Saves a picture of the screen in Immagini.
+    fn screenshot(&mut self, l: &mut Looper) {
+        let screen = self.screen();
+        let mut shot = Canvas::new(self.w, self.h, 0xFF00_0000);
+        self.paint_desktop(&mut shot, screen);
+        let d = now();
+        let dir = "sys:/home/Immagini";
+        let name = format!("Schermata {}-{:02}-{:02} alle {:02}.{:02}.{:02}.qoi", d.year, d.month, d.day, d.hour, d.min, d.sec);
+        let saved = fs::abs(dir).and_then(|p| {
+            if !fs::exists(&p) {
+                fs::make_dir(&p)?;
+            }
+            fs::write_file(&p.join(&name), &super::qoi::encode(&shot))
+        });
+        match saved {
+            Ok(()) => self.notify(l, String::from("Schermata salvata"), format!("In Immagini: {name}"), String::from("photos")),
+            Err(e) => self.notify(l, String::from("Schermata non salvata"), format!("{e}"), String::from("photos")),
         }
     }
 
@@ -1105,7 +1147,9 @@ impl Desktop {
                     ("Impostazioni di sistema…", Some(MenuAct::Settings)),
                     ("Negozio…", Some(MenuAct::Store)),
                     ("Monitor attività", Some(MenuAct::Activity)),
+                    ("Schermata", Some(MenuAct::Screenshot)),
                     ("", None),
+                    ("Blocca schermo", Some(MenuAct::Lock)),
                     ("Riavvia…", Some(MenuAct::Restart)),
                     ("Spegni…", Some(MenuAct::PowerOff)),
                 ],
@@ -1204,6 +1248,14 @@ impl Desktop {
         if k.ctrl && k.key == Key::Char(' ') {
             self.toggle_launcher(l);
             return;
+        }
+        match k.key {
+            Key::Lock => return self.lock_screen(l),
+            Key::PrintScreen => {
+                self.close_popup(l);
+                return self.screenshot(l);
+            }
+            _ => {}
         }
         if self.popup.is_some() && k.key == Key::Escape {
             self.close_popup(l);
@@ -1847,6 +1899,9 @@ impl View for Desktop {
     }
 
     fn animating(&self) -> bool {
+        if let Some(lock) = &self.lock {
+            return lock.animating();
+        }
         !self.fx.is_empty()
             || self.launcher.as_ref().is_some_and(|l| !l.anim.done() || l.closing)
             || self.popup.as_ref().is_some_and(|p| !p.anim.done())
@@ -1875,7 +1930,64 @@ impl View for Desktop {
 }
 
 impl Desktop {
+    /// Events while the computer is locked: only the lock screen sees them
+    /// (and the clock keeps going).
+    fn handle_locked(&mut self, l: &mut Looper, ev: Event) {
+        let Some(lock) = &mut self.lock else { return };
+        let outcome = match ev {
+            Event::Key(k) => lock.key(k),
+            Event::Press { .. } => lock.press(),
+            Event::Tick => {
+                let d = now();
+                let minute = d.hour * 60 + d.min;
+                if minute != self.minute {
+                    self.minute = minute;
+                    Outcome::Redraw
+                } else {
+                    Outcome::Stay
+                }
+            }
+            Event::Frame => {
+                if lock.finished() {
+                    self.lock = None;
+                    self.last_input = time::uptime_ms();
+                    self.minute = u64::MAX; // the bar and the widgets show the time again
+                }
+                Outcome::Redraw
+            }
+            _ => Outcome::Stay,
+        };
+        if outcome != Outcome::Stay {
+            l.damage(self.screen());
+        }
+    }
+
+    /// Locks the screen after the minutes chosen in the settings without
+    /// input, when a password is set.
+    fn idle_lock(&mut self, l: &mut Looper) {
+        let s = settings::get();
+        if s.lock_after == 0 || s.password.is_empty() || self.ending.is_some() {
+            return;
+        }
+        if time::uptime_ms().saturating_sub(self.last_input) > u64::from(s.lock_after) * 60_000 {
+            self.lock_screen(l);
+        }
+    }
+
     fn handle(&mut self, l: &mut Looper, ev: Event) -> bool {
+        if matches!(ev, Event::Press { .. } | Event::Key(_) | Event::Move { .. } | Event::Wheel { .. }) {
+            self.last_input = time::uptime_ms();
+        }
+        if self.lock.is_some() {
+            self.handle_locked(l, ev);
+            return false;
+        }
+        if matches!(ev, Event::Tick) {
+            self.idle_lock(l);
+            if self.lock.is_some() {
+                return false;
+            }
+        }
         match ev {
             Event::Press { x, y, double } => self.press(l, x, y, double),
             Event::Menu { x, y } => {
@@ -2037,6 +2149,20 @@ impl Desktop {
     }
 
     fn paint(&mut self, c: &mut Canvas, r: Rect) {
+        if let Some(lock) = &self.lock {
+            let covered = lock.anim.done() && lock.leaving.is_none();
+            if covered {
+                lock.draw(c, &self.blur, r, &now());
+                return;
+            }
+        }
+        self.paint_desktop(c, r);
+        if let Some(lock) = &self.lock {
+            lock.draw(c, &self.blur, r, &now());
+        }
+    }
+
+    fn paint_desktop(&mut self, c: &mut Canvas, r: Rect) {
         if let Some(la) = &self.launcher {
             if la.shown() >= 1000 {
                 self.draw_launcher(c, la);
@@ -2111,6 +2237,9 @@ pub fn run(d: &mut Display) {
         dock_reveal: false,
         history: Vec::new(),
         quiet: false,
+        // With a password, the computer starts locked.
+        lock: settings::has_password().then(Lock::new),
+        last_input: time::uptime_ms(),
     };
     let mut l = Looper::new(d);
     l.damage_all(d);

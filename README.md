@@ -34,6 +34,9 @@ di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
   suoni e musica sono creati per arcOS; tra gli sfondi ci sono foto delle
   Dolomiti da Wikimedia Commons (autori e licenze in
   `rootfs/system/gui/wallpapers/CREDITS.txt`).
+- **Al sicuro e aggiornato**: una password blocca lo schermo (all'avvio,
+  con logo+L o dopo qualche minuto di pausa), Stamp salva una schermata in
+  Immagini, e arcOS avvisa quando su GitHub c'è una versione nuova.
 - **Doppio clic e via**: un programma parte, un pacchetto (`.deb`,
   `.tar.gz`, `.zip`, `.pkg` di macOS…) si installa da solo.
 - **Le app di ogni giorno**: File, Editor di testo, Note, Promemoria,

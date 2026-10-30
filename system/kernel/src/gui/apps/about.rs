@@ -31,6 +31,10 @@ impl About {
     fn list(area: Rect) -> Rect {
         Rect::new(area.x + 14, area.y + 62, area.w - 28, area.h - 72)
     }
+
+    fn update_btn(area: Rect) -> Rect {
+        Rect::new(area.x + 250, area.y + 334, 170, 34)
+    }
 }
 
 /// An icon for a kind of device.
@@ -62,7 +66,7 @@ impl App for About {
     }
 
     fn size(&self) -> (i32, i32) {
-        (580, 470)
+        (700, 470)
     }
 
     fn draw(&mut self, c: &mut Canvas, area: Rect, _blur: &Canvas, _focused: bool) {
@@ -96,6 +100,18 @@ impl App for About {
                     text::draw(c, Font::Body, x + 110, y, &text::fit(Font::Body, &v, area.right() - x - 130), TEXT_DIM);
                     y += 28;
                 }
+                use crate::update::State;
+                let state = crate::update::state();
+                let b = Self::update_btn(area);
+                let label = if state == State::Checking { "Controllo…" } else { "Cerca aggiornamenti" };
+                ui::button(c, b, label, matches!(state, State::Available(_)), false);
+                let (line, color) = match &state {
+                    State::NotChecked | State::Checking => (String::new(), TEXT_FAINT),
+                    State::UpToDate => (String::from("arcOS è aggiornato."), ui::GREEN),
+                    State::Available(v) => (format!("arcOS {v} è nelle release su GitHub."), ui::ORANGE),
+                    State::Failed(_) => (String::from("Nessuna risposta: c'è la rete?"), TEXT_FAINT),
+                };
+                text::draw(c, Font::Small, b.right() + 12, b.y + 9, &text::fit(Font::Small, &line, area.right() - b.right() - 16), color);
                 text::draw_centered(c, Font::Small, area.x + area.w / 2, area.bottom() - 30, "Scritto da zero, in Rust · © Matthias Peterlini", TEXT_FAINT);
             }
             1 => {
@@ -155,6 +171,10 @@ impl App for About {
                 return Action::Redraw;
             }
         }
+        if self.tab == 0 && Self::update_btn(area).contains(area.x + x, area.y + y) {
+            crate::update::check(false);
+            return Action::Redraw;
+        }
         Action::None
     }
 
@@ -170,6 +190,7 @@ impl App for About {
 
     fn tick(&mut self) -> bool {
         // The uptime changes every second.
+        // (and the answer about updates comes in).
         self.tab == 0 && crate::time::uptime_ms() % 1000 < 100
     }
 }

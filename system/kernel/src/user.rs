@@ -667,6 +667,8 @@ pub(crate) fn key_code(ev: crate::dev::input::KeyEvent) -> u64 {
         Key::PageDown => sys::KEY_PAGE_DOWN,
         Key::Insert => sys::KEY_INSERT,
         Key::F(n) => sys::KEY_F + n as u32,
+        // The desktop keeps these for itself.
+        Key::PrintScreen | Key::Lock => 0,
     };
     let mut v = code as u64;
     if ev.ctrl {
