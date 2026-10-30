@@ -39,7 +39,8 @@ arcc - ArcScript on arcOS
 PATH is a .as file or a project folder with an Arc.toml (default: the
 current folder). -r builds without debug information. Arguments after
 PATH (or after --) are the program's: os.args().
-Programs with a view are shown as text: arcOS has no windows yet.";
+Programs with a view are shown as text here; ArcStudio, in the desktop,
+shows them live.";
 
 /// Exit codes of ArcScript's runtimes (BSD `EX_SOFTWARE`, `EX_DATAERR`).
 const EXIT_RUNTIME_ERROR: i32 = 70;
@@ -186,7 +187,7 @@ fn cmd_run(args: &Args) -> i32 {
     let result = vm.run_main().and_then(|()| {
         if vm.has_view() {
             let nodes = vm.render_view()?;
-            println!("{DIM}(the window of {title}, as text: arcOS has no windows yet){RESET}");
+            println!("{DIM}(the window of {title}, as text: open it in ArcStudio to use it){RESET}");
             print!("{}", UiNode::render_text(&nodes));
         }
         Ok(())

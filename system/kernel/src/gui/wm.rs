@@ -114,6 +114,8 @@ pub struct Window {
     pub minimized: bool,
     /// The size before maximising.
     pub restore: Option<Rect>,
+    /// Snapped to half or a quarter of the screen: where it was before.
+    pub snapped: Option<Rect>,
     /// The title button under the pointer.
     pub hover: Option<usize>,
     /// Maximised: the part of the desktop's bar where its buttons go (they
@@ -135,7 +137,7 @@ impl Window {
     pub fn new(id: u32, app: Box<dyn App>, x: i32, y: i32) -> Window {
         let (w, h) = app.size();
         let rect = Rect::new(x, y, w + 2 * GAP, h + TITLE_H + GAP);
-        Window { id, app, rect, minimized: false, restore: None, hover: None, bar: Rect::EMPTY }
+        Window { id, app, rect, minimized: false, restore: None, snapped: None, hover: None, bar: Rect::EMPTY }
     }
 
     /// The whole window for a content area of `w` x `h`.

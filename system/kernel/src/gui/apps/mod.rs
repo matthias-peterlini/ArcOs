@@ -2,6 +2,7 @@
 //! opens which file.
 
 mod about;
+mod arcstudio;
 mod browser;
 mod calculator;
 mod calendar;
@@ -14,6 +15,7 @@ mod photos;
 mod picker;
 mod prefs;
 mod reminders;
+pub mod search;
 pub mod store;
 mod terminal;
 mod textedit;
@@ -32,12 +34,13 @@ pub use files::Files;
 pub use viewer::Viewer;
 
 /// The built-in apps: id, name, icon, window kind.
-pub const BUILT_IN: [(&str, &str, &str); 19] = [
+pub const BUILT_IN: [(&str, &str, &str); 20] = [
     ("ticly-do", "ticly Do", "ticly-do"),
     ("ticly-ai", "ticly AI", "ticly-ai"),
     ("browser", "ticly browser", "ticly-browser"),
     ("files", "File", "files"),
     ("textedit", "Editor di testo", "text-editor"),
+    ("arcstudio", "ArcStudio", "code"),
     ("notes", "Note", "notes"),
     ("reminders", "Promemoria", "reminders"),
     ("calendar", "Calendario", "calendar"),
@@ -64,6 +67,7 @@ pub fn open(id: &str) -> Option<Box<dyn App>> {
         "store" => Box::new(store::Store::new()),
         "calculator" => Box::new(calculator::Calculator::new()),
         "textedit" | "textedit-new" => Box::new(textedit::TextEdit::new(None)),
+        "arcstudio" => Box::new(arcstudio::ArcStudio::new(None)),
         "notes" => Box::new(notes::Notes::new()),
         "reminders" => Box::new(reminders::Reminders::new()),
         "calendar" => Box::new(calendar::Calendar::new()),
@@ -125,6 +129,8 @@ pub enum Launch {
     Spawn(String),
     /// A text program, typed into the terminal.
     Run(String),
+    /// A file, with the app made for it; a folder, in File.
+    File(String),
 }
 
 pub struct Entry {
@@ -204,7 +210,9 @@ pub fn for_file(path: &str) -> Opener {
         }
         // A Windows program with a window of its own needs no terminal.
         "exe" if windowed_exe(path) => Opener::Spawn(String::from(path)),
-        "exe" | "as" | "arc" | "" => Opener::Run(quoted),
+        // ArcScript sources open in the IDE, which runs them too.
+        "as" => Opener::App(Box::new(arcstudio::ArcStudio::new(Some(path)))),
+        "exe" | "arc" | "" => Opener::Run(quoted),
         // Android apps get a window; Java programs (DEX) a terminal.
         "apk" => Opener::Spawn(String::from(path)),
         "dex" | "jar" => Opener::Run(quoted),

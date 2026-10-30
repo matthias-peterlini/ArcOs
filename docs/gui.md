@@ -40,7 +40,11 @@ Presa a modello da macOS:
   ridotta).
 - **Applicazioni** (come Launchpad, dal dock o con Ctrl+Spazio): tutte le app,
   comprese quelle installate dal Negozio, con una ricerca; si scrive e Invio
-  apre la prima.
+  apre la prima. La ricerca è anche quella di **Spotlight**: sopra le app
+  compaiono i **calcoli** (`12*3+4` → `= 40`, Invio lo copia), le
+  **impostazioni** per parola («sfondo», «volume», «password», «processore»...)
+  e i **file e le cartelle** della home per nome, che si aprono con l'app
+  giusta. La home viene letta una volta sola all'apertura della ricerca.
 - **Notifiche** in alto a destra: un'app installata, un timer scaduto, un
   file salvato, un programma che si è chiuso per un errore. Spariscono da sole
   o con un clic.
@@ -51,6 +55,13 @@ Presa a modello da macOS:
   ingrandire), molte si ridimensionano dall'angolo in basso a destra.
   **Alt+Tab** passa alla finestra successiva, **Ctrl+Q** chiude quella in
   primo piano.
+- **Snap**, come in Windows: una finestra trascinata sul bordo sinistro o
+  destro occupa quella metà dello schermo, in un angolo un quarto, sul bordo
+  in alto tutto lo schermo; mentre si trascina un vetro mostra dove andrà.
+  Da tastiera (finestre ridimensionabili) **Ctrl+Alt+←/→** per le metà,
+  **Ctrl+Alt+U/I/J/K** per i quarti, **Ctrl+Alt+↑** ingrandisce e
+  **Ctrl+Alt+↓** ripristina. Trascinata via, la finestra torna alla sua
+  misura di prima.
 - **Schermata**: il tasto **Stamp** (o *Schermata* nel menu del logo) salva
   lo schermo in `sys:/home/Immagini` come `Schermata <data> alle <ora>.qoi`,
   che Foto apre subito.
@@ -94,6 +105,7 @@ si ridisegna a ogni fotogramma.
 | ticly browser | il browser di ticly: schede, barra degli indirizzi (indirizzi o ricerche DuckDuckGo), avanti/indietro, ricarica, pagina iniziale ticly, trova nella pagina (Ctrl+F), moduli, `<select>`, cookie; i file non visualizzabili vanno in `Scaricati` |
 | File | sfoglia i volumi: risorse a sinistra, cartelle e file a destra; doppio clic apre una cartella o il file con l'app giusta; tasto destro per aprire, rinominare (anche F2), spostare nel Cestino (Canc), creare una cartella; nel Cestino eliminare o svuotare |
 | Editor di testo | file di testo con selezione, copia e incolla, scorrimento; Nuovo, Apri, Salva (Ctrl+N, Ctrl+O, Ctrl+S) con la scelta del file; alla chiusura salva da solo |
+| ArcStudio | l'IDE di ArcScript, preinstallato: esplora i progetti di `sys:/home/arcscript`, editor con numeri di riga, colori della sintassi, rientro automatico ed errori sottolineati mentre si scrive; **anteprima dal vivo** della `view` (il programma gira nella finestra e risponde a pulsanti, interruttori, cursori e campi), console con l'output di `print()`, pannello Problemi (un clic porta alla riga); Esegui (F5), Compila in `.arc` (Ctrl+B) e Nel terminale passano da `arcc`. I file `.as` si aprono qui |
 | Note | note in `sys:/home/Note`, la prima riga è il titolo, ricerca, si salvano mentre si scrive |
 | Promemoria | cose da fare, spuntate con un clic (`sys:/home/Promemoria.txt`) |
 | Calendario | un mese alla volta con le feste italiane (anche Pasqua e Pasquetta) e i propri eventi («9:30 Riunione»), salvati in `sys:/home/Calendario.txt` |

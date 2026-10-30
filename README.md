@@ -10,7 +10,8 @@ di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
 [**Scarica l'ultima versione**](https://github.com/matthias-peterlini/ArcOs/releases/latest) ·
 [Documentazione](docs/) ·
 [Architettura](docs/architettura.md) ·
-[Compatibilità](docs/compat.md)
+[Compatibilità](docs/compat.md) ·
+[Roadmap](docs/roadmap.md)
 
 [![Build](https://github.com/matthias-peterlini/ArcOs/actions/workflows/build.yml/badge.svg)](https://github.com/matthias-peterlini/ArcOs/actions/workflows/build.yml)
 
@@ -41,6 +42,11 @@ di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
   `.tar.gz`, `.zip`, `.pkg` di macOS…) si installa da solo.
 - **Le app di ogni giorno**: File, Editor di testo, Note, Promemoria,
   Calendario, Orologio, Calcolatrice, Foto, Musica, Monitor attività.
+- **Come Windows e macOS dove conta**: Ctrl+Spazio cerca app, file,
+  impostazioni e fa i conti (come Spotlight); le finestre si agganciano a
+  metà o a un quarto dello schermo trascinandole sul bordo o con
+  Ctrl+Alt+frecce (come lo Snap di Windows). Cosa manca ancora per essere
+  alla pari, e in che ordine arriverà, è nella [roadmap](docs/roadmap.md).
 - **L'ecosistema ticly**: ticly Do (attività, note, calendario), ticly AI
   (in anteprima: le risposte non sono ancora collegate) e il ticly browser,
   con un unico account ticly salvato sul computer; il browser usa un motore
@@ -58,7 +64,8 @@ di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
   l'interfaccia nel codice. Le app macOS non possono girare; i limiti sono
   in [compatibilità](docs/compat.md#cosa-non-può-girare).
 - **Ha il suo linguaggio**, ArcScript, con compilatore e macchina virtuale
-  che girano su arcOS.
+  che girano su arcOS, e il suo IDE preinstallato, **ArcStudio**: errori
+  sottolineati mentre si scrive e l'anteprima dal vivo dell'interfaccia.
 - **Scritto da zero**: niente codice di Linux, Unix, DOS o Windows, nessuna
   crate di terze parti. Solo il compilatore Rust e `core`/`alloc`.
 
@@ -122,11 +129,11 @@ memoria e `arcos.iso` nel lettore CD.
 | **Kernel** | 64 bit, memoria virtuale a 4 livelli, scheduler preemptivo, thread, code di attesa, MSI/MSI-X, ACPI per spegnere e riavviare | [architettura](docs/architettura.md#kernel) |
 | **Driver** | pacchetti `.adp` indipendenti dal kernel: il kernel confronta i manifesti con l'hardware e carica il driver giusto da solo, all'avvio e a sistema avviato | [driver](docs/driver.md) |
 | **ArcFS** | il file system nativo: blocchi da 4 KiB, extent, controllo di coerenza; volumi con nome (`sys:`, `ram:`, `chiavetta:`) | [architettura](docs/architettura.md#file-system-arcfs) |
-| **Interfaccia** | splash, configurazione guidata, scrivania con dock, Launchpad, notifiche e animazioni; quindici app di sistema | [gui](docs/gui.md) |
+| **Interfaccia** | splash, configurazione guidata, scrivania con dock, Launchpad, notifiche, ricerca globale, snap delle finestre e animazioni; le app di sistema, tra cui l'IDE ArcStudio | [gui](docs/gui.md) |
 | **Programmi** | in modalità utente, ognuno nel suo spazio di indirizzi, a riga di comando o con finestre proprie (`arcui`) | [programmi](docs/programmi.md) |
 | **Negozio** | 2048, Campo minato, Serpente, Sudoku, Tris, Disegno; BusyBox e Lua per il Terminale | [gui](docs/gui.md#il-negozio-e-le-app-installabili) |
 | **Compatibilità** | eseguibili ELF statici Linux, `.exe` Windows x64 (console e finestre), programmi Java e app Android (`.dex`, `.apk`); installazione di `.deb`, `.tar.gz`, `.zip` e `.pkg` con un doppio clic | [compatibilità](docs/compat.md) |
-| **ArcScript** | il linguaggio di arcOS: `arcc` compila ed esegue `.as` e pacchetti `.arc` | [ArcScript](docs/arcscript.md) |
+| **ArcScript** | il linguaggio di arcOS: `arcc` compila ed esegue `.as` e pacchetti `.arc`; ArcStudio è l'IDE con anteprima dal vivo | [ArcScript](docs/arcscript.md#arcstudio) |
 | **Rete** | ARP, IPv4, ICMP, UDP, TCP, DHCP, DNS; TLS 1.3 con certificati verificati e HTTP(S) | |
 | **Web** | `arcweb`: HTML, CSS (flexbox, grid, tabelle, media query), PNG, JPEG e GIF, per il ticly browser | [gui](docs/gui.md#il-motore-web) |
 | **Shell** | una quarantina di comandi, cronologia, completamento con Tab | [primi passi](#primi-passi-nel-terminale) |

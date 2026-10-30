@@ -20,6 +20,8 @@ dependencies = [
 name = "arc-kernel"
 version = "0.6.0"
 dependencies = [
+ "arc-vm",
+ "arcc-core",
  "arcdk",
  "arcfs",
  "arcgfx",

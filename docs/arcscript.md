@@ -4,8 +4,10 @@
 linguaggio applicativo di arcOS: indentazione al posto delle graffe, struct,
 enum con `match`, `Option`/`Result` con `?`, closure, moduli, una libreria
 standard e un'interfaccia dichiarativa (`view`). Su arcOS gira il compilatore
-e la macchina virtuale del repository ArcScript, portati in Rust `no_std`;
-manca per ora la grafica, quindi le `view` vengono stampate come testo.
+e la macchina virtuale del repository ArcScript, portati in Rust `no_std`.
+L'IDE è **ArcStudio**, preinstallato nell'interfaccia grafica: lì le `view`
+si vedono e si usano dal vivo (vedi sotto); `arcc` dal terminale le stampa
+come testo.
 
 Riferimenti del linguaggio, copiati dal repository ArcScript:
 [LANGUAGE.md](arcscript/LANGUAGE.md) (il linguaggio),
@@ -63,7 +65,44 @@ l'interfaccia `Host` di `arc-vm`. Su arcOS la implementa `arcc`
 
 Un programma con una `view` esegue il suo codice, poi `arcc` stampa
 l'interfaccia come testo (lo stesso formato dell'anteprima testuale di
-ArcScript). La grafica verrà con l'interfaccia utente di arcOS.
+ArcScript).
+
+## ArcStudio
+
+L'`arc-studio-ide` del repository ArcScript è scritto con egui e wgpu, che
+su arcOS non ci sono: ArcStudio è la stessa idea rifatta come app nativa
+dell'interfaccia grafica (`system/kernel/src/gui/apps/arcstudio.rs`), con
+`arcc-core` e `arc-vm` collegati direttamente, senza un programma a parte.
+
+- **Esplora**: i progetti (cartelle con `Arc.toml`) e i file `.as` di
+  `sys:/home/arcscript`; il progetto aperto mostra i suoi sorgenti. *Nuovo
+  file* (Ctrl+N) crea un `.as` di esempio con una `view`.
+- **Editor**: numeri di riga, colori dall'evidenziatore di `arcc-core`
+  (`highlight`), Tab di quattro spazi, Invio che mantiene il rientro e lo
+  aumenta dopo `fn`, `if`, `view`, `window`, `column`...; Ctrl+S salva, e
+  alla chiusura si salva da solo.
+- **Errori mentre si scrive**: tre decimi di secondo dopo l'ultimo tasto il
+  progetto viene ricompilato (con il testo non ancora salvato, anche per i
+  moduli importati); gli errori del file aperto sono sottolineati in rosso,
+  e tutti, con gli avvisi, sono nel pannello **Problemi**.
+- **Anteprima dal vivo**: se la compilazione riesce, il programma riparte in
+  una macchina virtuale nella finestra (al massimo 3 milioni di istruzioni
+  per chiamata, così un ciclo infinito non blocca il desktop) e la sua
+  `view` è disegnata con i colori Material calcolati dall'`accent` e dal
+  `theme` della finestra: etichette, pulsanti nei vari stili, card, righe,
+  colonne, griglie, split, campi di testo, caselle, interruttori, cursori,
+  barre di avanzamento, accordion. Clic, digitazione e trascinamenti vanno
+  al programma (`UiEvent`), che ridisegna la `view`. Con errori nel codice
+  resta l'ultima anteprima buona, segnalata.
+- **Console**: l'output di `print()` dell'ultima esecuzione e gli errori di
+  esecuzione.
+- **Esegui** (F5 o Ctrl+R) salva e riparte da capo; **Compila** (Ctrl+B)
+  apre il Terminale con `arcc build`; **Nel terminale** con `arcc run`, per
+  i programmi che leggono dalla tastiera.
+
+Le icone Material dei pulsanti non hanno ancora un font: le più comuni
+(`add`, `remove`, `close`...) sono disegnate con un carattere simile, le
+altre omesse. Le immagini (`image`) sono un riquadro con il nome del file.
 
 ## Com'è fatto il port
 

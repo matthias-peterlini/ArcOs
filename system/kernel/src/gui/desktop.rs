@@ -272,12 +272,26 @@ struct Launcher {
     /// What to start once it has faded out.
     then: Option<Launch>,
     scroll: i32,
+    /// Calculations, settings and files for the query.
+    found: Vec<apps::search::Found>,
+    index: apps::search::Index,
 }
+
+/// The rows of search results shown at most.
+const FOUND_ROWS: usize = 6;
 
 impl Launcher {
     fn visible(&self) -> Vec<&apps::Entry> {
         let q = self.query.to_lowercase();
         self.entries.iter().filter(|e| q.is_empty() || e.name.to_lowercase().contains(&q)).collect()
+    }
+
+    /// The height the search results take above the apps.
+    fn found_h(&self) -> i32 {
+        match self.found.len().min(FOUND_ROWS) as i32 {
+            0 => 0,
+            n => n * 44 + 12 + 18,
+        }
     }
 
     /// How far it has faded in, 0..=1000.
@@ -334,6 +348,8 @@ struct Desktop {
     lock: Option<Lock>,
     /// When the user last pressed a key or moved the pointer (uptime, ms).
     last_input: u64,
+    /// Where the window being dragged would snap if dropped now.
+    snap_preview: Option<Rect>,
 }
 
 fn now() -> DateTime {
@@ -684,6 +700,82 @@ impl Desktop {
         self.start_fx(l, id, FxKind::Zoom(before));
     }
 
+    /// Where a window dropped at (`x`, `y`) snaps: a half at the left or
+    /// right edge, a quarter near a corner, the whole screen at the top.
+    fn snap_zone(&self, x: i32, y: i32) -> Option<Rect> {
+        let a = self.work_area();
+        const EDGE: i32 = 4;
+        const CORNER: i32 = 90;
+        let (left, right) = (x <= EDGE, x >= self.w - 1 - EDGE);
+        if !left && !right {
+            return (y <= EDGE).then(|| self.full_area());
+        }
+        let (hw, hh) = (a.w / 2 - 4, a.h / 2 - 4);
+        let x0 = if left { a.x } else { a.right() - hw };
+        Some(if y < a.y + CORNER {
+            Rect::new(x0, a.y, hw, hh)
+        } else if y > a.bottom() - CORNER {
+            Rect::new(x0, a.bottom() - hh, hw, hh)
+        } else {
+            Rect::new(x0, a.y, hw, a.h)
+        })
+    }
+
+    /// One of the snap zones by name, for the keyboard (Ctrl+Alt with the
+    /// arrows or U, I, J, K, as Rectangle does on the Mac).
+    fn snap_named(&self, key: Key) -> Option<Rect> {
+        let a = self.work_area();
+        let (top, mid, bottom) = (a.y + 1, a.y + a.h / 2, a.bottom() - 2);
+        let right = self.w - 1;
+        match key {
+            Key::Left => self.snap_zone(0, mid),
+            Key::Right => self.snap_zone(right, mid),
+            Key::Char('u') | Key::Char('U') => self.snap_zone(0, top),
+            Key::Char('i') | Key::Char('I') => self.snap_zone(right, top),
+            Key::Char('j') | Key::Char('J') => self.snap_zone(0, bottom),
+            Key::Char('k') | Key::Char('K') => self.snap_zone(right, bottom),
+            _ => None,
+        }
+    }
+
+    /// Fits window `id` into `zone` (the whole screen means maximised).
+    fn snap(&mut self, l: &mut Looper, id: u32, zone: Rect) {
+        if zone == self.full_area() {
+            if self.window(id).is_some_and(|w| !w.full()) {
+                self.zoom(l, id);
+            }
+            return;
+        }
+        let Some(win) = self.window_mut(id) else { return };
+        let before = win.bounds();
+        if let Some(r) = win.restore.take() {
+            win.rect = r;
+        }
+        if win.snapped.is_none() {
+            win.snapped = Some(win.rect);
+        }
+        win.rect = zone;
+        l.damage(before);
+        l.damage(win.bounds());
+        self.start_fx(l, id, FxKind::Zoom(before));
+        l.damage(ui::with_shadow(self.topbar()));
+    }
+
+    /// Back to the size and place it had before snapping or maximising.
+    fn unsnap(&mut self, l: &mut Looper, id: u32) {
+        if self.window(id).is_some_and(|w| w.full()) {
+            self.zoom(l, id);
+            return;
+        }
+        let Some(win) = self.window_mut(id) else { return };
+        let Some(r) = win.snapped.take() else { return };
+        let before = win.bounds();
+        win.rect = r;
+        l.damage(before);
+        l.damage(win.bounds());
+        self.start_fx(l, id, FxKind::Zoom(before));
+    }
+
     /// Types a command line into the terminal (opening it if needed).
     fn run(&mut self, l: &mut Looper, cmd: &str) {
         self.open_id(l, "terminal");
@@ -809,6 +901,13 @@ impl Desktop {
             Launch::App(id) => self.open_id(l, id),
             Launch::Spawn(path) => self.spawn(l, &path),
             Launch::Run(cmd) => self.run(l, &cmd),
+            Launch::File(path) => {
+                if fs::abs(&path).is_ok_and(|p| fs::is_dir(&p)) {
+                    self.open(l, Box::new(apps::Files::new(&path)), false);
+                } else {
+                    self.open_file(l, &path);
+                }
+            }
         }
     }
 
@@ -827,7 +926,7 @@ impl Desktop {
             }
             None => {
                 self.launcher =
-                    Some(Launcher { query: String::new(), entries: apps::catalog(), anim: Anim::new(260), closing: false, then: None, scroll: 0 });
+                    Some(Launcher { query: String::new(), entries: apps::catalog(), anim: Anim::new(260), closing: false, then: None, scroll: 0, found: Vec::new(), index: None });
             }
         }
         self.popup = None;
@@ -855,6 +954,27 @@ impl Desktop {
 
     fn search_rect(&self) -> Rect {
         Rect::new(self.w / 2 - 200, 74, 400, 40)
+    }
+
+    /// The rows of search results, under the search field.
+    fn found_rows(&self, n: usize) -> Vec<Rect> {
+        let w = 560.min(self.w - 32);
+        (0..n.min(FOUND_ROWS)).map(|i| Rect::new(self.w / 2 - w / 2 + 6, 134 + i as i32 * 44, w - 12, 42)).collect()
+    }
+
+    /// Does what a search result is for: copies a result, opens the rest.
+    fn choose_found(&mut self, l: &mut Looper, i: usize) {
+        let Some(la) = &self.launcher else { return };
+        let Some(f) = la.found.get(i) else { return };
+        if let Some(v) = &f.copy {
+            ui::copy(v);
+            let v = v.clone();
+            self.close_launcher(l, None);
+            self.notify(l, String::from("Calcolo"), format!("{v} copiato negli appunti."), String::from("calculator"));
+            return;
+        }
+        let then = f.launch.clone();
+        self.close_launcher(l, then);
     }
 
     // ------------------------------------------------------------------
@@ -1127,8 +1247,11 @@ impl Desktop {
                 return;
             }
             let visible: Vec<Launch> = la.visible().iter().map(|e| e.launch.clone()).collect();
-            let tiles = self.launcher_tiles(visible.len(), la.scroll);
-            if let Some(i) = tiles.iter().position(|t| t.contains(x, y) && y > 130) {
+            let top = la.found_h();
+            let tiles = self.launcher_tiles(visible.len(), la.scroll - top);
+            if let Some(i) = self.found_rows(la.found.len()).iter().position(|r| r.contains(x, y)) {
+                self.choose_found(l, i);
+            } else if let Some(i) = tiles.iter().position(|t| t.contains(x, y) && y > 130 + top) {
                 let what = visible[i].clone();
                 self.close_launcher(l, Some(what));
             } else if !self.search_rect().contains(x, y) {
@@ -1268,14 +1391,18 @@ impl Desktop {
             match k.key {
                 Key::Escape => self.close_launcher(l, None),
                 Key::Enter => {
+                    // The first app, or else the first thing found.
                     let first = la.visible().first().map(|e| e.launch.clone());
                     if first.is_some() {
                         self.close_launcher(l, first);
+                    } else if !la.found.is_empty() {
+                        self.choose_found(l, 0);
                     }
                 }
                 _ => {
                     if ui::edit_text(&mut la.query, &k, 40) {
                         la.scroll = 0;
+                        la.found = apps::search::find(&la.query, &mut la.index);
                     }
                     l.damage(self.screen());
                 }
@@ -1301,6 +1428,19 @@ impl Desktop {
                 self.zoom(l, id);
                 return;
             }
+            // Ctrl+Alt: snap to a half or a quarter, Up fills the screen,
+            // Down puts the window back.
+            if k.ctrl && k.alt && self.window(id).is_some_and(|w| w.app.resizable()) {
+                match k.key {
+                    Key::Up => return self.snap(l, id, self.full_area()),
+                    Key::Down => return self.unsnap(l, id),
+                    key => {
+                        if let Some(zone) = self.snap_named(key) {
+                            return self.snap(l, id, zone);
+                        }
+                    }
+                }
+            }
             if let Some(win) = self.window_mut(id) {
                 let action = win.app.key(k);
                 self.act(l, Some(id), action);
@@ -1320,10 +1460,23 @@ impl Desktop {
                 Some(Drag::Move(id, dx, dy)) => {
                     let area = self.screen();
                     let top = self.topbar().bottom();
+                    let zone = if self.window(id).is_some_and(|w| w.app.resizable()) { self.snap_zone(x, y) } else { None };
+                    if zone != self.snap_preview {
+                        for r in [self.snap_preview, zone].into_iter().flatten() {
+                            l.damage(r.grow(4));
+                        }
+                        self.snap_preview = zone;
+                    }
                     let mut new_drag = None;
                     if let Some(win) = self.window_mut(id) {
                         let before = win.bounds();
-                        if win.restore.take().is_some() {
+                        if let Some(prev) = win.snapped.take() {
+                            // Dragging a snapped window: back to its size,
+                            // under the pointer.
+                            let off = (dx * prev.w / win.rect.w.max(1)).clamp(20, prev.w - 20);
+                            win.rect = Rect::new(x - off, y - dy, prev.w, prev.h);
+                            new_drag = Some(Drag::Move(id, off, dy));
+                        } else if win.restore.take().is_some() {
                             // Dragging a maximised window: back to its size,
                             // under the pointer.
                             let (w, h) = (win.rect.w, win.rect.h + BAR_FULL_H);
@@ -1456,12 +1609,21 @@ impl Desktop {
     }
 
     fn released(&mut self, l: &mut Looper) {
-        if let Some(Drag::Body(id)) = self.drag {
-            if let Some(win) = self.window_mut(id) {
-                let body = win.body();
-                let action = win.app.release(body);
-                self.act(l, Some(id), action);
+        match self.drag {
+            Some(Drag::Body(id)) => {
+                if let Some(win) = self.window_mut(id) {
+                    let body = win.body();
+                    let action = win.app.release(body);
+                    self.act(l, Some(id), action);
+                }
             }
+            Some(Drag::Move(id, ..)) => {
+                if let Some(zone) = self.snap_preview.take() {
+                    l.damage(zone.grow(4));
+                    self.snap(l, id, zone);
+                }
+            }
+            _ => {}
         }
         self.drag = None;
     }
@@ -1633,15 +1795,38 @@ impl Desktop {
             c.fill(Rect::new(s.x + 44 + w, s.y + 10, 2, s.h - 20), alpha(0xFFFF_FFFF));
         }
         let visible = la.visible();
-        if visible.is_empty() {
-            text::draw_centered(c, Font::Body, self.w / 2, 190, "Nessuna app con questo nome", alpha(TEXT_DIM));
+        let top = la.found_h();
+        if visible.is_empty() && la.found.is_empty() {
+            text::draw_centered(c, Font::Body, self.w / 2, 190, "Nessun risultato", alpha(TEXT_DIM));
+        }
+        // Calculations, settings and files, in a glass list.
+        let rows = self.found_rows(la.found.len());
+        if let (Some(first), Some(last)) = (rows.first(), rows.last()) {
+            let panel = Rect::new(first.x - 6, first.y - 6, first.w + 12, last.bottom() - first.y + 12);
+            c.fill_round(panel, 18, alpha(0x40FF_FFFF));
+            c.stroke_round(panel, 18, 1, alpha(ui::BORDER));
+            for (f, r) in la.found.iter().zip(&rows) {
+                if full && r.contains(self.mouse.0, self.mouse.1) {
+                    c.fill_round(*r, 12, 0x22FF_FFFF);
+                }
+                res::draw_icon_faded(c, f.icon, 28, r.x + 10, r.y + 7, t * 255 / 1000);
+                let font = if f.copy.is_some() { Font::Heading } else { Font::Strong };
+                let (lh, _) = text::metrics(font);
+                let tag_w = text::width(Font::Small, f.section) + 12;
+                let name = text::fit(font, &f.name, r.w / 2);
+                let w = text::draw(c, font, r.x + 50, r.y + (r.h - lh) / 2, &name, alpha(TEXT));
+                let detail = text::fit(Font::Small, &f.detail, r.w - 50 - w - 24 - tag_w);
+                let (sh, _) = text::metrics(Font::Small);
+                text::draw(c, Font::Small, r.x + 62 + w, r.y + (r.h - sh) / 2, &detail, alpha(TEXT_FAINT));
+                text::draw_right(c, Font::Small, r.right() - 12, r.y + (r.h - sh) / 2, f.section, alpha(TEXT_DIM));
+            }
         }
         // Tiles zoom in from a little larger, as in Launchpad.
         let zoom = ui::lerp(1120, 1000, t);
         let cx = self.w / 2;
         let saved = c.clip();
-        c.set_clip(saved.intersect(&Rect::new(0, 128, self.w, self.h - 128)));
-        for (e, tile) in visible.iter().zip(self.launcher_tiles(visible.len(), la.scroll)) {
+        c.set_clip(saved.intersect(&Rect::new(0, 128 + top, self.w, self.h - 128 - top)));
+        for (e, tile) in visible.iter().zip(self.launcher_tiles(visible.len(), la.scroll - top)) {
             let tile = Rect::new(cx + (tile.x - cx) * zoom / 1000, 150 + (tile.y - 150) * zoom / 1000, tile.w, tile.h);
             if tile.bottom() < 128 || tile.y > self.h {
                 continue;
@@ -2030,7 +2215,7 @@ impl Desktop {
                     let n = la.visible().len() as i32;
                     let cols = 7.min((self.w - 80) / 128).max(1);
                     let rows = (n + cols - 1) / cols;
-                    let max = (rows * 120 + 170 - (self.h - 70)).max(0);
+                    let max = (rows * 120 + 170 + la.found_h() - (self.h - 70)).max(0);
                     la.scroll = (la.scroll + lines * 60).clamp(0, max);
                     l.damage(self.screen());
                     return false;
@@ -2174,7 +2359,18 @@ impl Desktop {
         let focused = self.focused();
         let blur = &self.blur;
         let fx = &self.fx;
+        let dragged = match self.drag {
+            Some(Drag::Move(id, ..)) => Some(id),
+            _ => None,
+        };
         for w in self.windows.iter_mut() {
+            if let (Some(zone), true) = (self.snap_preview, Some(w.id) == dragged) {
+                // Where the window will go, under it.
+                if r.overlaps(&zone.grow(4)) {
+                    c.blit_round(blur, zone, 22, ui::GLASS_LIGHT);
+                    c.stroke_round(zone, 22, 2, 0x80FF_FFFF);
+                }
+            }
             if !w.minimized && r.overlaps(&w.bounds()) && !fx.iter().any(|f| f.id == w.id) {
                 let f = Some(w.id) == focused;
                 w.draw(c, blur, f, r);
@@ -2240,6 +2436,7 @@ pub fn run(d: &mut Display) {
         // With a password, the computer starts locked.
         lock: settings::has_password().then(Lock::new),
         last_input: time::uptime_ms(),
+        snap_preview: None,
     };
     let mut l = Looper::new(d);
     l.damage_all(d);
